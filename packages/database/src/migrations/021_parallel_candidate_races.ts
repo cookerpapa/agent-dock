@@ -407,7 +407,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 
   await sql`
-    create function agent_dock_reject_orchestration_acceptance_mutation()
+    create function pi_cloud_reject_orchestration_acceptance_mutation()
     returns trigger
     language plpgsql
     as $$
@@ -419,7 +419,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
     create trigger orchestration_acceptance_results_immutable
     before update or delete on orchestration_acceptance_results
-    for each row execute function agent_dock_reject_orchestration_acceptance_mutation()
+    for each row execute function pi_cloud_reject_orchestration_acceptance_mutation()
   `.execute(db);
 
   await db.schema
@@ -440,7 +440,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     on orchestration_acceptance_results
   `.execute(db);
   await sql`
-    drop function if exists agent_dock_reject_orchestration_acceptance_mutation()
+    drop function if exists pi_cloud_reject_orchestration_acceptance_mutation()
   `.execute(db);
   await db.schema.dropTable("candidate_promotions").ifExists().execute();
   await db.schema.dropTable("orchestration_decision_gates").ifExists().execute();

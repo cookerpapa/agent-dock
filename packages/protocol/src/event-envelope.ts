@@ -420,7 +420,7 @@ const TurnCancelledEventSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const AgentDockEventSchema = Type.Union([
+export const PiCloudEventSchema = Type.Union([
   TurnStartedEventSchema,
   SessionStateChangedEventSchema,
   ModelSamplingStartedEventSchema,
@@ -440,7 +440,7 @@ export const AgentDockEventSchema = Type.Union([
   TurnCancelledEventSchema,
 ]);
 
-export type AgentDockEvent =
+export type PiCloudEvent =
   | Static<typeof TurnStartedEventSchema>
   | Static<typeof SessionStateChangedEventSchema>
   | Static<typeof ModelSamplingStartedEventSchema>
@@ -458,64 +458,64 @@ export type AgentDockEvent =
   | Static<typeof TurnCompletedEventSchema>
   | Static<typeof TurnFailedEventSchema>
   | Static<typeof TurnCancelledEventSchema>;
-export type AgentDockEventType = AgentDockEvent["type"];
+export type PiCloudEventType = PiCloudEvent["type"];
 
-type EventBody<Event> = Event extends AgentDockEvent ? Pick<Event, "type" | "payload"> : never;
-export type AgentDockEventBody = EventBody<AgentDockEvent>;
+type EventBody<Event> = Event extends PiCloudEvent ? Pick<Event, "type" | "payload"> : never;
+export type PiCloudEventBody = EventBody<PiCloudEvent>;
 
-export class AgentDockProtocolError extends Error {
+export class PiCloudProtocolError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "AgentDockProtocolError";
+    this.name = "PiCloudProtocolError";
   }
 }
 
-export function parseAgentDockEvent(value: unknown): AgentDockEvent {
-  if (!Value.Check(AgentDockEventSchema, value)) {
-    const issue = [...Value.Errors(AgentDockEventSchema, value)][0];
+export function parsePiCloudEvent(value: unknown): PiCloudEvent {
+  if (!Value.Check(PiCloudEventSchema, value)) {
+    const issue = [...Value.Errors(PiCloudEventSchema, value)][0];
     const location = issue?.instancePath.length ? issue.instancePath : "/";
-    throw new AgentDockProtocolError(
-      `Invalid AgentDock event at ${location}: ${issue?.message ?? "schema validation failed"}`,
+    throw new PiCloudProtocolError(
+      `Invalid PiCloud event at ${location}: ${issue?.message ?? "schema validation failed"}`,
     );
   }
-  const event = value as AgentDockEvent;
+  const event = value as PiCloudEvent;
   if (
     event.type === "turn.completed" &&
     event.payload.workspacePatch !== undefined &&
     new TextEncoder().encode(event.payload.workspacePatch.patch).byteLength >
       MAX_WORKSPACE_PATCH_BYTES
   ) {
-    throw new AgentDockProtocolError(
-      `Invalid AgentDock event at /payload/workspacePatch/patch: UTF-8 content exceeds ${MAX_WORKSPACE_PATCH_BYTES} bytes`,
+    throw new PiCloudProtocolError(
+      `Invalid PiCloud event at /payload/workspacePatch/patch: UTF-8 content exceeds ${MAX_WORKSPACE_PATCH_BYTES} bytes`,
     );
   }
   return event;
 }
 
-export type AgentDockEventIdentity = {
+export type PiCloudEventIdentity = {
   sessionId: string;
   turnId: string | null;
   agentId: string;
 };
 
-export type AgentDockEventFactoryOptions = {
+export type PiCloudEventFactoryOptions = {
   initialSequence?: number;
   clock?: () => Date;
   idGenerator?: () => string;
 };
 
-export type AgentDockEventFactory = {
-  next: (body: AgentDockEventBody) => AgentDockEvent;
+export type PiCloudEventFactory = {
+  next: (body: PiCloudEventBody) => PiCloudEvent;
   currentSequence: () => number;
 };
 
-export function createAgentDockEventFactory(
-  identity: AgentDockEventIdentity,
-  options: AgentDockEventFactoryOptions = {},
-): AgentDockEventFactory {
+export function createPiCloudEventFactory(
+  identity: PiCloudEventIdentity,
+  options: PiCloudEventFactoryOptions = {},
+): PiCloudEventFactory {
   let sequence = options.initialSequence ?? 0;
   if (!Number.isSafeInteger(sequence) || sequence < 0) {
-    throw new AgentDockProtocolError("initialSequence must be a non-negative safe integer");
+    throw new PiCloudProtocolError("initialSequence must be a non-negative safe integer");
   }
 
   const clock = options.clock ?? (() => new Date());
@@ -524,7 +524,7 @@ export function createAgentDockEventFactory(
   return {
     next(body) {
       const nextSequence = sequence + 1;
-      const event = parseAgentDockEvent({
+      const event = parsePiCloudEvent({
         schemaVersion: 1,
         eventId: idGenerator(),
         sessionId: identity.sessionId,

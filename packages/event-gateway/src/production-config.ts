@@ -43,21 +43,21 @@ function boolean(value: string | undefined, fallback: boolean, name: string): bo
 }
 
 export async function loadEventGatewayProductionConfig(): Promise<EventGatewayProductionConfig> {
-  const databaseUrlPath = process.env.DATABASE_URL_FILE ?? "/run/agent-dock-secrets/database-url";
+  const databaseUrlPath = process.env.DATABASE_URL_FILE ?? "/run/pi-cloud-secrets/database-url";
   const notificationUrlPath =
-    process.env.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE ?? databaseUrlPath;
+    process.env.PI_CLOUD_DATABASE_NOTIFICATION_URL_FILE ?? databaseUrlPath;
   const [databaseUrl, databaseNotificationUrl] = await Promise.all([
     readSecret(databaseUrlPath, "database URL"),
     readSecret(notificationUrlPath, "database notification URL"),
   ]);
-  const kafkaBrokers = (process.env.AGENT_DOCK_KAFKA_BROKERS ?? "")
+  const kafkaBrokers = (process.env.PI_CLOUD_KAFKA_BROKERS ?? "")
     .split(",")
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
   const kafkaSecurityPaths = [
-    process.env.AGENT_DOCK_KAFKA_CA_FILE,
-    process.env.AGENT_DOCK_KAFKA_USERNAME_FILE,
-    process.env.AGENT_DOCK_KAFKA_PASSWORD_FILE,
+    process.env.PI_CLOUD_KAFKA_CA_FILE,
+    process.env.PI_CLOUD_KAFKA_USERNAME_FILE,
+    process.env.PI_CLOUD_KAFKA_PASSWORD_FILE,
   ];
   const configuredKafkaSecurityPaths = kafkaSecurityPaths.filter(
     (value): value is string => value !== undefined && value.length > 0,
@@ -81,27 +81,27 @@ export async function loadEventGatewayProductionConfig(): Promise<EventGatewayPr
       ? undefined
       : {
           brokers: kafkaBrokers,
-          clientId: process.env.AGENT_DOCK_KAFKA_CLIENT_ID ?? "agent-dock-event-gateway",
-          topic: process.env.AGENT_DOCK_WORKER_EVENT_TOPIC ?? "agent-dock-worker-events-v1",
+          clientId: process.env.PI_CLOUD_KAFKA_CLIENT_ID ?? "pi-cloud-event-gateway",
+          topic: process.env.PI_CLOUD_WORKER_EVENT_TOPIC ?? "pi-cloud-worker-events-v1",
           groupId:
-            process.env.AGENT_DOCK_WORKER_EVENT_PROJECTOR_GROUP ??
-            "agent-dock-worker-event-projector-v2",
+            process.env.PI_CLOUD_WORKER_EVENT_PROJECTOR_GROUP ??
+            "pi-cloud-worker-event-projector-v2",
           ...(kafkaSecurity === undefined ? {} : { security: kafkaSecurity }),
         };
   const workerEventIngestToken =
     kafka === undefined
       ? undefined
       : await readSecret(
-          process.env.AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE ??
-            "/run/agent-dock-secrets/worker-event-ingest-token",
+          process.env.PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE ??
+            "/run/pi-cloud-secrets/worker-event-ingest-token",
           "Worker event ingest token",
         );
   const liveEventStoreUrl =
     kafka === undefined
       ? undefined
       : await readSecret(
-          process.env.AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE ??
-            "/run/agent-dock-secrets/live-event-store-url",
+          process.env.PI_CLOUD_LIVE_EVENT_STORE_URL_FILE ??
+            "/run/pi-cloud-secrets/live-event-store-url",
           "Valkey live event store URL",
         );
   return {
@@ -110,9 +110,9 @@ export async function loadEventGatewayProductionConfig(): Promise<EventGatewayPr
     databaseUrl,
     databaseNotificationUrl,
     autoRepairLiveEvents: boolean(
-      process.env.AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS,
+      process.env.PI_CLOUD_AUTO_REPAIR_LIVE_EVENTS,
       true,
-      "AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS",
+      "PI_CLOUD_AUTO_REPAIR_LIVE_EVENTS",
     ),
     ...(kafka === undefined ? {} : { kafka }),
     ...(workerEventIngestToken === undefined ? {} : { workerEventIngestToken }),

@@ -1,9 +1,9 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type {
   CubeProxyConfigurationResource,
   InternalCubeProxyConfigurationResource,
   ReplaceCubeProxyConfigurationRequest,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Kysely } from "kysely";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";

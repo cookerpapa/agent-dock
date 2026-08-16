@@ -3,7 +3,7 @@ import type {
   ConversationTreeBranchResource,
   ConversationTreeResource,
   ConversationTreeView,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { selectActiveOutlineTurn } from "./ConversationOutline.tsx";
 import { useResizablePanel } from "./use-resizable-panel.ts";
 
@@ -115,7 +115,7 @@ export function ConversationTreeNavigator({
   onNavigate: (sessionId: string, turnId: string) => void;
 }) {
   const panel = useResizablePanel({
-    storageKey: "agent-dock:conversation-tree",
+    storageKey: "pi-cloud:conversation-tree",
     initialWidth: 300,
     minimumWidth: 220,
     maximumWidth: 520,

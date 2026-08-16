@@ -1,6 +1,6 @@
 # CubeSandbox primary execution plane
 
-This directory is the operator path for AgentDock's ordinary Tool runtime.
+This directory is the operator path for PiCloud's ordinary Tool runtime.
 `CubeSandboxProvider` is selected only by trusted deployment configuration; a
 browser user, tenant, model response or Tool Call cannot choose it or request a
 lower-security fallback.
@@ -46,7 +46,7 @@ A public or business-critical deployment should follow the upstream
 - rehearsed control-node, compute-node, storage and rolling-upgrade drills.
 
 Only CubeAPI TCP 3000 and CubeProxy TCP 80/443 should be privately reachable
-from AgentDock. Do not expose CubeMaster, MySQL, Redis, Cubelet, CubeProxy admin
+from PiCloud. Do not expose CubeMaster, MySQL, Redis, Cubelet, CubeProxy admin
 ports or the Kubernetes API.
 
 ## 1. Initialize private runtime state
@@ -66,7 +66,7 @@ control, Pi messages or a Tool microVM.
 ## 2. Install the pinned local Cube plane
 
 Installation mutates K3s and requires root. On the validated WSL2 host it also
-creates a stable `agentdock0` dummy node interface with MTU 1500 and enforces
+creates a stable `picloud0` dummy node interface with MTU 1500 and enforces
 Flannel/Pod MTU 1450:
 
 ```bash
@@ -78,7 +78,7 @@ The installer:
 
 - verifies `/dev/kvm`, K3s, Helm and the exact upstream checkout;
 - creates a 64 GiB loop-backed XFS Cubelet data filesystem on a fresh local
-  installation and safely grows an older, smaller AgentDock loopback image in
+  installation and safely grows an older, smaller PiCloud loopback image in
   place after verifying its file, loop device, mount point and filesystem;
 - rejects an unauthenticated CubeAPI;
 - installs the pinned chart and private template registry;
@@ -93,15 +93,15 @@ The installer:
 The local installer invokes `/usr/local/bin/k3s kubectl` by default so a WSL
 PATH entry that forwards to Windows `kubectl.exe` cannot silently select a
 different client or credential store. A native, pinned alternative can be
-supplied with `AGENT_DOCK_KUBECTL_BIN`.
+supplied with `PI_CLOUD_KUBECTL_BIN`.
 
-The egress gateway starts fail-closed when the AgentDock Control Plane is not
+The egress gateway starts fail-closed when the PiCloud Control Plane is not
 yet available: liveness succeeds, readiness and all proxy traffic remain
 disabled, and the configuration poller keeps retrying. This breaks the fresh
 installation dependency cycle without granting temporary unrestricted egress;
 readiness changes only after an authenticated configuration revision is read.
-AgentDock-owned Cube control images are imported and referenced by the exact
-AgentDock Git revision rather than a mutable `:local` tag, so K3s cannot keep a
+PiCloud-owned Cube control images are imported and referenced by the exact
+PiCloud Git revision rather than a mutable `:local` tag, so K3s cannot keep a
 stale cached Gateway or Authorizer across an idempotent reconcile.
 The import is a synchronous containerd operation followed by an inventory
 check; installation does not depend on K3s eventually noticing a mutable tar
@@ -113,7 +113,7 @@ exceed the real path MTU.
 
 ## 3. Commit, build and register the immutable Tool template
 
-Template identity is tied to a clean, committed AgentDock revision. After code
+Template identity is tied to a clean, committed PiCloud revision. After code
 and documentation are committed:
 
 ```bash
@@ -128,9 +128,9 @@ Kubernetes administrator credentials. An operator can still override all three
 values explicitly:
 
 ```bash
-AGENT_DOCK_CUBE_MASTER_ADDRESS="<private-cubemaster-address>" \
-AGENT_DOCK_CUBE_MASTER_CLI="/opt/cube/bin/cubemastercli" \
-AGENT_DOCK_CUBE_REGISTRY_ADDRESS="<private-registry-address>" \
+PI_CLOUD_CUBE_MASTER_ADDRESS="<private-cubemaster-address>" \
+PI_CLOUD_CUBE_MASTER_CLI="/opt/cube/bin/cubemastercli" \
+PI_CLOUD_CUBE_REGISTRY_ADDRESS="<private-registry-address>" \
 node scripts/register-cubesandbox-tool-template.mjs
 ```
 
@@ -140,7 +140,7 @@ It binds an ephemeral raw TCP relay to `127.0.0.1:5000` only while pushing the
 image, uses a temporary empty Docker client configuration because this private
 registry needs no interactive credential helper, then destroys both temporary
 resources. CubeMaster, the registry and their management ports remain private;
-this path deliberately avoids granting the AgentDock runtime or its Sandbox
+this path deliberately avoids granting the PiCloud runtime or its Sandbox
 Manager broader Kubernetes RBAC.
 
 The registration command:
@@ -153,18 +153,18 @@ The registration command:
 6. records the revision, image digest, template ID and spec SHA-256 in the
    private `runtime/cubesandbox/template.json`.
 
-Before the build and after registration, the command applies an AgentDock-only
+Before the build and after registration, the command applies an PiCloud-only
 template retention policy. It preserves the selected template and the newest
 READY rollback templates, ignores templates owned by other products and never
 deletes an in-progress build. The default is three READY templates and can be
 changed to a bounded value from 2 through 10 with
-`AGENT_DOCK_CUBE_TEMPLATE_RETENTION`. Retention failure is reported without
+`PI_CLOUD_CUBE_TEMPLATE_RETENTION`. Retention failure is reported without
 invalidating a successfully registered immutable template; operators should
 resolve the reported Cube control-plane error before storage pressure grows.
 
 The image contains Node 24, Java 17, Python 3.11 and Git 2. It replaces Cube's
 inherited entrypoint so root `envd` is not started; otherwise that daemon would
-create a second command/file channel outside AgentDock's Tool Broker.
+create a second command/file channel outside PiCloud's Tool Broker.
 
 ## 4. Run the real KVM gate
 
@@ -189,7 +189,7 @@ The gate creates real microVMs for isolated tenants and proves:
 - path, symlink, output, timeout and process limits;
 - content-hashed Workspace capture;
 - cancellation destroys the executing guest;
-- zero remaining AgentDock activation in Cube inventory.
+- zero remaining PiCloud activation in Cube inventory.
 
 The local Docker template check is compatibility evidence only. It must never
 be reported as KVM isolation evidence.
@@ -207,7 +207,7 @@ npm run production:ps
 
 `production:deploy` also initializes Cube's private runtime state. Startup
 fails closed when cluster evidence, template status, image digest, template
-specification or AgentDock Git revision does not match.
+specification or PiCloud Git revision does not match.
 
 The primary Compose overlay starts two credential-free fixed-target relays.
 The Tool Broker remains on internal networks, holds the Cube API key from
@@ -229,12 +229,12 @@ protocols do not gain an implicit direct route through that gateway.
 ## Lifecycle and rollback
 
 Cube compute instances are not data authorities. The installer loads the
-`agentdock-posix` binary Volume Plugin into CubeMaster and Cubelet. Each
+`picloud-posix` binary Volume Plugin into CubeMaster and Cubelet. Each
 deterministic Workspace-bound physical Volume is a trusted envelope:
 
 ```text
-agentdock-posix-<volume-id>/
-├── .agent-dock-runtime/
+picloud-posix-<volume-id>/
+├── .pi-cloud-runtime/
 │   ├── generation
 │   └── git/
 └── workspace/
@@ -244,7 +244,7 @@ Cube mounts only `workspace/` at `/workspace`. The trusted Workspace Volume
 Gateway validates and indexes that persistent Volume in place. PostgreSQL
 Fence/CAS publishes only the current Attempt's revision metadata as the
 Workspace head. The guest cannot
-list or mutate the sibling generation marker or AgentDock's external Git
+list or mutate the sibling generation marker or PiCloud's external Git
 baseline.
 
 The bundled single-node profile maps
@@ -273,6 +273,6 @@ npm run production:down
 ```
 
 Starting or restarting requires a READY template for the current commit.
-Before uninstalling Cube, verify its inventory has no AgentDock activation.
+Before uninstalling Cube, verify its inventory has no PiCloud activation.
 Removing the chart does not automatically revert node labels, taints,
 `/data/cubelet` data or any PVM host-kernel change.

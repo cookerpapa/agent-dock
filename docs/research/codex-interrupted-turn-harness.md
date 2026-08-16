@@ -43,18 +43,18 @@ Relevant upstream sources:
 - `codex-rs/tui/src/keymap.rs`
 - `codex-rs/app-server/README.md`
 
-## AgentDock mapping
+## PiCloud mapping
 
-AgentDock already had two durable interruption paths:
+PiCloud already had two durable interruption paths:
 
-- catchable cancellation/failure appends `agent-dock.run_interrupted` to Pi's
+- catchable cancellation/failure appends `pi-cloud.run_interrupted` to Pi's
   native Session JSONL and commits an interrupted Pi checkpoint;
 - `SIGKILL`, OOM or node loss uses PostgreSQL's durable public events to append
   one bounded semantic recovery item after the last committed Pi checkpoint.
 
 The first implementation made both paths carry a detailed next-Turn policy.
 That was rejected after comparing the exact upstream model-visible payload:
-Codex records uncertainty but does not tell the model how to recover. AgentDock
+Codex records uncertainty but does not tell the model how to recover. PiCloud
 therefore adopts the same separation:
 
 - trusted metadata retains exact reason, Run/Attempt and durable sequence data;
@@ -63,7 +63,7 @@ therefore adopts the same separation:
   in-flight Tool completion as unknown;
 - no fixed inspection or replay procedure is injected into the next prompt.
 
-AgentDock adds one cloud-specific distinction. The Sandbox Manager reports
+PiCloud adds one cloud-specific distinction. The Sandbox Manager reports
 whether the exact Session Cube is warm-reused or cold-restored. Pi stores the
 last active activation in a non-model custom entry; a confirmed loss emits one
 short `<sandbox_reset>` fact and records an unavailable state so pure-chat Runs

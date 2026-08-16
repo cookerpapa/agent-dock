@@ -1,0 +1,62 @@
+{{- if .Values.autoscaling.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "pi-cloud-pi-worker-pool.name" . }}-postgres
+  labels:
+    {{- include "pi-cloud-pi-worker-pool.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: {{ .Values.database.existingSecret }}
+      key: {{ .Values.database.notificationUrlKey }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "pi-cloud-pi-worker-pool.name" . }}
+  labels:
+    {{- include "pi-cloud-pi-worker-pool.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ include "pi-cloud-pi-worker-pool.name" . }}
+    envSourceContainerName: pi-worker
+  pollingInterval: {{ .Values.autoscaling.pollingIntervalSeconds }}
+  cooldownPeriod: {{ .Values.autoscaling.cooldownSeconds }}
+  minReplicaCount: {{ .Values.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.autoscaling.maxReplicas }}
+  fallback:
+    failureThreshold: 3
+    replicas: {{ .Values.autoscaling.minReplicas }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - { type: Percent, value: 100, periodSeconds: 60 }
+            - { type: Pods, value: 4, periodSeconds: 60 }
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: {{ .Values.autoscaling.scaleDownStabilizationSeconds }}
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: {{ .Values.autoscaling.scaleDownPeriodSeconds }}
+          selectPolicy: Min
+  triggers:
+    - type: postgresql
+      authenticationRef:
+        name: {{ include "pi-cloud-pi-worker-pool.name" . }}-postgres
+      metadata:
+        query: >-
+          SELECT COUNT(*)::double precision
+          FROM outbox
+          WHERE topic IN ('turn.command.v1', 'turn.cancel.v1')
+            AND published_at IS NULL
+            AND available_at <= now()
+        targetQueryValue: {{ .Values.autoscaling.targetQueuedRunsPerReplica | quote }}
+        activationTargetQueryValue: "0"
+{{- end }}

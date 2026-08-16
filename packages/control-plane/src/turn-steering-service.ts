@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { Database } from "@agent-dock/database";
-import type { CreateTurnSteerRequest, TurnSteerResource } from "@agent-dock/protocol";
+import type { Database } from "@pi-cloud/database";
+import type { CreateTurnSteerRequest, TurnSteerResource } from "@pi-cloud/protocol";
 import type { Kysely, Transaction } from "kysely";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.ts";

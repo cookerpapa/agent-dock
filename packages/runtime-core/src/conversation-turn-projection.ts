@@ -1,11 +1,11 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
-  parseAgentDockEvent,
+  parsePiCloudEvent,
   parseConversationTurnTranscriptResource,
-  type AgentDockEvent,
+  type PiCloudEvent,
   type ConversationTranscriptItemResource,
   type ConversationTurnTranscriptResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 
 type ProjectionDatabase = Kysely<Database> | Transaction<Database>;
@@ -61,8 +61,8 @@ function isoTimestamp(value: Date | string): string {
   return parsed.toISOString();
 }
 
-function projectionEvent(row: ProjectionEventRow): AgentDockEvent {
-  return parseAgentDockEvent({
+function projectionEvent(row: ProjectionEventRow): PiCloudEvent {
+  return parsePiCloudEvent({
     schemaVersion: row.schema_version,
     eventId: row.event_id,
     sessionId: row.session_id,
@@ -89,7 +89,7 @@ function toolItemIndex(
  * PostgreSQL stores this canonical terminal view.
  */
 export function projectConversationTurnTranscript(
-  events: readonly AgentDockEvent[],
+  events: readonly PiCloudEvent[],
 ): ConversationTurnTranscriptResource {
   if (events.length === 0) {
     throw new TypeError("A conversation turn projection requires at least one event");
@@ -379,7 +379,7 @@ export async function materializeConversationTurnProjections(
     .where("turn_id", "in", turnIds)
     .orderBy("seq", "asc")
     .execute();
-  const eventsByTurnId = new Map<string, AgentDockEvent[]>();
+  const eventsByTurnId = new Map<string, PiCloudEvent[]>();
   for (const row of rows) {
     if (row.turn_id === null) {
       throw new Error("Conversation projection query returned a session-level event");

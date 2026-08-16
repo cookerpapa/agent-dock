@@ -30,7 +30,7 @@ export {
   type ResolvedTenantModelCredential,
   type SealedTenantModelCredential,
   type TenantModelCredentialIdentity,
-} from "@agent-dock/runtime-core/model-credential-runtime";
+} from "@pi-cloud/runtime-core/model-credential-runtime";
 export {
   TenantModelConfigurationError,
   TenantModelConfigurationService,
@@ -87,19 +87,19 @@ export {
   type CheckpointObjectStore,
   type FileCheckpointObjectStoreOptions,
   type PostgresSandboxCheckpointStoreOptions,
-} from "@agent-dock/runtime-core/checkpoint-store";
+} from "@pi-cloud/runtime-core/checkpoint-store";
 export {
   TtlCheckpointObjectStore,
   type TtlCheckpointObjectStoreEvent,
   type TtlCheckpointObjectStoreOptions,
   type TtlCheckpointObjectStoreSnapshot,
-} from "@agent-dock/runtime-core/checkpoint-object-cache";
+} from "@pi-cloud/runtime-core/checkpoint-object-cache";
 export {
   SessionLiveStreamCompactionError,
   SessionLiveStreamCompactionService,
   type SessionLiveStreamCompactionOptions,
   type SessionLiveStreamCompactionResult,
-} from "@agent-dock/runtime-core/session-event-retention";
+} from "@pi-cloud/runtime-core/session-event-retention";
 export {
   RunCancellationExecutor,
   RunCancellationExecutorInvariantError,
@@ -112,7 +112,7 @@ export {
   type TurnCancellationReason,
   type TurnCancellationRequest,
   type TurnCancellationResult,
-} from "@agent-dock/runtime-core/run-cancellation-executor";
+} from "@pi-cloud/runtime-core/run-cancellation-executor";
 export {
   ControlPlaneModule,
   type ControlPlaneEventRuntime,
@@ -125,14 +125,14 @@ export {
   type DurableEventStoreErrorCode,
   type DurableEventStoreOptions,
   type EventReplayWindow,
-} from "@agent-dock/runtime-core/durable-event-store";
+} from "@pi-cloud/runtime-core/durable-event-store";
 export {
   materializeConversationTurnProjection,
   materializeConversationTurnProjections,
   projectConversationTurnTranscript,
   type MaterializeConversationTurnProjectionInput,
   type MaterializeConversationTurnProjectionsInput,
-} from "@agent-dock/runtime-core/conversation-turn-projection";
+} from "@pi-cloud/runtime-core/conversation-turn-projection";
 export {
   DeterministicExecutionBackend,
   type DeterministicExecutionOutcome,
@@ -141,7 +141,7 @@ export {
 export {
   LocalSupervisorExecutionBackend,
   type LocalSupervisorExecutionBackendOptions,
-} from "@agent-dock/runtime-core/local-supervisor-execution-backend";
+} from "@pi-cloud/runtime-core/local-supervisor-execution-backend";
 export {
   RemoteSupervisorSteerBackend,
   type RemoteSupervisorSteerBackendOptions,
@@ -186,14 +186,14 @@ export {
   type TurnExecutionLifecycle,
   type TurnExecutionRequest,
   type TurnExecutionResult,
-} from "@agent-dock/runtime-core/run-command-executor";
+} from "@pi-cloud/runtime-core/run-command-executor";
 export {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,
   type SessionLeaseCoordinatorOptions,
   type SupervisorConnectionGuard,
   type SupervisorHeartbeatIdentity,
-} from "@agent-dock/runtime-core/session-lease-coordinator";
+} from "@pi-cloud/runtime-core/session-lease-coordinator";
 export {
   SupervisorConnectionManager,
   SupervisorConnectionManagerError,
@@ -282,14 +282,14 @@ export {
   SessionEventHub,
   SessionEventSubscription,
   type SessionEventWake,
-} from "@agent-dock/runtime-core/session-event-hub";
+} from "@pi-cloud/runtime-core/session-event-hub";
 export { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
 export {
   type SessionEventNotification,
   type SessionEventNotificationHandlers,
   type SessionEventNotificationPublisher,
   type SessionEventNotificationTransport,
-} from "@agent-dock/runtime-core/session-event-notifications";
+} from "@pi-cloud/runtime-core/session-event-notifications";
 export {
   PostgresSessionEventNotifications,
   PostgresSessionEventNotificationsError,
@@ -297,12 +297,12 @@ export {
   parseSessionEventNotificationPayload,
   type PostgresSessionEventNotificationsOptions,
   type PostgresSessionEventNotificationsState,
-} from "@agent-dock/runtime-core/postgres-session-event-notifications";
+} from "@pi-cloud/runtime-core/postgres-session-event-notifications";
 export {
   OpenSessionEventStream,
   SessionEventStream,
   type SessionEventStreamOptions,
-} from "@agent-dock/runtime-core/session-event-stream";
+} from "@pi-cloud/runtime-core/session-event-stream";
 export {
   ControlPlaneStore,
   ControlPlaneStoreError,
@@ -312,7 +312,7 @@ export {
 export {
   PostgresRunAttemptPhaseObserver,
   type PostgresRunAttemptPhaseObserverOptions,
-} from "@agent-dock/runtime-core/run-attempt-runtime";
+} from "@pi-cloud/runtime-core/run-attempt-runtime";
 export {
   WorkspaceVersionError,
   WorkspaceVersionService,

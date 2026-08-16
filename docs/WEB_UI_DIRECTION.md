@@ -2,7 +2,7 @@
 
 ## Design reference
 
-AgentDock uses a familiar conversation product shell: account entry first, a
+PiCloud uses a familiar conversation product shell: account entry first, a
 left conversation list, a right conversation, and an anchored composer. Inside
 the transcript and optional Workspace inspector it retains the restrained visual
 language of Pi's `/export` HTML. The pinned Pi `0.84.1` export templates and the
@@ -27,9 +27,9 @@ The existing Session Tree Browser also demonstrates useful live behavior:
 independent transcript/sidebar scrolling, an anchored composer, streamed output,
 runtime state, fork navigation, and bounded/idle runtime management.
 
-## AgentDock adaptations
+## PiCloud adaptations
 
-AgentDock must use the visual language without copying the local-only execution
+PiCloud must use the visual language without copying the local-only execution
 model. The browser never starts Pi directly, rewrites JSONL, or manages OS
 processes. It talks only to the control-plane REST/SSE contract.
 
@@ -38,7 +38,7 @@ The product page adds:
 - session state and reconnect/replay status;
 - no model picker or credential form; platform model policy is an operator
   concern;
-- streamed assistant text and tool lifecycle from `AgentDockEvent`;
+- streamed assistant text and tool lifecycle from `PiCloudEvent`;
 - inline approval cards for confirm/select/input/editor;
 - a visible turn-cancel control and clear cancelling/failed states;
 - compact sandbox/runner health details for debugging;
@@ -83,7 +83,7 @@ sidebar into an overlay with an explicit backdrop.
 
 The browser uses only relative REST/SSE routes. Its fetch-based SSE client can
 set `Last-Event-ID` explicitly, parses fragmented frames, validates the shared
-`AgentDockEvent` contract and frame identity, refuses sequence gaps, ignores
+`PiCloudEvent` contract and frame identity, refuses sequence gaps, ignores
 duplicates, and reconnects with bounded backoff. Public REST resources are also
 validated before they enter React state. No raw Pi object, credential reference,
 provider token, or API body is logged.

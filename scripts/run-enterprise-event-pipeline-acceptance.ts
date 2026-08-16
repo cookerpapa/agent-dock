@@ -1,50 +1,50 @@
 import { KafkaJS } from "@confluentinc/kafka-javascript";
-import { createControlPlaneApplication } from "@agent-dock/control-plane";
-import { createDatabase, runMigrations } from "@agent-dock/database";
-import { EventGateway } from "@agent-dock/event-gateway";
+import { createControlPlaneApplication } from "@pi-cloud/control-plane";
+import { createDatabase, runMigrations } from "@pi-cloud/database";
+import { EventGateway } from "@pi-cloud/event-gateway";
 import type {
   AcceptedTurnResource,
   EventPublishBatchMessage,
   ProjectResource,
   SessionResource,
-} from "@agent-dock/protocol";
-import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
-import { PostgresEventProjectionBarrier } from "@agent-dock/runtime-core/event-projection-barrier";
-import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
-import { commitTerminalTurnEvent } from "@agent-dock/runtime-core/terminal-turn-event";
+} from "@pi-cloud/protocol";
+import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
+import { PostgresEventProjectionBarrier } from "@pi-cloud/runtime-core/event-projection-barrier";
+import { HttpDurableEventIngestor } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
+import { commitTerminalTurnEvent } from "@pi-cloud/runtime-core/terminal-turn-event";
 import {
   HttpTerminalTurnProjectionSource,
   LiveTerminalTurnProjectionSource,
-} from "@agent-dock/runtime-core/terminal-turn-projection";
-import { ValkeyLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
+} from "@pi-cloud/runtime-core/terminal-turn-projection";
+import { ValkeyLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
 import {
   KafkaWorkerEventLog,
   KafkaWorkerEventProjector,
-} from "@agent-dock/runtime-core/worker-event-log";
+} from "@pi-cloud/runtime-core/worker-event-log";
 import type {
   SessionEventNotification,
   SessionEventNotificationHandlers,
   SessionEventNotificationTransport,
-} from "@agent-dock/runtime-core/session-event-notifications";
+} from "@pi-cloud/runtime-core/session-event-notifications";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { sql, type Transaction } from "kysely";
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 
 const { Kafka, logLevel } = KafkaJS;
-const databaseUrl = process.env.AGENT_DOCK_TEST_DATABASE_URL;
-if (databaseUrl === undefined) throw new Error("AGENT_DOCK_TEST_DATABASE_URL is required");
-const brokers = (process.env.AGENT_DOCK_KAFKA_BROKERS ?? "127.0.0.1:19092")
+const databaseUrl = process.env.PI_CLOUD_TEST_DATABASE_URL;
+if (databaseUrl === undefined) throw new Error("PI_CLOUD_TEST_DATABASE_URL is required");
+const brokers = (process.env.PI_CLOUD_KAFKA_BROKERS ?? "127.0.0.1:19092")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
 const reportPath =
-  process.env.AGENT_DOCK_ENTERPRISE_EVENT_REPORT ??
+  process.env.PI_CLOUD_ENTERPRISE_EVENT_REPORT ??
   "docs/reports/enterprise-event-pipeline-acceptance-latest.json";
-const topic = `agent-dock-enterprise-acceptance-${randomUUID()}`;
-const groupId = `agent-dock-enterprise-projector-${randomUUID()}`;
+const topic = `pi-cloud-enterprise-acceptance-${randomUUID()}`;
+const groupId = `pi-cloud-enterprise-projector-${randomUUID()}`;
 const serviceToken = `acceptance-${"a".repeat(48)}`;
-const liveEventStoreUrl = process.env.AGENT_DOCK_LIVE_EVENT_STORE_URL ?? "redis://127.0.0.1:16379";
+const liveEventStoreUrl = process.env.PI_CLOUD_LIVE_EVENT_STORE_URL ?? "redis://127.0.0.1:16379";
 const ids = {
   tenant: randomUUID(),
   user: randomUUID(),
@@ -79,7 +79,7 @@ async function waitUntil(predicate: () => Promise<boolean>, timeoutMs = 30_000):
 
 const database = createDatabase({ connectionString: databaseUrl, maxConnections: 12 });
 const kafka = new Kafka({
-  kafkaJS: { brokers, clientId: "agent-dock-enterprise-acceptance", logLevel: logLevel.NOTHING },
+  kafkaJS: { brokers, clientId: "pi-cloud-enterprise-acceptance", logLevel: logLevel.NOTHING },
 });
 const admin = kafka.admin();
 let application: Awaited<ReturnType<typeof createControlPlaneApplication>> | undefined;
@@ -103,7 +103,7 @@ try {
     .values({
       id: ids.credential,
       tenant_id: ids.tenant,
-      provider: "agent-dock-fake",
+      provider: "pi-cloud-fake",
       kind: "brokered",
       secret_ref: "broker://acceptance/fake",
       version: 1,
@@ -116,8 +116,8 @@ try {
       id: ids.profile,
       tenant_id: ids.tenant,
       name: "acceptance",
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       default_thinking_level: "off",
       allowed_thinking_levels: ["off"],
       credential_binding_id: ids.credential,
@@ -256,7 +256,7 @@ try {
   await admin.createTopics({ topics: [{ topic, numPartitions: 8, replicationFactor: 1 }] });
   eventLog = new KafkaWorkerEventLog({
     brokers,
-    clientId: "agent-dock-enterprise-ingest",
+    clientId: "pi-cloud-enterprise-ingest",
     topic,
   });
   const store = new DurableEventStore({
@@ -266,7 +266,7 @@ try {
   });
   projector = new KafkaWorkerEventProjector({
     brokers,
-    clientId: "agent-dock-enterprise-projector",
+    clientId: "pi-cloud-enterprise-projector",
     topic,
     groupId,
     sink: store,
@@ -360,7 +360,7 @@ try {
   }
   projector = new KafkaWorkerEventProjector({
     brokers,
-    clientId: "agent-dock-enterprise-projector-restarted",
+    clientId: "pi-cloud-enterprise-projector-restarted",
     topic,
     groupId,
     sink: store,

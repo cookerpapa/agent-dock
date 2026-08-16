@@ -1,17 +1,17 @@
 import {
-  createAgentDockEventFactory,
+  createPiCloudEventFactory,
   MAX_TOOL_OUTPUT_BYTES,
   parseSupervisorToControlMessage,
-  type AgentDockEvent,
+  type PiCloudEvent,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
   type WorkspacePatch,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   CloudAgentRuntime,
   type CloudAgentExecutionAuthority,
   type CloudAgentRuntimeEvent,
-} from "@agent-dock/pi-session-postgres";
+} from "@pi-cloud/pi-session-postgres";
 import type { AgentMessage, Session } from "@earendil-works/pi-agent-core";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ProviderHeaders } from "@earendil-works/pi-ai";
@@ -178,7 +178,7 @@ async function createModelRuntime(config: PiModelRuntimeConfig): Promise<ModelRu
 function cancellationSignal(value: unknown): PiCancellationSignal {
   if (
     !isRecord(value) ||
-    value.kind !== "agent-dock.turn-cancellation" ||
+    value.kind !== "pi-cloud.turn-cancellation" ||
     (value.reason !== "user_request" &&
       value.reason !== "timeout" &&
       value.reason !== "lease_revoked" &&
@@ -186,7 +186,7 @@ function cancellationSignal(value: unknown): PiCancellationSignal {
     !Number.isSafeInteger(value.gracePeriodMs) ||
     (value.gracePeriodMs as number) < 0
   ) {
-    return { kind: "agent-dock.turn-cancellation", reason: "shutdown", gracePeriodMs: 0 };
+    return { kind: "pi-cloud.turn-cancellation", reason: "shutdown", gracePeriodMs: 0 };
   }
   return value as PiCancellationSignal;
 }
@@ -280,9 +280,9 @@ export class PiCloudTurnRunner {
     let toolOutputDirectoryForCleanup: string | undefined;
 
     try {
-      const toolOutputDirectory = await mkdtemp(resolve(tmpdir(), "agent-dock-tool-output-"));
+      const toolOutputDirectory = await mkdtemp(resolve(tmpdir(), "pi-cloud-tool-output-"));
       toolOutputDirectoryForCleanup = toolOutputDirectory;
-      const eventFactory = createAgentDockEventFactory(
+      const eventFactory = createPiCloudEventFactory(
         {
           sessionId: command.payload.sessionId,
           turnId: command.payload.turnId,
@@ -314,7 +314,7 @@ export class PiCloudTurnRunner {
       let eventChain = Promise.resolve();
       let fatalError: Error | undefined;
 
-      const eventMessage = (event: AgentDockEvent): EventPublishMessage => {
+      const eventMessage = (event: PiCloudEvent): EventPublishMessage => {
         const parsed = parseSupervisorToControlMessage({
           protocolVersion: 1,
           messageId: this.#id(),
@@ -504,7 +504,7 @@ export class PiCloudTurnRunner {
       const timer = setTimeout(
         () =>
           timeout.abort({
-            kind: "agent-dock.turn-cancellation",
+            kind: "pi-cloud.turn-cancellation",
             reason: "timeout",
             gracePeriodMs: 0,
           }),

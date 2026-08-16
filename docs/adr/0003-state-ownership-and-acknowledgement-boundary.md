@@ -5,7 +5,7 @@
 
 ## Context
 
-AgentDock spans a trusted control plane, a trusted Pi Worker, an isolated Cube
+PiCloud spans a trusted control plane, a trusted Pi Worker, an isolated Cube
 Tool environment, a live Workspace, and cold object storage. Several of these
 components temporarily hold related data, but treating more than one copy as
 authoritative would make reconnect and crash recovery ambiguous.

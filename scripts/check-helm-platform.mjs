@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { parseAllDocuments } from "yaml";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const chart = resolve(root, "deploy/helm/agent-dock-platform");
-const helm = process.env.AGENT_DOCK_HELM_BIN ?? "helm";
+const chart = resolve(root, "deploy/helm/pi-cloud-platform");
+const helm = process.env.PI_CLOUD_HELM_BIN ?? "helm";
 function run(arguments_) {
   const result = spawnSync(helm, arguments_, { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, `${arguments_.join(" ")} failed:\n${result.stderr}`);
@@ -15,7 +15,7 @@ function run(arguments_) {
 
 run(["dependency", "build", chart]);
 run(["lint", chart, "--strict"]);
-const rendered = run(["template", "agent-dock", chart, "--namespace", "agent-dock-system"]);
+const rendered = run(["template", "pi-cloud", chart, "--namespace", "pi-cloud-system"]);
 assert.doesNotMatch(
   rendered,
   /temporal|execution[_-]?cell|kopia|minio|checkpoint_s3|aws-credentials/i,
@@ -28,7 +28,7 @@ const resources = parseAllDocuments(rendered)
   .filter(Boolean);
 const find = (kind, name) =>
   resources.find((resource) => resource.kind === kind && resource.metadata?.name === name);
-const controlPlane = find("Deployment", "agent-dock-control-plane");
+const controlPlane = find("Deployment", "pi-cloud-control-plane");
 assert(controlPlane);
 const environment = Object.fromEntries(
   controlPlane.spec.template.spec.containers[0].env
@@ -36,10 +36,10 @@ const environment = Object.fromEntries(
     .map((entry) => [entry.name, String(entry.value)]),
 );
 assert.equal(
-  environment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE,
-  "/run/agent-dock-secrets/database-notification-url",
+  environment.PI_CLOUD_DATABASE_NOTIFICATION_URL_FILE,
+  "/run/pi-cloud-secrets/database-notification-url",
 );
-assert.match(environment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES, /\{supervisorId\}/);
-assert(find("StatefulSet", "agent-dock-pi-worker-primary-v1"));
-assert(find("Deployment", "agent-dock-workspace-volume-gateway"));
+assert.match(environment.PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES, /\{supervisorId\}/);
+assert(find("StatefulSet", "pi-cloud-pi-worker-primary-v1"));
+assert(find("Deployment", "pi-cloud-workspace-volume-gateway"));
 process.stdout.write("Platform Helm chart matches the PostgreSQL/Cube Volume architecture.\n");

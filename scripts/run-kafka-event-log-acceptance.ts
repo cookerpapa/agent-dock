@@ -7,28 +7,28 @@ import {
   KafkaWorkerEventProjector,
   type WorkerEventLogBatch,
   type WorkerEventLogEnvelope,
-} from "@agent-dock/runtime-core/worker-event-log";
+} from "@pi-cloud/runtime-core/worker-event-log";
 
 const { Kafka, logLevel } = KafkaJS;
 
-const brokers = (process.env.AGENT_DOCK_KAFKA_BROKERS ?? "127.0.0.1:19092")
+const brokers = (process.env.PI_CLOUD_KAFKA_BROKERS ?? "127.0.0.1:19092")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
-const sessionCount = Number(process.env.AGENT_DOCK_KAFKA_ACCEPTANCE_SESSIONS ?? "64");
-const eventsPerBatch = Number(process.env.AGENT_DOCK_KAFKA_ACCEPTANCE_EVENTS_PER_BATCH ?? "16");
+const sessionCount = Number(process.env.PI_CLOUD_KAFKA_ACCEPTANCE_SESSIONS ?? "64");
+const eventsPerBatch = Number(process.env.PI_CLOUD_KAFKA_ACCEPTANCE_EVENTS_PER_BATCH ?? "16");
 if (!Number.isSafeInteger(sessionCount) || sessionCount < 1 || sessionCount > 2_048) {
-  throw new Error("AGENT_DOCK_KAFKA_ACCEPTANCE_SESSIONS is invalid");
+  throw new Error("PI_CLOUD_KAFKA_ACCEPTANCE_SESSIONS is invalid");
 }
 if (!Number.isSafeInteger(eventsPerBatch) || eventsPerBatch < 1 || eventsPerBatch > 256) {
-  throw new Error("AGENT_DOCK_KAFKA_ACCEPTANCE_EVENTS_PER_BATCH is invalid");
+  throw new Error("PI_CLOUD_KAFKA_ACCEPTANCE_EVENTS_PER_BATCH is invalid");
 }
 
-const topic = `agent-dock-worker-events-acceptance-${randomUUID()}`;
+const topic = `pi-cloud-worker-events-acceptance-${randomUUID()}`;
 const kafka = new Kafka({
   kafkaJS: {
     brokers,
-    clientId: "agent-dock-kafka-acceptance-admin",
+    clientId: "pi-cloud-kafka-acceptance-admin",
     logLevel: logLevel.NOTHING,
   },
 });
@@ -75,14 +75,14 @@ function batch(sessionId: string, firstSequence: number): WorkerEventLogBatch {
 
 const eventLog = new KafkaWorkerEventLog({
   brokers,
-  clientId: "agent-dock-kafka-acceptance-producer",
+  clientId: "pi-cloud-kafka-acceptance-producer",
   topic,
 });
 const projector = new KafkaWorkerEventProjector({
   brokers,
-  clientId: "agent-dock-kafka-acceptance-projector",
+  clientId: "pi-cloud-kafka-acceptance-projector",
   topic,
-  groupId: `agent-dock-kafka-acceptance-${randomUUID()}`,
+  groupId: `pi-cloud-kafka-acceptance-${randomUUID()}`,
   partitionsConsumedConcurrently: 8,
   sink: {
     project(envelope: WorkerEventLogEnvelope) {
@@ -129,7 +129,7 @@ try {
   }
   const logicalEvents = sessionCount * eventsPerBatch * 2;
   const report = {
-    format: "agent-dock.kafka-worker-event-acceptance.v1",
+    format: "pi-cloud.kafka-worker-event-acceptance.v1",
     generatedAt: new Date().toISOString(),
     revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     input: { sessionCount, eventsPerBatch, logicalEvents, partitions: 16 },

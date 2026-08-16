@@ -8,7 +8,7 @@
 
 The Cube POSIX Volume previously mounted its physical root directly at
 `/workspace`. The trusted Volume Gateway stored
-`.agent-dock-runtime/generation` in that root so the marker followed the same
+`.pi-cloud-runtime/generation` in that root so the marker followed the same
 persistent Volume lifecycle as the mutable Workspace.
 
 Tool file APIs, Workspace indexes and Git patches excluded the marker, but an
@@ -16,7 +16,7 @@ untrusted shell could still list it because Cube mounted the entire physical
 Volume. This mixed platform checkpoint metadata with user-visible files and
 made `/workspace` less clean than its product contract.
 
-At the time of this decision, the root `.git` directory still held AgentDock's
+At the time of this decision, the root `.git` directory still held PiCloud's
 private Workspace baseline. ADR-0073 subsequently moved that metadata beside
 the user-visible tree as well.
 
@@ -25,8 +25,8 @@ the user-visible tree as well.
 Every physical POSIX Volume is an envelope:
 
 ```text
-agentdock-posix-<volume-id>/
-├── .agent-dock-runtime/
+picloud-posix-<volume-id>/
+├── .pi-cloud-runtime/
 │   └── generation
 └── workspace/
     ├── .git/
@@ -47,7 +47,7 @@ Volume:
 
 Snapshot file materialization prefixes the requested user-relative path with
 `workspace/`. User-visible indexes and portable snapshots operate only on the
-mounted child and no longer reserve `.agent-dock-runtime` as a user path.
+mounted child and no longer reserve `.pi-cloud-runtime` as a user path.
 
 The persistent Volume reference carries the generation/revision and tenant,
 Workspace and activation binding. Previous development checkpoint formats and
@@ -56,7 +56,7 @@ migration branch is retained.
 
 ## Consequences
 
-- `ls -la /workspace` no longer exposes AgentDock checkpoint metadata.
+- `ls -la /workspace` no longer exposes PiCloud checkpoint metadata.
 - An untrusted command cannot read, delete or forge the generation marker.
 - Workspace bytes stay on the persistent Volume; PostgreSQL receives only the
   bounded immutable reference and file index.
@@ -68,7 +68,7 @@ migration branch is retained.
 ## Acceptance
 
 1. a fresh Volume exposes an empty `/workspace` without
-   `.agent-dock-runtime`;
+   `.pi-cloud-runtime`;
 2. the physical envelope contains a generation marker beside `workspace/`;
 3. persistent Volume reattachment and file materialization use the envelope layout;
 4. missing, linked or mismatched envelope components fail closed;

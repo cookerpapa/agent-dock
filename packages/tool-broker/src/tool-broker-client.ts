@@ -19,9 +19,9 @@ import {
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
   type ToolSandboxReleaseResponse,
-} from "@agent-dock/protocol";
-import { decodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
-import { activeTraceCarrier } from "@agent-dock/observability";
+} from "@pi-cloud/protocol";
+import { decodeWorkspaceSnapshotBlob } from "@pi-cloud/workspace-runtime";
+import { activeTraceCarrier } from "@pi-cloud/observability";
 import { randomUUID } from "node:crypto";
 
 export const TOOL_BROKER_SERVICE_PATH = "/internal/v1/tool-broker";

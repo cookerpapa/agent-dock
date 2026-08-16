@@ -1,7 +1,7 @@
 # Control Plane
 
 The Control Plane is the authoritative multi-tenant business service for
-AgentDock.
+PiCloud.
 
 ## Responsibilities
 
@@ -66,8 +66,8 @@ owners receive `false`.
 ## Verification
 
 ```bash
-npm run typecheck --workspace @agent-dock/control-plane
-npm test --workspace @agent-dock/control-plane
+npm run typecheck --workspace @pi-cloud/control-plane
+npm test --workspace @pi-cloud/control-plane
 ```
 
 The API tests cover tenant hiding, idempotency, Workspace sharing, conversation

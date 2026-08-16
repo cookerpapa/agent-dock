@@ -3,11 +3,11 @@ import type {
   ToolSandboxAssignment,
   ToolSandboxCreateRequest,
   ToolSandboxOperationRequest,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash } from "node:crypto";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -46,7 +46,7 @@ const assignment: ToolSandboxAssignment = {
 const environment = {
   environmentVersionId: "10000000-0000-4000-8000-000000000004",
   versionNumber: 1,
-  profileKey: "agent-dock-fullstack" as const,
+  profileKey: "pi-cloud-fullstack" as const,
   profileVersion: "1" as const,
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
@@ -54,7 +54,7 @@ const environment = {
   recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 };
 const environmentValidation = {
-  profileKey: "agent-dock-fullstack" as const,
+  profileKey: "pi-cloud-fullstack" as const,
   profileVersion: "1" as const,
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
@@ -116,7 +116,7 @@ function providerFixture() {
         providerId: "cubesandbox",
         activationId: spec.activationId,
         runtimeId: "66666666-6666-4666-8666-666666666666",
-        runtimeName: `agent-dock-tool-${spec.activationId}`.slice(0, 63),
+        runtimeName: `pi-cloud-tool-${spec.activationId}`.slice(0, 63),
         workspaceRoot: "/workspace",
         assignment: spec.assignment,
         environment: spec.environment,
@@ -971,7 +971,7 @@ describe("provider-backed Tool Tool Broker", () => {
 
     const advancedInventoryAssignment: SupervisorRuntimeAssignment = {
       containerId: "66666666-6666-4666-8666-666666666666",
-      containerName: `agent-dock-tool-${ACTIVATION_ID}`.slice(0, 63),
+      containerName: `pi-cloud-tool-${ACTIVATION_ID}`.slice(0, 63),
       supervisorId: assignment.supervisorId,
       bootId: assignment.bootId,
       sandboxId: assignment.sandboxId,
@@ -1015,7 +1015,7 @@ describe("provider-backed Tool Tool Broker", () => {
   });
 
   it("loads only the CubeSandbox deployment configuration", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "agent-dock-manager-config-"));
+    const directory = await mkdtemp(join(tmpdir(), "pi-cloud-manager-config-"));
     const tokenPath = join(directory, "manager-token");
     try {
       await writeFile(tokenPath, `${"t".repeat(48)}\n`, { mode: 0o600 });
@@ -1030,32 +1030,28 @@ describe("provider-backed Tool Tool Broker", () => {
       await writeFile(workspaceVolumeGatewayTokenPath, `${"m".repeat(48)}\n`, { mode: 0o600 });
       await chmod(workspaceVolumeGatewayTokenPath, 0o600);
       const databaseUrlPath = join(directory, "database-url");
-      await writeFile(
-        databaseUrlPath,
-        "postgresql://agent-dock:secret@postgres:5432/agent-dock\n",
-        {
-          mode: 0o600,
-        },
-      );
+      await writeFile(databaseUrlPath, "postgresql://pi-cloud:secret@postgres:5432/pi-cloud\n", {
+        mode: 0o600,
+      });
       await chmod(databaseUrlPath, 0o600);
       await expect(
         loadToolBrokerConfig({
           DATABASE_URL_FILE: databaseUrlPath,
-          AGENT_DOCK_SANDBOX_DOMAIN_ID: "sandbox-domain-0001",
-          AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL: "http://tool-broker-0:4300",
-          AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: tokenPath,
-          AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: terminalTokenPath,
-          AGENT_DOCK_IMAGE_REVISION: "development",
-          AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
-          AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
-          AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: "agent-dock-tool-v1",
-          AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: "10.20.30.40",
-          AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME: "https",
-          AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL: "http://workspace-volume-gateway:4500",
-          AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: workspaceVolumeGatewayTokenPath,
+          PI_CLOUD_SANDBOX_DOMAIN_ID: "sandbox-domain-0001",
+          PI_CLOUD_TOOL_BROKER_ADVERTISED_URL: "http://tool-broker-0:4300",
+          PI_CLOUD_TOOL_BROKER_TOKEN_FILE: tokenPath,
+          PI_CLOUD_WORKSPACE_TERMINAL_TOKEN_FILE: terminalTokenPath,
+          PI_CLOUD_IMAGE_REVISION: "development",
+          PI_CLOUD_CUBESANDBOX_API_URL: "https://cube-api.internal",
+          PI_CLOUD_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
+          PI_CLOUD_CUBESANDBOX_TEMPLATE_ID: "pi-cloud-tool-v1",
+          PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP: "10.20.30.40",
+          PI_CLOUD_CUBESANDBOX_PROXY_SCHEME: "https",
+          PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_URL: "http://workspace-volume-gateway:4500",
+          PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: workspaceVolumeGatewayTokenPath,
         }),
       ).resolves.toMatchObject({
-        databaseUrl: "postgresql://agent-dock:secret@postgres:5432/agent-dock",
+        databaseUrl: "postgresql://pi-cloud:secret@postgres:5432/pi-cloud",
         sandboxDomainId: "sandbox-domain-0001",
         advertisedBaseUrl: "http://tool-broker-0:4300/",
         maximumActiveSandboxes: 2,
@@ -1063,7 +1059,7 @@ describe("provider-backed Tool Tool Broker", () => {
         cubeSandbox: {
           apiUrl: "https://cube-api.internal",
           apiKey: "k".repeat(48),
-          templateId: "agent-dock-tool-v1",
+          templateId: "pi-cloud-tool-v1",
           proxyNodeIp: "10.20.30.40",
           proxyPort: 443,
           proxyScheme: "https",
@@ -1075,26 +1071,26 @@ describe("provider-backed Tool Tool Broker", () => {
       await expect(
         loadToolBrokerConfig({
           DATABASE_URL_FILE: databaseUrlPath,
-          AGENT_DOCK_SANDBOX_DOMAIN_ID: "sandbox-domain-0001",
-          AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL: "http://tool-broker-0:4300",
-          AGENT_DOCK_TOOL_BROKER_OWNERSHIP_LEASE_MS: "10000",
-          AGENT_DOCK_TOOL_BROKER_OWNERSHIP_HEARTBEAT_MS: "5000",
-          AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: tokenPath,
-          AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: terminalTokenPath,
-          AGENT_DOCK_IMAGE_REVISION: "development",
-          AGENT_DOCK_CUBESANDBOX_API_URL: "https://cube-api.internal",
-          AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
-          AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: "agent-dock-tool-v1",
-          AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: "10.20.30.40",
-          AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL: "http://workspace-volume-gateway:4500",
-          AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: workspaceVolumeGatewayTokenPath,
+          PI_CLOUD_SANDBOX_DOMAIN_ID: "sandbox-domain-0001",
+          PI_CLOUD_TOOL_BROKER_ADVERTISED_URL: "http://tool-broker-0:4300",
+          PI_CLOUD_TOOL_BROKER_OWNERSHIP_LEASE_MS: "10000",
+          PI_CLOUD_TOOL_BROKER_OWNERSHIP_HEARTBEAT_MS: "5000",
+          PI_CLOUD_TOOL_BROKER_TOKEN_FILE: tokenPath,
+          PI_CLOUD_WORKSPACE_TERMINAL_TOKEN_FILE: terminalTokenPath,
+          PI_CLOUD_IMAGE_REVISION: "development",
+          PI_CLOUD_CUBESANDBOX_API_URL: "https://cube-api.internal",
+          PI_CLOUD_CUBESANDBOX_API_KEY_FILE: cubeKeyPath,
+          PI_CLOUD_CUBESANDBOX_TEMPLATE_ID: "pi-cloud-tool-v1",
+          PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP: "10.20.30.40",
+          PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_URL: "http://workspace-volume-gateway:4500",
+          PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: workspaceVolumeGatewayTokenPath,
         }),
       ).rejects.toThrow("heartbeat must leave lease failure margin");
       await expect(
         loadToolBrokerConfig({
-          AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: tokenPath,
-          AGENT_DOCK_IMAGE_REVISION: "development",
-          AGENT_DOCK_REPOSITORY_IMPORT_NETWORK: "repository-egress",
+          PI_CLOUD_TOOL_BROKER_TOKEN_FILE: tokenPath,
+          PI_CLOUD_IMAGE_REVISION: "development",
+          PI_CLOUD_REPOSITORY_IMPORT_NETWORK: "repository-egress",
         }),
       ).rejects.toThrow("was removed");
     } finally {

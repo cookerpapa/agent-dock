@@ -8,7 +8,7 @@ Accepted on 2026-08-12; amended on 2026-08-13 by ADR-0101.
 
 A Sandbox Domain binds one Cube control plane, one persistent Workspace
 storage authority and a replicated Tool Broker. Cube owns generic microVM
-scheduling and lifecycle. AgentDock's Broker owns only application-specific
+scheduling and lifecycle. PiCloud's Broker owns only application-specific
 tenant authorization, lease/fence validation, operation identity, ambiguous
 Tool outcomes and Workspace revision coordination.
 

@@ -16,7 +16,7 @@ from UI deltas.
 
 1. Pi conversation state and Workspace state have separate settlement rules.
 2. A failed or cancelled started Run appends a hidden, model-visible
-   `agent-dock.run_interrupted` custom entry.
+   `pi-cloud.run_interrupted` custom entry.
 3. If a Worker disappears with an open operation, the next Worker recovers the
    accepted user entry and unresolved Tool results from the durable operation
    ledger before appending the interruption marker.

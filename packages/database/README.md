@@ -1,4 +1,4 @@
-# AgentDock database
+# PiCloud database
 
 This package owns the typed PostgreSQL schema and Kysely migrations for the
 control plane. It does not store Pi conversation history or provider credential
@@ -50,7 +50,7 @@ Important database-enforced invariants include:
 
 The application state machines remain responsible for transition order. A
 CHECK constraint can reject an unknown state, but it cannot replace the
-transactional transition functions in `@agent-dock/domain`.
+transactional transition functions in `@pi-cloud/domain`.
 
 ## Commands
 
@@ -70,7 +70,7 @@ The CLI never prints `DATABASE_URL`.
 
 ## Tests
 
-`npm test --workspace @agent-dock/database` compiles the Kysely migration with
+`npm test --workspace @pi-cloud/database` compiles the Kysely migration with
 the PostgreSQL dialect and executes the resulting DDL in an isolated in-memory
 PGlite PostgreSQL engine. The suite inserts both valid and invalid rows to prove
 the constraints, then applies the down migration. PGlite is test-only; the

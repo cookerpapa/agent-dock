@@ -1,10 +1,10 @@
-import type { Database } from "@agent-dock/database";
-import { transitionSandbox, type SandboxState } from "@agent-dock/domain";
+import type { Database } from "@pi-cloud/database";
+import { transitionSandbox, type SandboxState } from "@pi-cloud/domain";
 import {
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
   type SupervisorHeartbeatAckMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import type {
   TurnExecutionAcknowledgement,

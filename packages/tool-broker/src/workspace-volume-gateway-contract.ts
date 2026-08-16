@@ -2,7 +2,7 @@ import {
   MAX_WORKSPACE_PATCH_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
   type WorkspacePatch,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 
@@ -14,7 +14,7 @@ export const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{32,4096}$/;
 export const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 export const VOLUME_GENERATION_PATTERN = /^[0-9a-f]{64}$/;
 export const GIT_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
-export const VOLUME_METADATA_DIRECTORY = ".agent-dock-runtime";
+export const VOLUME_METADATA_DIRECTORY = ".pi-cloud-runtime";
 export const VOLUME_WORKSPACE_DIRECTORY = "workspace";
 export const VOLUME_GENERATION_FILE = "generation";
 export const VOLUME_GIT_DIRECTORY = "git";
@@ -72,7 +72,7 @@ export interface WorkspaceVolumeGateway {
     volumeRevision: string;
     gitBaselineCommit: string;
     workspacePatch: WorkspacePatch;
-    files: readonly import("@agent-dock/workspace-runtime").WorkspaceSnapshotFileMetadata[];
+    files: readonly import("@pi-cloud/workspace-runtime").WorkspaceSnapshotFileMetadata[];
   }>;
   materialize(
     input: WorkspaceVolumeGatewayMaterializeInput,
@@ -130,7 +130,7 @@ export function workspaceVolumeId(identity: { tenantId: string; workspaceId: str
   boundedOpaque(identity.tenantId, "tenantId");
   boundedOpaque(identity.workspaceId, "workspaceId");
   return `adw-${createHash("sha256")
-    .update("agent-dock.workspace-volume.v1\0")
+    .update("pi-cloud.workspace-volume.v1\0")
     .update(identity.tenantId)
     .update("\0")
     .update(identity.workspaceId)

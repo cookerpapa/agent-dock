@@ -268,7 +268,7 @@ export function createCubeEgressGateway(options: {
             `CONNECT ${authority} HTTP/1.1`,
             `Host: ${authority}`,
             "Proxy-Connection: keep-alive",
-            "User-Agent: AgentDock-Cube-Egress/1",
+            "User-Agent: PiCloud-Cube-Egress/1",
             "",
             "",
           ].join("\r\n"),
@@ -291,7 +291,7 @@ export function createCubeEgressGateway(options: {
           return;
         }
         clearTimeout(timeout);
-        client.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: AgentDock\r\n\r\n");
+        client.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: PiCloud\r\n\r\n");
         const remainder = responseHeader.subarray(boundary + 4);
         if (remainder.byteLength > 0) client.write(remainder);
         if (head.byteLength > 0) upstream.write(head);

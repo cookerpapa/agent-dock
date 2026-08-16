@@ -24,7 +24,7 @@ describe("Cube egress configuration poller", () => {
     let revision = 1;
     const observedTokens: string[] = [];
     const server = createServer((request, response) => {
-      observedTokens.push(String(request.headers["x-agent-dock-internal-token"] ?? ""));
+      observedTokens.push(String(request.headers["x-pi-cloud-internal-token"] ?? ""));
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({

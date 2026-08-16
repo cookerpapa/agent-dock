@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 
-import { AgentDockApi } from "../src/api.ts";
+import { PiCloudApi } from "../src/api.ts";
 
 const environment = {
   environmentVersionId: "90000000-0000-4000-8000-000000000001",
   versionNumber: 1,
-  profileKey: "agent-dock-fullstack",
+  profileKey: "pi-cloud-fullstack",
   profileVersion: "1",
   imageRevision: "sha-0123456789abcdef",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -45,7 +45,7 @@ describe("tenant-aware browser API", () => {
         headers: { "content-type": "application/json" },
       });
     });
-    const api = new AgentDockApi(fetchImplementation);
+    const api = new PiCloudApi(fetchImplementation);
     await expect(api.registerAccount("alice", "Alice", "long password 123")).resolves.toMatchObject(
       { identity },
     );
@@ -77,7 +77,7 @@ describe("tenant-aware browser API", () => {
         { status: 201, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation, token);
+    const api = new PiCloudApi(fetchImplementation, token);
     await expect(api.createProject("Pinned repository")).resolves.toMatchObject({
       source: { kind: "empty", status: "ready" },
     });
@@ -103,7 +103,7 @@ describe("tenant-aware browser API", () => {
         { status: 201, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation, token);
+    const api = new PiCloudApi(fetchImplementation, token);
     await expect(
       api.createProject("Candidate fixture", { kind: "sample_java" }),
     ).resolves.toMatchObject({
@@ -133,7 +133,7 @@ describe("tenant-aware browser API", () => {
         { status: 201, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation);
+    const api = new PiCloudApi(fetchImplementation);
     await expect(
       api.createSession(
         "20000000-0000-4000-8000-000000000001",
@@ -161,7 +161,7 @@ describe("tenant-aware browser API", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation);
+    const api = new PiCloudApi(fetchImplementation);
     await expect(api.deleteWorkspace(workspaceId, "delete-workspace-once")).resolves.toMatchObject({
       workspaceId,
       storageState: "pending",
@@ -177,8 +177,8 @@ describe("tenant-aware browser API", () => {
         return new Response(
           JSON.stringify({
             mode: "deterministic",
-            provider: "agent-dock-fake",
-            modelId: "agent-dock-fake",
+            provider: "pi-cloud-fake",
+            modelId: "pi-cloud-fake",
             configured: false,
             credentialVersion: 1,
             updatedAt: "2026-07-19T00:00:00.000Z",
@@ -205,7 +205,7 @@ describe("tenant-aware browser API", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation, token);
+    const api = new PiCloudApi(fetchImplementation, token);
     await expect(api.getModelConfiguration()).resolves.toMatchObject({
       mode: "deterministic",
     });
@@ -246,7 +246,7 @@ describe("tenant-aware browser API", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation, token);
+    const api = new PiCloudApi(fetchImplementation, token);
     await expect(api.getCubeProxyConfiguration()).resolves.toMatchObject({
       enabled: false,
       revision: 0,
@@ -272,7 +272,7 @@ describe("tenant-aware browser API", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation, token);
+    const api = new PiCloudApi(fetchImplementation, token);
 
     await expect(api.getIdentity()).resolves.toEqual({
       tenantId: "10000000-0000-4000-8000-000000000002",
@@ -308,7 +308,7 @@ describe("tenant-aware browser API", () => {
         { status: 201, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation);
+    const api = new PiCloudApi(fetchImplementation);
 
     await expect(api.registerTenant("team-alpha", "Alpha Owner")).resolves.toMatchObject({
       tenantSlug: "team-alpha",
@@ -377,7 +377,7 @@ describe("tenant-aware browser API", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation, token);
+    const api = new PiCloudApi(fetchImplementation, token);
 
     await expect(api.listConversations()).resolves.toMatchObject({
       conversations: [{ title: "Repair checkout", workspaceName: "Alpha repair" }],
@@ -454,7 +454,7 @@ describe("tenant-aware browser API", () => {
         { status: 201, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation);
+    const api = new PiCloudApi(fetchImplementation);
     await expect(api.getConversationTree(sessionId, "full")).resolves.toMatchObject({
       branches: [{ entries: [{ entryId }] }],
     });
@@ -474,7 +474,7 @@ describe("tenant-aware browser API", () => {
         headers: { "content-type": "application/octet-stream" },
       });
     });
-    const api = new AgentDockApi(fetchImplementation, token);
+    const api = new PiCloudApi(fetchImplementation, token);
 
     const file = await api.readWorkspaceFile(versionId, "src/Main.java");
     expect(new TextDecoder().decode(file.bytes)).toBe("class Main {}\n");
@@ -497,7 +497,7 @@ describe("tenant-aware browser API", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     });
-    const api = new AgentDockApi(fetchImplementation, token);
+    const api = new PiCloudApi(fetchImplementation, token);
 
     await expect(api.listWorkspaceFiles(versionId, cursor)).resolves.toEqual({
       versionId,

@@ -97,7 +97,7 @@ function baseUrl(value: string, allowInsecure: boolean): string {
     parsed.hash ||
     (parsed.pathname !== "/" && parsed.pathname !== "")
   ) {
-    throw new TypeError("AGENT_DOCK_CONTROL_PLANE_URL is invalid");
+    throw new TypeError("PI_CLOUD_CONTROL_PLANE_URL is invalid");
   }
   if (parsed.protocol === "http:" && !allowInsecure) {
     throw new TypeError("Plain HTTP control-plane access requires explicit opt-in");
@@ -118,7 +118,7 @@ function websocketUrl(controlPlaneBaseUrl: string, explicit: string | undefined)
     parsed.search ||
     parsed.hash
   ) {
-    throw new TypeError("AGENT_DOCK_SUPERVISOR_WEBSOCKET_URL is invalid");
+    throw new TypeError("PI_CLOUD_SUPERVISOR_WEBSOCKET_URL is invalid");
   }
   return parsed.toString();
 }
@@ -133,7 +133,7 @@ function modelGatewayBaseUrl(value: string): string {
     parsed.hash ||
     (parsed.pathname !== "/" && parsed.pathname !== "")
   ) {
-    throw new TypeError("AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL is invalid");
+    throw new TypeError("PI_CLOUD_MODEL_GATEWAY_ADVERTISED_URL is invalid");
   }
   return parsed.toString();
 }
@@ -231,82 +231,82 @@ export async function loadSupervisorHostConfig(
 ): Promise<SupervisorHostConfig> {
   const allowInsecureInternalHttp = booleanValue(
     environment,
-    "AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP",
+    "PI_CLOUD_ALLOW_INSECURE_INTERNAL_HTTP",
   );
-  const allowInlineSecrets = booleanValue(environment, "AGENT_DOCK_ALLOW_INLINE_SECRETS");
+  const allowInlineSecrets = booleanValue(environment, "PI_CLOUD_ALLOW_INLINE_SECRETS");
   const controlPlaneBaseUrl = baseUrl(
-    required(environment, "AGENT_DOCK_CONTROL_PLANE_URL"),
+    required(environment, "PI_CLOUD_CONTROL_PLANE_URL"),
     allowInsecureInternalHttp,
   );
-  const githubGatewayBaseUrl = environment.AGENT_DOCK_GITHUB_GATEWAY_URL;
+  const githubGatewayBaseUrl = environment.PI_CLOUD_GITHUB_GATEWAY_URL;
   const githubGatewayServiceToken = await optionalSecret(
     environment,
-    "AGENT_DOCK_GITHUB_GATEWAY_TOKEN",
+    "PI_CLOUD_GITHUB_GATEWAY_TOKEN",
     allowInlineSecrets,
   );
   if ((githubGatewayBaseUrl === undefined) !== (githubGatewayServiceToken === undefined)) {
     throw new TypeError("GitHub Gateway URL and service token must be configured together");
   }
-  const externalWorkerEventLog = booleanValue(environment, "AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG");
+  const externalWorkerEventLog = booleanValue(environment, "PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG");
   const workerEventIngest = externalWorkerEventLog
     ? {
         workerEventIngestBaseUrl: internalServiceBaseUrl(
-          required(environment, "AGENT_DOCK_WORKER_EVENT_INGEST_URL"),
+          required(environment, "PI_CLOUD_WORKER_EVENT_INGEST_URL"),
           allowInsecureInternalHttp,
-          "AGENT_DOCK_WORKER_EVENT_INGEST_URL",
+          "PI_CLOUD_WORKER_EVENT_INGEST_URL",
         ),
         workerEventIngestToken: await secret(
           environment,
-          "AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN",
+          "PI_CLOUD_WORKER_EVENT_INGEST_TOKEN",
           allowInlineSecrets,
         ),
       }
     : {};
   const toolBrokerRequestTimeoutMs = integerValue(
     environment,
-    "AGENT_DOCK_TOOL_BROKER_REQUEST_TIMEOUT_MS",
+    "PI_CLOUD_TOOL_BROKER_REQUEST_TIMEOUT_MS",
     MAX_REMOTE_TOOL_EXECUTION_MS + REMOTE_TOOL_TRANSPORT_MARGIN_MS,
     1_000,
     900_000,
   );
   const piTurnTimeoutMs = integerValue(
     environment,
-    "AGENT_DOCK_PI_TURN_TIMEOUT_MS",
+    "PI_CLOUD_PI_TURN_TIMEOUT_MS",
     10 * 60_000,
     1_000,
     15 * 60_000,
   );
   const modelGatewayCapabilityTtlMs = integerValue(
     environment,
-    "AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS",
+    "PI_CLOUD_MODEL_GATEWAY_CAPABILITY_TTL_MS",
     15 * 60_000,
     1_000,
     60 * 60_000,
   );
   const modelGatewayUpstreamRequestTimeoutMs = integerValue(
     environment,
-    "AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS",
+    "PI_CLOUD_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS",
     120_000,
     1_000,
     300_000,
   );
   const piModelRequestTimeoutMs = integerValue(
     environment,
-    "AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS",
+    "PI_CLOUD_PI_MODEL_REQUEST_TIMEOUT_MS",
     150_000,
     1_000,
     300_000,
   );
   const repositoryImportLeaseMs = integerValue(
     environment,
-    "AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS",
+    "PI_CLOUD_REPOSITORY_IMPORT_LEASE_MS",
     240_000,
     1_000,
     10 * 60_000,
   );
   const repositoryImportWaitMs = integerValue(
     environment,
-    "AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS",
+    "PI_CLOUD_REPOSITORY_IMPORT_WAIT_MS",
     300_000,
     1_000,
     15 * 60_000,
@@ -334,34 +334,34 @@ export async function loadSupervisorHostConfig(
     databaseUrl;
   return {
     supervisorId: bounded(
-      required(environment, "AGENT_DOCK_SUPERVISOR_ID"),
-      "AGENT_DOCK_SUPERVISOR_ID",
+      required(environment, "PI_CLOUD_SUPERVISOR_ID"),
+      "PI_CLOUD_SUPERVISOR_ID",
       256,
     ),
     controlPlaneBaseUrl,
     supervisorWebSocketUrl: websocketUrl(
       controlPlaneBaseUrl,
-      environment.AGENT_DOCK_SUPERVISOR_WEBSOCKET_URL,
+      environment.PI_CLOUD_SUPERVISOR_WEBSOCKET_URL,
     ),
     allowInsecureInternalHttp,
     enrollmentToken: await secret(
       environment,
-      "AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN",
+      "PI_CLOUD_SUPERVISOR_ENROLLMENT_TOKEN",
       allowInlineSecrets,
     ),
     managementToken: await secret(
       environment,
-      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN",
+      "PI_CLOUD_SUPERVISOR_MANAGEMENT_TOKEN",
       allowInlineSecrets,
     ),
     toolBrokerServiceToken: await secret(
       environment,
-      "AGENT_DOCK_TOOL_BROKER_TOKEN",
+      "PI_CLOUD_TOOL_BROKER_TOKEN",
       allowInlineSecrets,
     ),
     modelCredentialMasterKey: await secret(
       environment,
-      "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
+      "PI_CLOUD_MODEL_CREDENTIAL_MASTER_KEY",
       allowInlineSecrets,
     ),
     databaseUrl,
@@ -369,66 +369,66 @@ export async function loadSupervisorHostConfig(
     externalWorkerEventLog,
     ...workerEventIngest,
     managementHost: bounded(
-      environment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST ?? "127.0.0.1",
-      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST",
+      environment.PI_CLOUD_SUPERVISOR_MANAGEMENT_HOST ?? "127.0.0.1",
+      "PI_CLOUD_SUPERVISOR_MANAGEMENT_HOST",
       256,
     ),
     managementPort: integerValue(
       environment,
-      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT",
+      "PI_CLOUD_SUPERVISOR_MANAGEMENT_PORT",
       4100,
       1,
       65_535,
     ),
     managementAdvertisedBaseUrl: internalServiceBaseUrl(
-      required(environment, "AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL"),
+      required(environment, "PI_CLOUD_SUPERVISOR_MANAGEMENT_ADVERTISED_URL"),
       allowInsecureInternalHttp,
-      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL",
+      "PI_CLOUD_SUPERVISOR_MANAGEMENT_ADVERTISED_URL",
     ),
-    maxConcurrentSessions: integerValue(environment, "AGENT_DOCK_SUPERVISOR_CAPACITY", 4, 1, 16),
+    maxConcurrentSessions: integerValue(environment, "PI_CLOUD_SUPERVISOR_CAPACITY", 4, 1, 16),
     toolBrokerBaseUrls: internalServiceBaseUrls(
-      required(environment, "AGENT_DOCK_TOOL_BROKER_URLS"),
+      required(environment, "PI_CLOUD_TOOL_BROKER_URLS"),
       allowInsecureInternalHttp,
-      "AGENT_DOCK_TOOL_BROKER_URLS",
+      "PI_CLOUD_TOOL_BROKER_URLS",
     ),
     toolBrokerRequestTimeoutMs,
-    trustedWorkspaceDirectory: required(environment, "AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY"),
-    bootStateDirectory: required(environment, "AGENT_DOCK_BOOT_STATE_DIRECTORY"),
-    eventSpoolDirectory: required(environment, "AGENT_DOCK_EVENT_SPOOL_DIRECTORY"),
+    trustedWorkspaceDirectory: required(environment, "PI_CLOUD_TRUSTED_WORKSPACE_DIRECTORY"),
+    bootStateDirectory: required(environment, "PI_CLOUD_BOOT_STATE_DIRECTORY"),
+    eventSpoolDirectory: required(environment, "PI_CLOUD_EVENT_SPOOL_DIRECTORY"),
     checkpointReadCacheTtlMs: integerValue(
       environment,
-      "AGENT_DOCK_CHECKPOINT_READ_CACHE_TTL_MS",
+      "PI_CLOUD_CHECKPOINT_READ_CACHE_TTL_MS",
       10 * 60_000,
       1_000,
       60 * 60_000,
     ),
     checkpointReadCacheMaximumEntries: integerValue(
       environment,
-      "AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES",
+      "PI_CLOUD_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES",
       512,
       1,
       16_384,
     ),
     checkpointReadCacheMaximumBytes: integerValue(
       environment,
-      "AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_BYTES",
+      "PI_CLOUD_CHECKPOINT_READ_CACHE_MAXIMUM_BYTES",
       32 * 1_024 * 1_024,
       1_024,
       512 * 1_024 * 1_024,
     ),
     modelGatewayHost: bounded(
-      environment.AGENT_DOCK_MODEL_GATEWAY_HOST ?? "127.0.0.1",
-      "AGENT_DOCK_MODEL_GATEWAY_HOST",
+      environment.PI_CLOUD_MODEL_GATEWAY_HOST ?? "127.0.0.1",
+      "PI_CLOUD_MODEL_GATEWAY_HOST",
       256,
     ),
-    modelGatewayPort: integerValue(environment, "AGENT_DOCK_MODEL_GATEWAY_PORT", 4_200, 1, 65_535),
+    modelGatewayPort: integerValue(environment, "PI_CLOUD_MODEL_GATEWAY_PORT", 4_200, 1, 65_535),
     modelGatewayAdvertisedBaseUrl: modelGatewayBaseUrl(
-      required(environment, "AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL"),
+      required(environment, "PI_CLOUD_MODEL_GATEWAY_ADVERTISED_URL"),
     ),
     modelGatewayCapabilityTtlMs,
     modelGatewayMaximumRequestsPerTurn: integerValue(
       environment,
-      "AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN",
+      "PI_CLOUD_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN",
       128,
       1,
       256,
@@ -444,7 +444,7 @@ export async function loadSupervisorHostConfig(
           githubGatewayBaseUrl: internalServiceBaseUrl(
             githubGatewayBaseUrl,
             allowInsecureInternalHttp,
-            "AGENT_DOCK_GITHUB_GATEWAY_URL",
+            "PI_CLOUD_GITHUB_GATEWAY_URL",
           ),
           githubGatewayServiceToken,
         }),

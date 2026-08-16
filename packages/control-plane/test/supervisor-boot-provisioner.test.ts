@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import { createHash, randomBytes } from "node:crypto";
 import Fastify from "fastify";
 import type { Kysely } from "kysely";

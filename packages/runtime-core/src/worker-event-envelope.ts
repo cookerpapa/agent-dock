@@ -1,4 +1,4 @@
-import { parseSupervisorToControlMessage, type EventPublishMessage } from "@agent-dock/protocol";
+import { parseSupervisorToControlMessage, type EventPublishMessage } from "@pi-cloud/protocol";
 
 export type WorkerEventLogBatch = Readonly<{
   tenantId: string;

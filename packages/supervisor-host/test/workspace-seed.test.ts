@@ -3,15 +3,15 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import {
   SandboxCheckpointStoreError,
   type CheckpointObjectStore,
-} from "@agent-dock/runtime-core/checkpoint-runtime";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+} from "@pi-cloud/runtime-core/checkpoint-runtime";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   type ExecuteTurnCommandMessage,
   type GitHubRepositorySource,
-} from "@agent-dock/protocol";
-import { createWorkspaceSnapshot, parseWorkspaceSnapshot } from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/protocol";
+import { createWorkspaceSnapshot, parseWorkspaceSnapshot } from "@pi-cloud/workspace-runtime";
 import type { Kysely } from "kysely";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostgresWorkspaceSeedResolver, WorkspaceSeedError } from "../src/index.ts";
@@ -41,7 +41,7 @@ const SOURCE: GitHubRepositorySource = {
   commitSha: "b".repeat(40),
 };
 const SNAPSHOT = Buffer.from(
-  `${JSON.stringify({ format: "agent-dock.workspace-manifest.v1", files: [] })}\n`,
+  `${JSON.stringify({ format: "pi-cloud.workspace-manifest.v1", files: [] })}\n`,
 );
 
 class MemoryObjectStore implements CheckpointObjectStore {
@@ -101,8 +101,8 @@ function command(tenantId: string = IDS.tenant): ExecuteTurnCommandMessage {
       sandboxRetention: "ephemeral",
       model: {
         profileId: IDS.profile,
-        provider: "agent-dock-fake",
-        modelId: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        modelId: "pi-cloud-fake",
         thinkingLevel: "off",
         credentialBindingId: IDS.credential,
         credentialBindingVersion: 1,
@@ -110,7 +110,7 @@ function command(tenantId: string = IDS.tenant): ExecuteTurnCommandMessage {
       environment: {
         environmentVersionId: IDS.environment,
         versionNumber: 1,
-        profileKey: "agent-dock-fullstack",
+        profileKey: "pi-cloud-fullstack",
         profileVersion: "1",
         imageRevision: "development",
         specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -176,7 +176,7 @@ async function fixture(): Promise<Fixture> {
     .values({
       id: IDS.credential,
       tenant_id: IDS.tenant,
-      provider: "agent-dock-fake",
+      provider: "pi-cloud-fake",
       kind: "brokered",
       secret_ref: "fixture",
       version: 1,
@@ -189,8 +189,8 @@ async function fixture(): Promise<Fixture> {
       id: IDS.profile,
       tenant_id: IDS.tenant,
       name: "default",
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       default_thinking_level: "off",
       allowed_thinking_levels: ["off"],
       credential_binding_id: IDS.credential,
@@ -204,7 +204,7 @@ async function fixture(): Promise<Fixture> {
       tenant_id: IDS.tenant,
       project_id: IDS.project,
       version_number: 1,
-      profile_key: "agent-dock-fullstack",
+      profile_key: "pi-cloud-fullstack",
       profile_version: "1",
       image_revision: "development",
       spec_sha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -234,8 +234,8 @@ async function fixture(): Promise<Fixture> {
       input_kind: "prompt",
       input_text: "Inspect the imported repository",
       model_profile_id: IDS.profile,
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       thinking_level: "off",
       credential_binding_id: IDS.credential,
       credential_binding_version: 1,

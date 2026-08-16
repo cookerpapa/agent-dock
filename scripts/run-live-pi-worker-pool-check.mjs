@@ -7,19 +7,19 @@ import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { format } from "prettier";
-import { AgentDockApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
+import { PiCloudApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-if (process.env.AGENT_DOCK_LIVE_WORKER_POOL_CHECK !== "1") {
+if (process.env.PI_CLOUD_LIVE_WORKER_POOL_CHECK !== "1") {
   throw new Error(
-    "Set AGENT_DOCK_LIVE_WORKER_POOL_CHECK=1 to acknowledge real model usage and a controlled Worker restart",
+    "Set PI_CLOUD_LIVE_WORKER_POOL_CHECK=1 to acknowledge real model usage and a controlled Worker restart",
   );
 }
 
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 
 async function readPrivate(path, maximumBytes, label) {
@@ -50,8 +50,8 @@ const environment = Object.fromEntries(
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
 );
-const bindAddress = environment.AGENT_DOCK_HTTP_BIND_ADDRESS;
-const port = environment.AGENT_DOCK_HTTP_PORT;
+const bindAddress = environment.PI_CLOUD_HTTP_BIND_ADDRESS;
+const port = environment.PI_CLOUD_HTTP_PORT;
 if (bindAddress === undefined || port === undefined) {
   throw new Error("Production HTTP endpoint configuration is missing");
 }
@@ -63,14 +63,14 @@ const token = (
   await readPrivate(resolve(runtimeDirectory, "secrets/api-token"), 4_096, "Production API token")
 ).trim();
 const fetchFromProduction = (input, init) => fetch(new URL(String(input), baseUrl), init);
-const api = new AgentDockApi(fetchFromProduction, token);
-const workerDeployment = environment.AGENT_DOCK_PI_WORKER_DEPLOYMENT ?? "compose";
+const api = new PiCloudApi(fetchFromProduction, token);
+const workerDeployment = environment.PI_CLOUD_PI_WORKER_DEPLOYMENT ?? "compose";
 if (workerDeployment !== "compose" && workerDeployment !== "kubernetes") {
   throw new Error("Production Pi Worker deployment mode is invalid");
 }
 const kubernetesKubeconfig = resolve(runtimeDirectory, "kubernetes/pi-worker-local.kubeconfig");
-const kubernetesNamespace = "agent-dock-workers";
-const kubernetesStatefulSet = "agent-dock-pi-worker-local-v1";
+const kubernetesNamespace = "pi-cloud-workers";
+const kubernetesStatefulSet = "pi-cloud-pi-worker-local-v1";
 const kubernetesScaleDownWorker = `${kubernetesStatefulSet}-1`;
 
 function capture(command, args, timeoutMs = 120_000) {
@@ -112,9 +112,9 @@ async function psql(query) {
     "postgres",
     "psql",
     "--username",
-    "agent_dock",
+    "pi_cloud",
     "--dbname",
-    "agent_dock",
+    "pi_cloud",
     "--no-align",
     "--tuples-only",
     "--set",

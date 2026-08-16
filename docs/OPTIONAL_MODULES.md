@@ -1,6 +1,6 @@
 # Optional deployment modules
 
-AgentDock's default deployment is the shortest production path required for
+PiCloud's default deployment is the shortest production path required for
 the conversation product:
 
 ```text

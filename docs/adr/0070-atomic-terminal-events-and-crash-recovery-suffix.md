@@ -46,13 +46,13 @@ the Control Plane can construct the canonical completion event.
 
 ### Hard-crash recovery
 
-Pi JSONL remains the conversation authority. AgentDock does not introduce a
+Pi JSONL remains the conversation authority. PiCloud does not introduce a
 second mutable `messages[]` representation.
 
 Each loaded Pi checkpoint is associated with the sequence of its canonical
 terminal event. When later terminal conversation projections exist beyond that
 sequence without a newer Pi checkpoint, the checkpoint loader returns a
-bounded AgentDock-owned semantic recovery suffix containing:
+bounded PiCloud-owned semantic recovery suffix containing:
 
 - the accepted user prompt;
 - publicly visible assistant text;

@@ -31,7 +31,7 @@ function host(value: string | undefined): string {
     value.length > 253 ||
     /[\u0000-\u0020\u007f/?#@:[\]]/.test(value)
   ) {
-    throw new TypeError("AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST is invalid");
+    throw new TypeError("PI_CLOUD_FIXED_RELAY_UPSTREAM_HOST is invalid");
   }
   return value;
 }
@@ -39,18 +39,18 @@ function host(value: string | undefined): string {
 export function loadFixedTcpRelayOptions(
   environment: NodeJS.ProcessEnv = process.env,
 ): FixedTcpRelayOptions {
-  const listenHost = environment.AGENT_DOCK_FIXED_RELAY_LISTEN_HOST ?? "0.0.0.0";
+  const listenHost = environment.PI_CLOUD_FIXED_RELAY_LISTEN_HOST ?? "0.0.0.0";
   if (listenHost !== "0.0.0.0" && listenHost !== "127.0.0.1") {
-    throw new TypeError("AGENT_DOCK_FIXED_RELAY_LISTEN_HOST is invalid");
+    throw new TypeError("PI_CLOUD_FIXED_RELAY_LISTEN_HOST is invalid");
   }
   return {
     listenHost,
-    listenPort: integer(environment.AGENT_DOCK_FIXED_RELAY_LISTEN_PORT, 8_080, 1, 65_535),
-    upstreamHost: host(environment.AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST),
-    upstreamPort: integer(environment.AGENT_DOCK_FIXED_RELAY_UPSTREAM_PORT, 8_080, 1, 65_535),
-    maximumConnections: integer(environment.AGENT_DOCK_FIXED_RELAY_MAXIMUM_CONNECTIONS, 64, 1, 256),
+    listenPort: integer(environment.PI_CLOUD_FIXED_RELAY_LISTEN_PORT, 8_080, 1, 65_535),
+    upstreamHost: host(environment.PI_CLOUD_FIXED_RELAY_UPSTREAM_HOST),
+    upstreamPort: integer(environment.PI_CLOUD_FIXED_RELAY_UPSTREAM_PORT, 8_080, 1, 65_535),
+    maximumConnections: integer(environment.PI_CLOUD_FIXED_RELAY_MAXIMUM_CONNECTIONS, 64, 1, 256),
     idleTimeoutMs: integer(
-      environment.AGENT_DOCK_FIXED_RELAY_IDLE_TIMEOUT_MS,
+      environment.PI_CLOUD_FIXED_RELAY_IDLE_TIMEOUT_MS,
       5 * 60_000,
       1_000,
       60 * 60_000,

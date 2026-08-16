@@ -335,8 +335,8 @@ describe("control-plane public API schemas", () => {
   });
 
   it("normalizes project names and preserves prompt text", () => {
-    expect(parseCreateProjectRequest({ name: "  AgentDock  " })).toEqual({
-      name: "AgentDock",
+    expect(parseCreateProjectRequest({ name: "  PiCloud  " })).toEqual({
+      name: "PiCloud",
       source: { kind: "empty" },
     });
     expect(

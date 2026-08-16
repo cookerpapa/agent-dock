@@ -1,9 +1,9 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   parseLiveTurnSnapshotResource,
-  type AgentDockEvent,
+  type PiCloudEvent,
   type LiveTurnSnapshotResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { Kysely } from "kysely";
 import { projectConversationTurnTranscript } from "./conversation-turn-projection.ts";
 import type { LiveSessionEventStore } from "./live-session-event-store.ts";
@@ -97,7 +97,7 @@ export class ValkeyLiveTurnSnapshotSource implements LiveTurnSnapshotSource {
       return { sessionId, replayAfterSequence: rangeStart, turn: null };
     }
 
-    const turnEvents: AgentDockEvent[] = [];
+    const turnEvents: PiCloudEvent[] = [];
     let sequence = rangeStart;
     while (sequence < liveThrough) {
       const page = await this.#liveEvents.readPage(tenantId, sessionId, sequence, liveThrough, 500);

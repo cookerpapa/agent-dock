@@ -1,4 +1,4 @@
-name: agent-dock-production
+name: pi-cloud-production
 
 x-logging: &bounded-logging
   driver: json-file
@@ -7,8 +7,8 @@ x-logging: &bounded-logging
     max-size: 10m
 
 x-application-build-args: &application-build-args
-  AGENT_DOCK_VERSION: ${AGENT_DOCK_IMAGE_VERSION:-production}
-  AGENT_DOCK_REVISION: ${AGENT_DOCK_IMAGE_REVISION:-unknown}
+  PI_CLOUD_VERSION: ${PI_CLOUD_IMAGE_VERSION:-production}
+  PI_CLOUD_REVISION: ${PI_CLOUD_IMAGE_REVISION:-unknown}
   HTTP_PROXY: ${HTTP_PROXY:-}
   HTTPS_PROXY: ${HTTPS_PROXY:-}
   NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}
@@ -23,105 +23,105 @@ x-application-security: &application-security
 
 x-control-plane-runtime-environment: &control-plane-runtime-environment
   NODE_ENV: production
-  AGENT_DOCK_IMAGE_REVISION: ${AGENT_DOCK_IMAGE_REVISION:-unknown}
+  PI_CLOUD_IMAGE_REVISION: ${PI_CLOUD_IMAGE_REVISION:-unknown}
   HOST: 0.0.0.0
   PORT: "3000"
-  DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-  AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
-  AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
-  AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
-  AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE: /run/agent-dock-secrets/cube-egress-config-token
-  AGENT_DOCK_TOOL_BROKER_URLS: http://tool-broker:4300
-  AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
-  AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: /run/agent-dock-secrets/workspace-terminal-token
-  AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
-  AGENT_DOCK_SUPERVISOR_ID_PREFIX: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}
-  AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-1}
-  AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: ${AGENT_DOCK_TENANT_ID:?run npm run production:init first}
-  AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID: ${AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID:-}
-  AGENT_DOCK_WEB_SESSION_COOKIE_SECURE: ${AGENT_DOCK_WEB_SESSION_COOKIE_SECURE:-false}
-  AGENT_DOCK_WEB_SESSION_TTL_MS: ${AGENT_DOCK_WEB_SESSION_TTL_MS:-2592000000}
-  AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: ${AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES:-http://{supervisorId}:4100}
-  AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG: "true"
-  AGENT_DOCK_WORKER_EVENT_INGEST_URL: http://event-gateway:4600
-  AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE: /run/agent-dock-secrets/worker-event-ingest-token
-  AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED: ${AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED:-true}
-  AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: ${AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS:-32}
-  AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS:-10}
-  AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS:-100}
-  AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS:-10}
-  AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS:-2}
-  AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES: ${AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES:-2}
-  AGENT_DOCK_METRICS_HOST: 0.0.0.0
-  AGENT_DOCK_METRICS_PORT: "9464"
-  AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
-  AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}
+  DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
+  PI_CLOUD_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/pi-cloud-secrets/supervisor-enrollment-token
+  PI_CLOUD_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/pi-cloud-secrets/supervisor-management-token
+  PI_CLOUD_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/pi-cloud-secrets/model-credential-master-key
+  PI_CLOUD_CUBE_EGRESS_CONFIG_TOKEN_FILE: /run/pi-cloud-secrets/cube-egress-config-token
+  PI_CLOUD_TOOL_BROKER_URLS: http://tool-broker:4300
+  PI_CLOUD_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/pi-cloud-secrets/sandbox-materializer-token
+  PI_CLOUD_WORKSPACE_TERMINAL_TOKEN_FILE: /run/pi-cloud-secrets/workspace-terminal-token
+  PI_CLOUD_ALLOW_INSECURE_INTERNAL_HTTP: "true"
+  PI_CLOUD_SUPERVISOR_ID_PREFIX: ${PI_CLOUD_SUPERVISOR_ID_PREFIX:-pi-cloud-worker-}
+  PI_CLOUD_SUPERVISOR_MAXIMUM_CAPACITY: ${PI_CLOUD_SUPERVISOR_CAPACITY:-1}
+  PI_CLOUD_PLATFORM_MODEL_SOURCE_TENANT_ID: ${PI_CLOUD_TENANT_ID:?run npm run production:init first}
+  PI_CLOUD_PLATFORM_OPERATOR_TENANT_ID: ${PI_CLOUD_PLATFORM_OPERATOR_TENANT_ID:-}
+  PI_CLOUD_WEB_SESSION_COOKIE_SECURE: ${PI_CLOUD_WEB_SESSION_COOKIE_SECURE:-false}
+  PI_CLOUD_WEB_SESSION_TTL_MS: ${PI_CLOUD_WEB_SESSION_TTL_MS:-2592000000}
+  PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: ${PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES:-http://{supervisorId}:4100}
+  PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG: "true"
+  PI_CLOUD_WORKER_EVENT_INGEST_URL: http://event-gateway:4600
+  PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE: /run/pi-cloud-secrets/worker-event-ingest-token
+  PI_CLOUD_PUBLIC_REGISTRATION_ENABLED: ${PI_CLOUD_PUBLIC_REGISTRATION_ENABLED:-true}
+  PI_CLOUD_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: ${PI_CLOUD_PUBLIC_REGISTRATION_MAXIMUM_TENANTS:-32}
+  PI_CLOUD_PUBLIC_TENANT_MAXIMUM_PROJECTS: ${PI_CLOUD_PUBLIC_TENANT_MAXIMUM_PROJECTS:-10}
+  PI_CLOUD_PUBLIC_TENANT_MAXIMUM_SESSIONS: ${PI_CLOUD_PUBLIC_TENANT_MAXIMUM_SESSIONS:-100}
+  PI_CLOUD_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS: ${PI_CLOUD_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS:-10}
+  PI_CLOUD_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS: ${PI_CLOUD_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS:-2}
+  PI_CLOUD_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES: ${PI_CLOUD_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES:-2}
+  PI_CLOUD_METRICS_HOST: 0.0.0.0
+  PI_CLOUD_METRICS_PORT: "9464"
+  PI_CLOUD_METRICS_TOKEN_FILE: /run/pi-cloud-secrets/metrics-token
+  PI_CLOUD_OTLP_TRACES_ENDPOINT: ${PI_CLOUD_OTLP_TRACES_ENDPOINT:-}
 
 x-bootstrap-environment: &bootstrap-environment
   NODE_ENV: production
-  DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-  AGENT_DOCK_API_TOKEN_FILE: /run/agent-dock-secrets/api-token
-  AGENT_DOCK_TENANT_ID: ${AGENT_DOCK_TENANT_ID:?run npm run production:init first}
-  AGENT_DOCK_TENANT_SLUG: ${AGENT_DOCK_TENANT_SLUG:-agent-dock}
-  AGENT_DOCK_USER_ID: ${AGENT_DOCK_USER_ID:?run npm run production:init first}
-  AGENT_DOCK_API_CREDENTIAL_ID: ${AGENT_DOCK_API_CREDENTIAL_ID:?run npm run production:init first}
-  AGENT_DOCK_CREDENTIAL_BINDING_ID: ${AGENT_DOCK_CREDENTIAL_BINDING_ID:?run npm run production:init first}
-  AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID: ${AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID:?run npm run production:init first}
-  AGENT_DOCK_MODEL_PROFILE_NAME: deterministic-java-repair
-  AGENT_DOCK_TENANT_MAXIMUM_PROJECTS: ${AGENT_DOCK_TENANT_MAXIMUM_PROJECTS:-100}
-  AGENT_DOCK_TENANT_MAXIMUM_SESSIONS: ${AGENT_DOCK_TENANT_MAXIMUM_SESSIONS:-1000}
-  AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS: ${AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS:-100}
-  AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS: ${AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS:-2}
-  AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES: ${AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES:-64}
-  AGENT_DOCK_SANDBOX_DOMAINS_JSON: >-
+  DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
+  PI_CLOUD_API_TOKEN_FILE: /run/pi-cloud-secrets/api-token
+  PI_CLOUD_TENANT_ID: ${PI_CLOUD_TENANT_ID:?run npm run production:init first}
+  PI_CLOUD_TENANT_SLUG: ${PI_CLOUD_TENANT_SLUG:-pi-cloud}
+  PI_CLOUD_USER_ID: ${PI_CLOUD_USER_ID:?run npm run production:init first}
+  PI_CLOUD_API_CREDENTIAL_ID: ${PI_CLOUD_API_CREDENTIAL_ID:?run npm run production:init first}
+  PI_CLOUD_CREDENTIAL_BINDING_ID: ${PI_CLOUD_CREDENTIAL_BINDING_ID:?run npm run production:init first}
+  PI_CLOUD_DEFAULT_MODEL_PROFILE_ID: ${PI_CLOUD_DEFAULT_MODEL_PROFILE_ID:?run npm run production:init first}
+  PI_CLOUD_MODEL_PROFILE_NAME: deterministic-java-repair
+  PI_CLOUD_TENANT_MAXIMUM_PROJECTS: ${PI_CLOUD_TENANT_MAXIMUM_PROJECTS:-100}
+  PI_CLOUD_TENANT_MAXIMUM_SESSIONS: ${PI_CLOUD_TENANT_MAXIMUM_SESSIONS:-1000}
+  PI_CLOUD_TENANT_MAXIMUM_UNSETTLED_TURNS: ${PI_CLOUD_TENANT_MAXIMUM_UNSETTLED_TURNS:-100}
+  PI_CLOUD_TENANT_MAXIMUM_CONCURRENT_TURNS: ${PI_CLOUD_TENANT_MAXIMUM_CONCURRENT_TURNS:-2}
+  PI_CLOUD_TENANT_MAXIMUM_ACTIVE_SANDBOXES: ${PI_CLOUD_TENANT_MAXIMUM_ACTIVE_SANDBOXES:-64}
+  PI_CLOUD_SANDBOX_DOMAINS_JSON: >-
     [{"id":"sandbox-domain-0001","displayName":"Primary sandbox domain","state":"active","toolBrokerBaseUrl":"http://tool-broker:4300","workspaceStorageKey":"workspace-domain-0001","maximumActiveSandboxes":1024}]
 
 x-control-plane-runtime-secrets: &control-plane-runtime-secrets
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
-    target: /run/agent-dock-secrets/database-url
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+    target: /run/pi-cloud-secrets/database-url
     read_only: true
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-enrollment-token
-    target: /run/agent-dock-secrets/supervisor-enrollment-token
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-enrollment-token
+    target: /run/pi-cloud-secrets/supervisor-enrollment-token
     read_only: true
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-management-token
-    target: /run/agent-dock-secrets/supervisor-management-token
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-management-token
+    target: /run/pi-cloud-secrets/supervisor-management-token
     read_only: true
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/model-credential-master-key
-    target: /run/agent-dock-secrets/model-credential-master-key
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/model-credential-master-key
+    target: /run/pi-cloud-secrets/model-credential-master-key
     read_only: true
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/cube-egress-config-token
-    target: /run/agent-dock-secrets/cube-egress-config-token
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/cube-egress-config-token
+    target: /run/pi-cloud-secrets/cube-egress-config-token
     read_only: true
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-materializer-token
-    target: /run/agent-dock-secrets/sandbox-materializer-token
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-materializer-token
+    target: /run/pi-cloud-secrets/sandbox-materializer-token
     read_only: true
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-terminal-token
-    target: /run/agent-dock-secrets/workspace-terminal-token
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-terminal-token
+    target: /run/pi-cloud-secrets/workspace-terminal-token
     read_only: true
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
-    target: /run/agent-dock-secrets/metrics-token
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+    target: /run/pi-cloud-secrets/metrics-token
     read_only: true
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
-    target: /run/agent-dock-secrets/worker-event-ingest-token
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
+    target: /run/pi-cloud-secrets/worker-event-ingest-token
     read_only: true
 
 x-bootstrap-secrets: &bootstrap-secrets
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
-    target: /run/agent-dock-secrets/database-url
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+    target: /run/pi-cloud-secrets/database-url
     read_only: true
   - type: bind
-    source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/api-token
-    target: /run/agent-dock-secrets/api-token
+    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/api-token
+    target: /run/pi-cloud-secrets/api-token
     read_only: true
 
 services:
@@ -129,19 +129,19 @@ services:
     image: postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
     restart: unless-stopped
     environment:
-      POSTGRES_DB: agent_dock
-      POSTGRES_USER: agent_dock
-      POSTGRES_PASSWORD_FILE: /run/agent-dock-secrets/postgres-password
+      POSTGRES_DB: pi_cloud
+      POSTGRES_USER: pi_cloud
+      POSTGRES_PASSWORD_FILE: /run/pi-cloud-secrets/postgres-password
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/postgres-password
-        target: /run/agent-dock-secrets/postgres-password
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/postgres-password
+        target: /run/pi-cloud-secrets/postgres-password
         read_only: true
     networks:
       - database
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U agent_dock -d agent_dock"]
+      test: [CMD-SHELL, "pg_isready -U pi_cloud -d pi_cloud"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -207,21 +207,21 @@ services:
     entrypoint: [/bin/bash, -eu, -o, pipefail, -c]
     command:
       - |
-        retention_ms=${AGENT_DOCK_WORKER_EVENT_RETENTION_MS:-86400000}
+        retention_ms=${PI_CLOUD_WORKER_EVENT_RETENTION_MS:-86400000}
         if [[ ! "$${retention_ms}" =~ ^[0-9]+$ ]] || (( retention_ms <= 3600000 )); then
-          echo "AGENT_DOCK_WORKER_EVENT_RETENTION_MS must exceed the one-hour live replay window" >&2
+          echo "PI_CLOUD_WORKER_EVENT_RETENTION_MS must exceed the one-hour live replay window" >&2
           exit 1
         fi
         /opt/kafka/bin/kafka-topics.sh \
           --bootstrap-server kafka:9092 \
           --create --if-not-exists \
-          --topic agent-dock-worker-events-v1 \
+          --topic pi-cloud-worker-events-v1 \
           --partitions 24 \
           --replication-factor 1 \
           --config cleanup.policy=delete \
           --config retention.ms="$${retention_ms}" \
           --config min.insync.replicas=1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic agent-dock-worker-events-v1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic pi-cloud-worker-events-v1
     networks:
       - event-log
     read_only: true
@@ -247,7 +247,7 @@ services:
         --appendfsync,
         always,
         --maxmemory,
-        "${AGENT_DOCK_LIVE_EVENT_MAXMEMORY:-320mb}",
+        "${PI_CLOUD_LIVE_EVENT_MAXMEMORY:-320mb}",
         --maxmemory-policy,
         noeviction,
       ]
@@ -276,7 +276,7 @@ services:
     logging: *bounded-logging
 
   database-bootstrap:
-    image: agent-dock/control-plane:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/control-plane:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/control-plane/Dockerfile
@@ -287,21 +287,21 @@ services:
       postgres:
         condition: service_healthy
     command: [/app/packages/control-plane/src/bootstrap-main.ts]
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     environment: *bootstrap-environment
     volumes: *bootstrap-secrets
     networks:
       - database
     <<: *application-security
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 128
     mem_limit: 384m
     cpus: 1.0
     logging: *bounded-logging
 
   control-plane:
-    image: agent-dock/control-plane:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/control-plane:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/control-plane/Dockerfile
@@ -314,7 +314,7 @@ services:
       event-gateway:
         condition: service_healthy
     environment: *control-plane-runtime-environment
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     volumes: *control-plane-runtime-secrets
     networks:
       - api
@@ -336,7 +336,7 @@ services:
       start_period: 10s
     <<: *application-security
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 256
     mem_limit: 768m
     cpus: 1.5
@@ -344,7 +344,7 @@ services:
     logging: *bounded-logging
 
   event-retention:
-    image: agent-dock/control-plane:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/control-plane:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/control-plane/Dockerfile
@@ -359,27 +359,27 @@ services:
     command: [/app/packages/control-plane/src/event-retention-main.ts]
     environment:
       NODE_ENV: production
-      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-      AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE: /run/agent-dock-secrets/live-event-store-url
-      AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS: ${AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS:-60000}
-      AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE: ${AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE:-100}
-      AGENT_DOCK_METRICS_HOST: 0.0.0.0
-      AGENT_DOCK_METRICS_PORT: "9468"
-      AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
-      AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+      DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
+      PI_CLOUD_LIVE_EVENT_STORE_URL_FILE: /run/pi-cloud-secrets/live-event-store-url
+      PI_CLOUD_EVENT_RETENTION_INTERVAL_MS: ${PI_CLOUD_EVENT_RETENTION_INTERVAL_MS:-60000}
+      PI_CLOUD_EVENT_RETENTION_BATCH_SIZE: ${PI_CLOUD_EVENT_RETENTION_BATCH_SIZE:-100}
+      PI_CLOUD_METRICS_HOST: 0.0.0.0
+      PI_CLOUD_METRICS_PORT: "9468"
+      PI_CLOUD_METRICS_TOKEN_FILE: /run/pi-cloud-secrets/metrics-token
+      PI_CLOUD_OTLP_TRACES_ENDPOINT: ${PI_CLOUD_OTLP_TRACES_ENDPOINT:-}
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     volumes:
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
-        target: /run/agent-dock-secrets/database-url
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/pi-cloud-secrets/database-url
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/live-event-store-url
-        target: /run/agent-dock-secrets/live-event-store-url
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/live-event-store-url
+        target: /run/pi-cloud-secrets/live-event-store-url
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
-        target: /run/agent-dock-secrets/metrics-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/pi-cloud-secrets/metrics-token
         read_only: true
     networks:
       - database
@@ -387,7 +387,7 @@ services:
       - observability
     <<: *application-security
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 128
     mem_limit: 512m
     cpus: 1.0
@@ -395,7 +395,7 @@ services:
     logging: *bounded-logging
 
   event-gateway:
-    image: agent-dock/event-gateway:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/event-gateway:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/event-gateway/Dockerfile
@@ -413,30 +413,30 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: "4600"
-      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-      AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE: /run/agent-dock-secrets/database-url
-      AGENT_DOCK_KAFKA_BROKERS: kafka:9092
-      AGENT_DOCK_WORKER_EVENT_TOPIC: agent-dock-worker-events-v1
-      AGENT_DOCK_WORKER_EVENT_PROJECTOR_GROUP: agent-dock-worker-event-projector-v2
-      AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE: /run/agent-dock-secrets/worker-event-ingest-token
-      AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE: /run/agent-dock-secrets/live-event-store-url
-      AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS: ${AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS:-true}
-      AGENT_DOCK_METRICS_HOST: 0.0.0.0
-      AGENT_DOCK_METRICS_PORT: "9467"
-      AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+      DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
+      PI_CLOUD_DATABASE_NOTIFICATION_URL_FILE: /run/pi-cloud-secrets/database-url
+      PI_CLOUD_KAFKA_BROKERS: kafka:9092
+      PI_CLOUD_WORKER_EVENT_TOPIC: pi-cloud-worker-events-v1
+      PI_CLOUD_WORKER_EVENT_PROJECTOR_GROUP: pi-cloud-worker-event-projector-v2
+      PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE: /run/pi-cloud-secrets/worker-event-ingest-token
+      PI_CLOUD_LIVE_EVENT_STORE_URL_FILE: /run/pi-cloud-secrets/live-event-store-url
+      PI_CLOUD_AUTO_REPAIR_LIVE_EVENTS: ${PI_CLOUD_AUTO_REPAIR_LIVE_EVENTS:-true}
+      PI_CLOUD_METRICS_HOST: 0.0.0.0
+      PI_CLOUD_METRICS_PORT: "9467"
+      PI_CLOUD_OTLP_TRACES_ENDPOINT: ${PI_CLOUD_OTLP_TRACES_ENDPOINT:-}
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     volumes:
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
-        target: /run/agent-dock-secrets/database-url
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/pi-cloud-secrets/database-url
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
-        target: /run/agent-dock-secrets/worker-event-ingest-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
+        target: /run/pi-cloud-secrets/worker-event-ingest-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/live-event-store-url
-        target: /run/agent-dock-secrets/live-event-store-url
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/live-event-store-url
+        target: /run/pi-cloud-secrets/live-event-store-url
         read_only: true
     networks:
       - api
@@ -458,7 +458,7 @@ services:
       start_period: 10s
     <<: *application-security
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 256
     mem_limit: 512m
     cpus: 1.0
@@ -466,17 +466,17 @@ services:
     logging: *bounded-logging
 
   provider-relay-volume-bootstrap:
-    image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/provider-egress-relay:${PI_CLOUD_IMAGE_VERSION:-production}
     restart: "no"
     entrypoint: [/bin/sh, -eu, -c]
     command:
       - |
-        owner=${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}
-        chmod 0700 /run/agent-dock-provider-relay
-        chown "$${owner}" /run/agent-dock-provider-relay
+        owner=${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}
+        chmod 0700 /run/pi-cloud-provider-relay
+        chown "$${owner}" /run/pi-cloud-provider-relay
     user: "0:0"
     volumes:
-      - provider-relay:/run/agent-dock-provider-relay
+      - provider-relay:/run/pi-cloud-provider-relay
     network_mode: none
     read_only: true
     init: true
@@ -493,18 +493,18 @@ services:
     logging: *bounded-logging
 
   provider-host-egress-relay:
-    image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/provider-egress-relay:${PI_CLOUD_IMAGE_VERSION:-production}
     restart: unless-stopped
     depends_on:
       provider-relay-volume-bootstrap:
         condition: service_completed_successfully
     environment:
-      AGENT_DOCK_PROVIDER_RELAY_MODE: host
-      AGENT_DOCK_PROVIDER_RELAY_SOCKET: /run/agent-dock-provider-relay/provider-egress.sock
-      AGENT_DOCK_PROVIDER_RELAY_ALLOWED_HOSTS: api.deepseek.com
-      AGENT_DOCK_PROVIDER_RELAY_UPSTREAM_PROXY: ${HTTPS_PROXY:-}
+      PI_CLOUD_PROVIDER_RELAY_MODE: host
+      PI_CLOUD_PROVIDER_RELAY_SOCKET: /run/pi-cloud-provider-relay/provider-egress.sock
+      PI_CLOUD_PROVIDER_RELAY_ALLOWED_HOSTS: api.deepseek.com
+      PI_CLOUD_PROVIDER_RELAY_UPSTREAM_PROXY: ${HTTPS_PROXY:-}
     volumes:
-      - provider-relay:/run/agent-dock-provider-relay
+      - provider-relay:/run/pi-cloud-provider-relay
     network_mode: host
     healthcheck:
       test:
@@ -512,16 +512,16 @@ services:
           CMD,
           node,
           -e,
-          "const s=require('node:net').connect({path:'/run/agent-dock-provider-relay/provider-egress.sock'});s.setTimeout(2000);s.once('connect',()=>{s.destroy();process.exit(0)});s.once('error',()=>process.exit(1));s.once('timeout',()=>process.exit(1))",
+          "const s=require('node:net').connect({path:'/run/pi-cloud-provider-relay/provider-egress.sock'});s.setTimeout(2000);s.once('connect',()=>{s.destroy();process.exit(0)});s.once('error',()=>process.exit(1));s.once('timeout',()=>process.exit(1))",
         ]
       interval: 5s
       timeout: 3s
       retries: 20
       start_period: 5s
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     <<: *application-security
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 32
     mem_limit: 64m
     cpus: 0.25
@@ -529,18 +529,18 @@ services:
     logging: *bounded-logging
 
   provider-egress-relay:
-    image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/provider-egress-relay:${PI_CLOUD_IMAGE_VERSION:-production}
     restart: unless-stopped
     depends_on:
       provider-host-egress-relay:
         condition: service_healthy
     environment:
-      AGENT_DOCK_PROVIDER_RELAY_MODE: bridge
-      AGENT_DOCK_PROVIDER_RELAY_SOCKET: /run/agent-dock-provider-relay/provider-egress.sock
-      AGENT_DOCK_PROVIDER_RELAY_HOST: 0.0.0.0
-      AGENT_DOCK_PROVIDER_RELAY_PORT: "3129"
+      PI_CLOUD_PROVIDER_RELAY_MODE: bridge
+      PI_CLOUD_PROVIDER_RELAY_SOCKET: /run/pi-cloud-provider-relay/provider-egress.sock
+      PI_CLOUD_PROVIDER_RELAY_HOST: 0.0.0.0
+      PI_CLOUD_PROVIDER_RELAY_PORT: "3129"
     volumes:
-      - provider-relay:/run/agent-dock-provider-relay
+      - provider-relay:/run/pi-cloud-provider-relay
     networks:
       - model-egress
     healthcheck:
@@ -555,10 +555,10 @@ services:
       timeout: 3s
       retries: 20
       start_period: 5s
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     <<: *application-security
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 32
     mem_limit: 64m
     cpus: 0.25
@@ -567,7 +567,7 @@ services:
 
   supervisor-host:
     profiles: [compose-pi-workers]
-    image: agent-dock/supervisor-host:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/supervisor-host:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/supervisor-host/Dockerfile
@@ -588,85 +588,85 @@ services:
       NODE_USE_ENV_PROXY: "1"
       HTTP_PROXY: http://provider-egress-relay:3129
       HTTPS_PROXY: http://provider-egress-relay:3129
-      NO_PROXY: 127.0.0.1,localhost,control-plane,event-gateway,tool-broker,github-gateway,jaeger,postgres,supervisor-host,supervisor-host-1,agent-dock-worker-1,agent-dock-worker-2
-      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-      AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true"
-      AGENT_DOCK_CONTROL_PLANE_URL: http://control-plane:3000
-      AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1
-      AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-enrollment-token
-      AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/agent-dock-secrets/supervisor-management-token
-      AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: /run/agent-dock-secrets/tool-broker-token
-      AGENT_DOCK_TOOL_BROKER_URLS: http://tool-broker:4300
-      AGENT_DOCK_TOOL_BROKER_REQUEST_TIMEOUT_MS: "360000"
-      AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/agent-dock-secrets/model-credential-master-key
-      AGENT_DOCK_SUPERVISOR_MANAGEMENT_HOST: 0.0.0.0
-      AGENT_DOCK_SUPERVISOR_MANAGEMENT_PORT: "4100"
-      AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1:4100
-      AGENT_DOCK_SUPERVISOR_CAPACITY: ${AGENT_DOCK_SUPERVISOR_CAPACITY:-1}
-      AGENT_DOCK_TRUSTED_WORKSPACE_DIRECTORY: /workspace
-      AGENT_DOCK_BOOT_STATE_DIRECTORY: /var/lib/agent-dock/boot-volume/state
-      AGENT_DOCK_EVENT_SPOOL_DIRECTORY: /var/lib/agent-dock/spool-volume/state
-      AGENT_DOCK_CHECKPOINT_READ_CACHE_TTL_MS: "600000"
-      AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES: "512"
-      AGENT_DOCK_CHECKPOINT_READ_CACHE_MAXIMUM_BYTES: "33554432"
-      AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG: "true"
-      AGENT_DOCK_WORKER_EVENT_INGEST_URL: http://event-gateway:4600
-      AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE: /run/agent-dock-secrets/worker-event-ingest-token
-      AGENT_DOCK_MODEL_GATEWAY_HOST: 127.0.0.1
-      AGENT_DOCK_MODEL_GATEWAY_PORT: "4200"
-      AGENT_DOCK_MODEL_GATEWAY_ADVERTISED_URL: http://127.0.0.1:4200
-      AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS: "900000"
-      AGENT_DOCK_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN: "128"
-      AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS: "120000"
-      AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS: "150000"
-      AGENT_DOCK_PI_TURN_TIMEOUT_MS: "600000"
-      AGENT_DOCK_REPOSITORY_IMPORT_LEASE_MS: "240000"
-      AGENT_DOCK_REPOSITORY_IMPORT_WAIT_MS: "300000"
-      AGENT_DOCK_GITHUB_GATEWAY_URL: http://github-gateway:4400
-      AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/github-gateway-token
-      AGENT_DOCK_METRICS_HOST: 0.0.0.0
-      AGENT_DOCK_METRICS_PORT: "9465"
-      AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
-      AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}
+      NO_PROXY: 127.0.0.1,localhost,control-plane,event-gateway,tool-broker,github-gateway,jaeger,postgres,supervisor-host,supervisor-host-1,pi-cloud-worker-1,pi-cloud-worker-2
+      DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
+      PI_CLOUD_ALLOW_INSECURE_INTERNAL_HTTP: "true"
+      PI_CLOUD_CONTROL_PLANE_URL: http://control-plane:3000
+      PI_CLOUD_SUPERVISOR_ID: ${PI_CLOUD_SUPERVISOR_ID_PREFIX:-pi-cloud-worker-}1
+      PI_CLOUD_SUPERVISOR_ENROLLMENT_TOKEN_FILE: /run/pi-cloud-secrets/supervisor-enrollment-token
+      PI_CLOUD_SUPERVISOR_MANAGEMENT_TOKEN_FILE: /run/pi-cloud-secrets/supervisor-management-token
+      PI_CLOUD_TOOL_BROKER_TOKEN_FILE: /run/pi-cloud-secrets/tool-broker-token
+      PI_CLOUD_TOOL_BROKER_URLS: http://tool-broker:4300
+      PI_CLOUD_TOOL_BROKER_REQUEST_TIMEOUT_MS: "360000"
+      PI_CLOUD_MODEL_CREDENTIAL_MASTER_KEY_FILE: /run/pi-cloud-secrets/model-credential-master-key
+      PI_CLOUD_SUPERVISOR_MANAGEMENT_HOST: 0.0.0.0
+      PI_CLOUD_SUPERVISOR_MANAGEMENT_PORT: "4100"
+      PI_CLOUD_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${PI_CLOUD_SUPERVISOR_ID_PREFIX:-pi-cloud-worker-}1:4100
+      PI_CLOUD_SUPERVISOR_CAPACITY: ${PI_CLOUD_SUPERVISOR_CAPACITY:-1}
+      PI_CLOUD_TRUSTED_WORKSPACE_DIRECTORY: /workspace
+      PI_CLOUD_BOOT_STATE_DIRECTORY: /var/lib/pi-cloud/boot-volume/state
+      PI_CLOUD_EVENT_SPOOL_DIRECTORY: /var/lib/pi-cloud/spool-volume/state
+      PI_CLOUD_CHECKPOINT_READ_CACHE_TTL_MS: "600000"
+      PI_CLOUD_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES: "512"
+      PI_CLOUD_CHECKPOINT_READ_CACHE_MAXIMUM_BYTES: "33554432"
+      PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG: "true"
+      PI_CLOUD_WORKER_EVENT_INGEST_URL: http://event-gateway:4600
+      PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE: /run/pi-cloud-secrets/worker-event-ingest-token
+      PI_CLOUD_MODEL_GATEWAY_HOST: 127.0.0.1
+      PI_CLOUD_MODEL_GATEWAY_PORT: "4200"
+      PI_CLOUD_MODEL_GATEWAY_ADVERTISED_URL: http://127.0.0.1:4200
+      PI_CLOUD_MODEL_GATEWAY_CAPABILITY_TTL_MS: "900000"
+      PI_CLOUD_MODEL_GATEWAY_MAXIMUM_REQUESTS_PER_TURN: "128"
+      PI_CLOUD_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS: "120000"
+      PI_CLOUD_PI_MODEL_REQUEST_TIMEOUT_MS: "150000"
+      PI_CLOUD_PI_TURN_TIMEOUT_MS: "600000"
+      PI_CLOUD_REPOSITORY_IMPORT_LEASE_MS: "240000"
+      PI_CLOUD_REPOSITORY_IMPORT_WAIT_MS: "300000"
+      PI_CLOUD_GITHUB_GATEWAY_URL: http://github-gateway:4400
+      PI_CLOUD_GITHUB_GATEWAY_TOKEN_FILE: /run/pi-cloud-secrets/github-gateway-token
+      PI_CLOUD_METRICS_HOST: 0.0.0.0
+      PI_CLOUD_METRICS_PORT: "9465"
+      PI_CLOUD_METRICS_TOKEN_FILE: /run/pi-cloud-secrets/metrics-token
+      PI_CLOUD_OTLP_TRACES_ENDPOINT: ${PI_CLOUD_OTLP_TRACES_ENDPOINT:-}
     volumes:
-      - supervisor-boot:/var/lib/agent-dock/boot-volume
-      - supervisor-event-wal:/var/lib/agent-dock/spool-volume
+      - supervisor-boot:/var/lib/pi-cloud/boot-volume
+      - supervisor-event-wal:/var/lib/pi-cloud/spool-volume
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
-        target: /run/agent-dock-secrets/database-url
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/pi-cloud-secrets/database-url
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-enrollment-token
-        target: /run/agent-dock-secrets/supervisor-enrollment-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-enrollment-token
+        target: /run/pi-cloud-secrets/supervisor-enrollment-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-management-token
-        target: /run/agent-dock-secrets/supervisor-management-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/supervisor-management-token
+        target: /run/pi-cloud-secrets/supervisor-management-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/tool-broker-token
-        target: /run/agent-dock-secrets/tool-broker-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/tool-broker-token
+        target: /run/pi-cloud-secrets/tool-broker-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/model-credential-master-key
-        target: /run/agent-dock-secrets/model-credential-master-key
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/model-credential-master-key
+        target: /run/pi-cloud-secrets/model-credential-master-key
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
-        target: /run/agent-dock-secrets/github-gateway-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
+        target: /run/pi-cloud-secrets/github-gateway-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
-        target: /run/agent-dock-secrets/metrics-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/pi-cloud-secrets/metrics-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
-        target: /run/agent-dock-secrets/worker-event-ingest-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
+        target: /run/pi-cloud-secrets/worker-event-ingest-token
         read_only: true
     networks:
       management:
         aliases:
-          - ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}1
+          - ${PI_CLOUD_SUPERVISOR_ID_PREFIX:-pi-cloud-worker-}1
       database: {}
       sandbox-control: {}
       model-egress: {}
@@ -688,7 +688,7 @@ services:
     <<: *application-security
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
-      - /workspace:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /workspace:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 256
     mem_limit: 2g
     cpus: 2.0
@@ -700,15 +700,15 @@ services:
     extends:
       service: supervisor-host
     environment:
-      AGENT_DOCK_SUPERVISOR_ID: ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}2
-      AGENT_DOCK_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}2:4100
+      PI_CLOUD_SUPERVISOR_ID: ${PI_CLOUD_SUPERVISOR_ID_PREFIX:-pi-cloud-worker-}2
+      PI_CLOUD_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${PI_CLOUD_SUPERVISOR_ID_PREFIX:-pi-cloud-worker-}2:4100
     volumes:
-      - supervisor-1-boot:/var/lib/agent-dock/boot-volume
-      - supervisor-1-event-wal:/var/lib/agent-dock/spool-volume
+      - supervisor-1-boot:/var/lib/pi-cloud/boot-volume
+      - supervisor-1-event-wal:/var/lib/pi-cloud/spool-volume
     networks:
       management:
         aliases: !override
-          - ${AGENT_DOCK_SUPERVISOR_ID_PREFIX:-agent-dock-worker-}2
+          - ${PI_CLOUD_SUPERVISOR_ID_PREFIX:-pi-cloud-worker-}2
       database: {}
       sandbox-control: {}
       model-egress: {}
@@ -718,21 +718,21 @@ services:
 
   supervisor-volume-bootstrap:
     profiles: [compose-pi-workers]
-    image: agent-dock/supervisor-host:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/supervisor-host:${PI_CLOUD_IMAGE_VERSION:-production}
     restart: "no"
     entrypoint: [/bin/sh, -eu, -c]
     command:
       - |
-        owner=${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}
-        chown -R "$${owner}" /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume /var/lib/agent-dock/boot-volume-1 /var/lib/agent-dock/spool-volume-1
-        find /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume /var/lib/agent-dock/boot-volume-1 /var/lib/agent-dock/spool-volume-1 -type d -exec chmod 0700 {} +
-        find /var/lib/agent-dock/boot-volume /var/lib/agent-dock/spool-volume /var/lib/agent-dock/boot-volume-1 /var/lib/agent-dock/spool-volume-1 -type f -exec chmod 0600 {} +
+        owner=${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}
+        chown -R "$${owner}" /var/lib/pi-cloud/boot-volume /var/lib/pi-cloud/spool-volume /var/lib/pi-cloud/boot-volume-1 /var/lib/pi-cloud/spool-volume-1
+        find /var/lib/pi-cloud/boot-volume /var/lib/pi-cloud/spool-volume /var/lib/pi-cloud/boot-volume-1 /var/lib/pi-cloud/spool-volume-1 -type d -exec chmod 0700 {} +
+        find /var/lib/pi-cloud/boot-volume /var/lib/pi-cloud/spool-volume /var/lib/pi-cloud/boot-volume-1 /var/lib/pi-cloud/spool-volume-1 -type f -exec chmod 0600 {} +
     user: "0:0"
     volumes:
-      - supervisor-boot:/var/lib/agent-dock/boot-volume
-      - supervisor-event-wal:/var/lib/agent-dock/spool-volume
-      - supervisor-1-boot:/var/lib/agent-dock/boot-volume-1
-      - supervisor-1-event-wal:/var/lib/agent-dock/spool-volume-1
+      - supervisor-boot:/var/lib/pi-cloud/boot-volume
+      - supervisor-event-wal:/var/lib/pi-cloud/spool-volume
+      - supervisor-1-boot:/var/lib/pi-cloud/boot-volume-1
+      - supervisor-1-event-wal:/var/lib/pi-cloud/spool-volume-1
     network_mode: none
     read_only: true
     init: true
@@ -750,7 +750,7 @@ services:
     logging: *bounded-logging
 
   workspace-volume-gateway:
-    image: agent-dock/tool-broker:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/tool-broker:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/tool-broker/Dockerfile
@@ -763,34 +763,34 @@ services:
     command: [/app/packages/tool-broker/src/workspace-volume-gateway-main.ts]
     environment:
       NODE_ENV: production
-      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_HOST: 0.0.0.0
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_PORT: "4500"
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/workspace-volume-gateway-token
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS: ${AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS:-2}
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS: ${AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS:-32}
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS: ${AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS:-30000}
-      AGENT_DOCK_WORKSPACE_DELETION_REAPER_INTERVAL_MS: ${AGENT_DOCK_WORKSPACE_DELETION_REAPER_INTERVAL_MS:-30000}
-      AGENT_DOCK_WORKSPACE_DELETION_REAPER_BATCH_SIZE: ${AGENT_DOCK_WORKSPACE_DELETION_REAPER_BATCH_SIZE:-16}
-      AGENT_DOCK_WORKSPACE_POSIX_ROOT: /data/cube-shared/volume
-      AGENT_DOCK_METRICS_HOST: 0.0.0.0
-      AGENT_DOCK_METRICS_PORT: "9469"
-      AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
+      DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_HOST: 0.0.0.0
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_PORT: "4500"
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: /run/pi-cloud-secrets/workspace-volume-gateway-token
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS: ${PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS:-2}
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS: ${PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS:-32}
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS: ${PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS:-30000}
+      PI_CLOUD_WORKSPACE_DELETION_REAPER_INTERVAL_MS: ${PI_CLOUD_WORKSPACE_DELETION_REAPER_INTERVAL_MS:-30000}
+      PI_CLOUD_WORKSPACE_DELETION_REAPER_BATCH_SIZE: ${PI_CLOUD_WORKSPACE_DELETION_REAPER_BATCH_SIZE:-16}
+      PI_CLOUD_WORKSPACE_POSIX_ROOT: /data/cube-shared/volume
+      PI_CLOUD_METRICS_HOST: 0.0.0.0
+      PI_CLOUD_METRICS_PORT: "9469"
+      PI_CLOUD_METRICS_TOKEN_FILE: /run/pi-cloud-secrets/metrics-token
     volumes:
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
-        target: /run/agent-dock-secrets/database-url
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/pi-cloud-secrets/database-url
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/state/cube-shared/volume
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/state/cube-shared/volume
         target: /data/cube-shared/volume
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-volume-gateway-token
-        target: /run/agent-dock-secrets/workspace-volume-gateway-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-volume-gateway-token
+        target: /run/pi-cloud-secrets/workspace-volume-gateway-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
-        target: /run/agent-dock-secrets/metrics-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/pi-cloud-secrets/metrics-token
         read_only: true
     networks:
       - sandbox-control
@@ -808,10 +808,10 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     <<: *application-security
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 128
     mem_limit: 512m
     cpus: 1.5
@@ -819,7 +819,7 @@ services:
     logging: *bounded-logging
 
   tool-broker:
-    image: agent-dock/tool-broker:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/tool-broker:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/tool-broker/Dockerfile
@@ -833,49 +833,49 @@ services:
         condition: service_completed_successfully
     environment:
       NODE_ENV: production
-      DATABASE_URL_FILE: /run/agent-dock-secrets/database-url
-      AGENT_DOCK_SANDBOX_DOMAIN_ID: sandbox-domain-0001
-      AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL: http://tool-broker:4300
-      AGENT_DOCK_TOOL_BROKER_HOST: 0.0.0.0
-      AGENT_DOCK_TOOL_BROKER_PORT: "4300"
-      AGENT_DOCK_SANDBOX_WARM_TTL_MS: "900000"
-      AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES: "2"
-      AGENT_DOCK_MAXIMUM_WARM_SANDBOXES: "4"
-      AGENT_DOCK_TOOL_BROKER_TOKEN_FILE: /run/agent-dock-secrets/tool-broker-token
-      AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/agent-dock-secrets/sandbox-materializer-token
-      AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: /run/agent-dock-secrets/workspace-terminal-token
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL: http://workspace-volume-gateway:4500
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/workspace-volume-gateway-token
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS: ${AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS:-660000}
-      AGENT_DOCK_IMAGE_REVISION: ${AGENT_DOCK_IMAGE_REVISION:-unknown}
-      AGENT_DOCK_METRICS_HOST: 0.0.0.0
-      AGENT_DOCK_METRICS_PORT: "9466"
-      AGENT_DOCK_METRICS_TOKEN_FILE: /run/agent-dock-secrets/metrics-token
-      AGENT_DOCK_OTLP_TRACES_ENDPOINT: ${AGENT_DOCK_OTLP_TRACES_ENDPOINT:-}
+      DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
+      PI_CLOUD_SANDBOX_DOMAIN_ID: sandbox-domain-0001
+      PI_CLOUD_TOOL_BROKER_ADVERTISED_URL: http://tool-broker:4300
+      PI_CLOUD_TOOL_BROKER_HOST: 0.0.0.0
+      PI_CLOUD_TOOL_BROKER_PORT: "4300"
+      PI_CLOUD_SANDBOX_WARM_TTL_MS: "900000"
+      PI_CLOUD_MAXIMUM_ACTIVE_TOOL_SANDBOXES: "2"
+      PI_CLOUD_MAXIMUM_WARM_SANDBOXES: "4"
+      PI_CLOUD_TOOL_BROKER_TOKEN_FILE: /run/pi-cloud-secrets/tool-broker-token
+      PI_CLOUD_SANDBOX_MATERIALIZER_TOKEN_FILE: /run/pi-cloud-secrets/sandbox-materializer-token
+      PI_CLOUD_WORKSPACE_TERMINAL_TOKEN_FILE: /run/pi-cloud-secrets/workspace-terminal-token
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_URL: http://workspace-volume-gateway:4500
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: /run/pi-cloud-secrets/workspace-volume-gateway-token
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS: ${PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS:-660000}
+      PI_CLOUD_IMAGE_REVISION: ${PI_CLOUD_IMAGE_REVISION:-unknown}
+      PI_CLOUD_METRICS_HOST: 0.0.0.0
+      PI_CLOUD_METRICS_PORT: "9466"
+      PI_CLOUD_METRICS_TOKEN_FILE: /run/pi-cloud-secrets/metrics-token
+      PI_CLOUD_OTLP_TRACES_ENDPOINT: ${PI_CLOUD_OTLP_TRACES_ENDPOINT:-}
     volumes:
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
-        target: /run/agent-dock-secrets/database-url
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
+        target: /run/pi-cloud-secrets/database-url
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/tool-broker-token
-        target: /run/agent-dock-secrets/tool-broker-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/tool-broker-token
+        target: /run/pi-cloud-secrets/tool-broker-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-materializer-token
-        target: /run/agent-dock-secrets/sandbox-materializer-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/sandbox-materializer-token
+        target: /run/pi-cloud-secrets/sandbox-materializer-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-terminal-token
-        target: /run/agent-dock-secrets/workspace-terminal-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-terminal-token
+        target: /run/pi-cloud-secrets/workspace-terminal-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-volume-gateway-token
-        target: /run/agent-dock-secrets/workspace-volume-gateway-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/workspace-volume-gateway-token
+        target: /run/pi-cloud-secrets/workspace-volume-gateway-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
-        target: /run/agent-dock-secrets/metrics-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/pi-cloud-secrets/metrics-token
         read_only: true
     networks:
       - database
@@ -893,10 +893,10 @@ services:
       timeout: 3s
       retries: 30
       start_period: 10s
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     <<: *application-security
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 128
     mem_limit: 384m
     cpus: 1.0
@@ -905,35 +905,35 @@ services:
 
   github-gateway:
     profiles: [github]
-    image: agent-dock/github-gateway:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/github-gateway:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/github-gateway/Dockerfile
       args: *application-build-args
       network: host
     restart: unless-stopped
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: "4400"
-      AGENT_DOCK_GITHUB_GATEWAY_TOKEN_FILE: /run/agent-dock-secrets/github-gateway-token
-      AGENT_DOCK_GITHUB_WEBHOOK_SECRET_FILE: /run/agent-dock-secrets/github-webhook-secret
-      AGENT_DOCK_GITHUB_APP_ID: ${AGENT_DOCK_GITHUB_APP_ID:-}
-      AGENT_DOCK_GITHUB_APP_PRIVATE_KEY_FILE: /run/agent-dock-secrets/github-app-private-key.pem
-      AGENT_DOCK_CONTROL_PLANE_URL: http://control-plane:3000
+      PI_CLOUD_GITHUB_GATEWAY_TOKEN_FILE: /run/pi-cloud-secrets/github-gateway-token
+      PI_CLOUD_GITHUB_WEBHOOK_SECRET_FILE: /run/pi-cloud-secrets/github-webhook-secret
+      PI_CLOUD_GITHUB_APP_ID: ${PI_CLOUD_GITHUB_APP_ID:-}
+      PI_CLOUD_GITHUB_APP_PRIVATE_KEY_FILE: /run/pi-cloud-secrets/github-app-private-key.pem
+      PI_CLOUD_CONTROL_PLANE_URL: http://control-plane:3000
     volumes:
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
-        target: /run/agent-dock-secrets/github-gateway-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-gateway-token
+        target: /run/pi-cloud-secrets/github-gateway-token
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-webhook-secret
-        target: /run/agent-dock-secrets/github-webhook-secret
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-webhook-secret
+        target: /run/pi-cloud-secrets/github-webhook-secret
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-app-private-key.pem
-        target: /run/agent-dock-secrets/github-app-private-key.pem
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/github-app-private-key.pem
+        target: /run/pi-cloud-secrets/github-app-private-key.pem
         read_only: true
     networks:
       - github-control
@@ -952,7 +952,7 @@ services:
       start_period: 10s
     <<: *application-security
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 128
     mem_limit: 256m
     cpus: 0.75
@@ -960,7 +960,7 @@ services:
     logging: *bounded-logging
 
   web:
-    image: agent-dock/web-ui:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/web-ui:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/web-ui/Dockerfile
@@ -976,7 +976,7 @@ services:
       XDG_CONFIG_HOME: /tmp/caddy-config
       XDG_DATA_HOME: /tmp/caddy-data
     ports:
-      - ${AGENT_DOCK_HTTP_BIND_ADDRESS:-127.0.0.1}:${AGENT_DOCK_HTTP_PORT:-8080}:8080
+      - ${PI_CLOUD_HTTP_BIND_ADDRESS:-127.0.0.1}:${PI_CLOUD_HTTP_PORT:-8080}:8080
     networks:
       - edge
       - api
@@ -1004,7 +1004,7 @@ services:
     entrypoint: [/bin/sh, -eu, -c]
     command:
       - |
-        owner=${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}
+        owner=${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}
         chown -R "$${owner}" /prometheus /grafana /jaeger
         chmod 0700 /prometheus /grafana /jaeger
     user: "0:0"
@@ -1033,7 +1033,7 @@ services:
         condition: service_healthy
       tool-broker:
         condition: service_healthy
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -1046,8 +1046,8 @@ services:
         target: /etc/prometheus/prometheus.yml
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
-        target: /run/agent-dock-secrets/metrics-token
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
+        target: /run/pi-cloud-secrets/metrics-token
         read_only: true
     networks: [observability]
     read_only: true
@@ -1067,7 +1067,7 @@ services:
     depends_on:
       observability-volume-bootstrap:
         condition: service_completed_successfully
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
       SPAN_STORAGE_TYPE: badger
@@ -1100,10 +1100,10 @@ services:
         condition: service_started
       jaeger:
         condition: service_started
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     environment:
-      GF_SECURITY_ADMIN_USER: agent-dock-admin
-      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/agent-dock-secrets/grafana-admin-password
+      GF_SECURITY_ADMIN_USER: pi-cloud-admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/pi-cloud-secrets/grafana-admin-password
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_PATHS_DATA: /grafana
@@ -1118,8 +1118,8 @@ services:
         target: /var/lib/grafana/dashboards
         read_only: true
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/grafana-admin-password
-        target: /run/agent-dock-secrets/grafana-admin-password
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/grafana-admin-password
+        target: /run/pi-cloud-secrets/grafana-admin-password
         read_only: true
     networks: [observability]
     read_only: true
@@ -1136,7 +1136,7 @@ services:
 
   observability-ingress:
     profiles: [observability]
-    image: agent-dock/web-ui:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/web-ui:${PI_CLOUD_IMAGE_VERSION:-production}
     restart: unless-stopped
     depends_on:
       prometheus:
@@ -1155,9 +1155,9 @@ services:
         target: /etc/caddy/Caddyfile
         read_only: true
     ports:
-      - 127.0.0.1:${AGENT_DOCK_PROMETHEUS_PORT:-9090}:9090
-      - 127.0.0.1:${AGENT_DOCK_JAEGER_PORT:-16686}:16686
-      - 127.0.0.1:${AGENT_DOCK_GRAFANA_PORT:-3001}:3001
+      - 127.0.0.1:${PI_CLOUD_PROMETHEUS_PORT:-9090}:9090
+      - 127.0.0.1:${PI_CLOUD_JAEGER_PORT:-16686}:16686
+      - 127.0.0.1:${PI_CLOUD_GRAFANA_PORT:-3001}:3001
     networks:
       - observability
       - observability-edge
@@ -1180,7 +1180,7 @@ services:
 
   provider-egress-relay-image:
     profiles: [image-only]
-    image: agent-dock/provider-egress-relay:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/provider-egress-relay:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
       context: ../..
       dockerfile: packages/provider-egress-relay/Dockerfile

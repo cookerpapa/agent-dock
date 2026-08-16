@@ -23,7 +23,7 @@ export class TenantRequestContext {
     if (identity === undefined) {
       throw new TenantRequestContextError(
         "authentication_required",
-        "A valid AgentDock API credential is required",
+        "A valid PiCloud API credential is required",
       );
     }
     return identity;

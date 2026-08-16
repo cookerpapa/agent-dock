@@ -9,7 +9,7 @@
 - Triggering Run first-response/settled: 4169 / 92712 ms
 - Post-compaction recall first-response/settled: 4750 / 4837 ms
 - Post-compaction coding first-response/settled: 5071 / 68201 ms
-- Cross-Worker recovery: agent-dock-worker-2 -> agent-dock-worker-1
+- Cross-Worker recovery: pi-cloud-worker-2 -> pi-cloud-worker-1
 - Same persistent Cube runtime rebound: true
 - Real model attempts/completed/recovered failures: 165 / 165 / 0
 - Real input/output/cache-read/cache-write tokens: 168010 / 109063 / 8570624 / 0

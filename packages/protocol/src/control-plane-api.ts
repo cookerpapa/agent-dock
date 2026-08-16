@@ -62,8 +62,8 @@ export const ModelConfigurationResourceSchema = Type.Union([
   Type.Object(
     {
       mode: Type.Literal("deterministic"),
-      provider: Type.Literal("agent-dock-fake"),
-      modelId: Type.Literal("agent-dock-fake"),
+      provider: Type.Literal("pi-cloud-fake"),
+      modelId: Type.Literal("pi-cloud-fake"),
       configured: Type.Literal(false),
       credentialVersion: PositiveSafeIntegerSchema,
       updatedAt: UtcTimestampSchema,

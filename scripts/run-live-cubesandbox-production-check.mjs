@@ -10,20 +10,20 @@ import {
   OfficialCubeSandboxRuntimeClient,
   workspaceVolumeId,
 } from "../packages/tool-broker/src/index.ts";
-import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
+import { PiCloudApi, PiCloudApiError, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-if (process.env.AGENT_DOCK_LIVE_CUBESANDBOX_CHECK !== "1") {
+if (process.env.PI_CLOUD_LIVE_CUBESANDBOX_CHECK !== "1") {
   throw new Error(
-    "Set AGENT_DOCK_LIVE_CUBESANDBOX_CHECK=1 to acknowledge real model usage and Cube KVM execution",
+    "Set PI_CLOUD_LIVE_CUBESANDBOX_CHECK=1 to acknowledge real model usage and Cube KVM execution",
   );
 }
-const writeReport = process.env.AGENT_DOCK_LIVE_CUBESANDBOX_REPORT !== "0";
+const writeReport = process.env.PI_CLOUD_LIVE_CUBESANDBOX_REPORT !== "0";
 
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 
 async function readPrivate(path, maximumBytes, label) {
@@ -94,9 +94,9 @@ if (
   throw new Error("Cube production evidence is invalid");
 }
 
-const bindAddress = environment.AGENT_DOCK_HTTP_BIND_ADDRESS;
-const port = environment.AGENT_DOCK_HTTP_PORT;
-const bootstrapTenantId = environment.AGENT_DOCK_TENANT_ID;
+const bindAddress = environment.PI_CLOUD_HTTP_BIND_ADDRESS;
+const port = environment.PI_CLOUD_HTTP_PORT;
+const bootstrapTenantId = environment.PI_CLOUD_TENANT_ID;
 if (bindAddress === undefined || port === undefined || bootstrapTenantId === undefined) {
   throw new Error("Production HTTP endpoint configuration is missing");
 }
@@ -112,7 +112,7 @@ const fetchFromProduction = (input, init = {}) =>
     ...init,
     signal: init.signal ?? AbortSignal.timeout(300_000),
   });
-const bootstrapApi = new AgentDockApi(fetchFromProduction, token);
+const bootstrapApi = new PiCloudApi(fetchFromProduction, token);
 let api = bootstrapApi;
 let tenantId = bootstrapTenantId;
 let authorizationToken = token;
@@ -123,7 +123,7 @@ const cube = new OfficialCubeSandboxRuntimeClient({
   proxyPort: cluster.proxy.port,
   proxyScheme: "http",
   sandboxDomain: cluster.sandboxDomain,
-  egressProxyIp: environment.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254",
+  egressProxyIp: environment.PI_CLOUD_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254",
   requestTimeoutMs: 30_000,
 });
 
@@ -170,9 +170,9 @@ async function psql(query) {
     "postgres",
     "psql",
     "--username",
-    "agent_dock",
+    "pi_cloud",
     "--dbname",
-    "agent_dock",
+    "pi_cloud",
     "--no-align",
     "--tuples-only",
     "--set",
@@ -225,7 +225,7 @@ function wait(delayMs, signal) {
 function currentCubeAssignment(metadata) {
   const records = [];
   for (const [key, raw] of Object.entries(metadata)) {
-    if (!key.startsWith("agentdock.assignment.v1.")) continue;
+    if (!key.startsWith("picloud.assignment.v1.")) continue;
     try {
       const parsed = JSON.parse(raw);
       if (
@@ -253,8 +253,8 @@ function managedForSession(instances, sessionId) {
   return instances.filter((instance) => {
     const assignment = currentCubeAssignment(instance.metadata);
     return (
-      instance.metadata["agentdock.managed"] === "true" &&
-      instance.metadata["agentdock.provider"] === "cubesandbox" &&
+      instance.metadata["picloud.managed"] === "true" &&
+      instance.metadata["picloud.provider"] === "cubesandbox" &&
       assignment?.sessionId === sessionId
     );
   });
@@ -380,7 +380,7 @@ async function optionalMetadata(path) {
 function persistentWorkspacePath(tenant, workspaceId, sessionId) {
   const volumeId = workspaceVolumeId({ tenantId: tenant, workspaceId, sessionId });
   const volumeRoot = resolve(runtimeDirectory, "state/cube-shared/volume");
-  const volumePath = resolve(volumeRoot, `agentdock-posix-${volumeId}`);
+  const volumePath = resolve(volumeRoot, `picloud-posix-${volumeId}`);
   assert(volumePath.startsWith(`${volumeRoot}/`), "Workspace path escaped the shared-volume root");
   return { volumeId, volumePath, workspacePath: resolve(volumePath, "workspace") };
 }
@@ -391,7 +391,7 @@ async function trustedGitPlacementEvidence(tenant, workspaceId, sessionId) {
     workspaceId,
     sessionId,
   );
-  const trustedGitPath = resolve(volumePath, ".agent-dock-runtime/git");
+  const trustedGitPath = resolve(volumePath, ".pi-cloud-runtime/git");
   const [trustedGit, workspace, workspaceGit] = await Promise.all([
     optionalMetadata(trustedGitPath),
     optionalMetadata(workspacePath),
@@ -424,7 +424,7 @@ async function terminateLogicalSandbox(logicalSandboxId, sessionId, required) {
     const sandboxId = ${JSON.stringify(logicalSandboxId)};
     const sessionId = ${JSON.stringify(sessionId)};
     const token = readFileSync(
-      "/run/agent-dock-secrets/tool-broker-token",
+      "/run/pi-cloud-secrets/tool-broker-token",
       "utf8",
     ).trim();
     const endpoint = "http://127.0.0.1:4300/internal/v1/sandbox-inventory";
@@ -624,11 +624,11 @@ function totalUsage(...usage) {
 await cube.checkHealth();
 progress("Cube API is healthy; registering an isolated acceptance tenant");
 const suffix = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-const registration = await new AgentDockApi(fetchFromProduction).registerTenant(
+const registration = await new PiCloudApi(fetchFromProduction).registerTenant(
   `cube-check-${suffix}`.replaceAll(/[^a-z0-9-]/g, "-").slice(0, 63),
   "Cube production acceptance tenant",
 );
-api = new AgentDockApi(fetchFromProduction, registration.apiToken);
+api = new PiCloudApi(fetchFromProduction, registration.apiToken);
 tenantId = registration.tenantId;
 authorizationToken = registration.apiToken;
 const model = await api.getModelConfiguration();
@@ -769,11 +769,11 @@ try {
   );
   await assert.rejects(
     api.getConversation(foreignSession.sessionId),
-    (error) => error instanceof AgentDockApiError && error.status === 404,
+    (error) => error instanceof PiCloudApiError && error.status === 404,
   );
   await assert.rejects(
     foreignApi.getConversation(session.sessionId),
-    (error) => error instanceof AgentDockApiError && error.status === 404,
+    (error) => error instanceof PiCloudApiError && error.status === 404,
   );
 
   const largeProject = await api.createProject(`Cube large-workspace project ${suffix}`);

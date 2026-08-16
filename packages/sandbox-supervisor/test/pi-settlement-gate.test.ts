@@ -1,7 +1,7 @@
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   type ExecuteTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import {

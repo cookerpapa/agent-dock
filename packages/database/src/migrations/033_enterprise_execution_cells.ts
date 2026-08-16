@@ -1,7 +1,7 @@
 import { sql, type Kysely } from "kysely";
 
 const INITIAL_CELL_ID = "cell-0001";
-const INITIAL_TASK_QUEUE = "agent-dock-pi-runs-cell-0001-v1";
+const INITIAL_TASK_QUEUE = "pi-cloud-pi-runs-cell-0001-v1";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema

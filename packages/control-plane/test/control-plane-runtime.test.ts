@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -22,7 +22,7 @@ const IDS = {
 } as const;
 
 const SUPERVISOR_ID = "remote-runtime-test";
-const TOKEN = `agent-dock-${"w".repeat(48)}`;
+const TOKEN = `pi-cloud-${"w".repeat(48)}`;
 
 let pglite: PGlite | undefined;
 let socketServer: PGLiteSocketServer | undefined;
@@ -39,7 +39,7 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
 }
 
 beforeAll(async () => {
-  let connectionString = process.env.AGENT_DOCK_TEST_DATABASE_URL;
+  let connectionString = process.env.PI_CLOUD_TEST_DATABASE_URL;
   if (!connectionString) {
     pglite = await PGlite.create();
     socketServer = new PGLiteSocketServer({

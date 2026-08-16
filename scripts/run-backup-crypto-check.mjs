@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { decryptBackup, encryptBackup, sha256File } from "./production-backup-common.mjs";
 
-const directory = await mkdtemp(join(tmpdir(), "agent-dock-backup-crypto-"));
+const directory = await mkdtemp(join(tmpdir(), "pi-cloud-backup-crypto-"));
 try {
   const input = join(directory, "payload.tar.gz");
   const encrypted = join(directory, "payload.adbackup");

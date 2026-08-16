@@ -141,7 +141,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`drop table session_events`.execute(db);
   await sql`alter table session_events_partitioned rename to session_events`.execute(db);
   await sql`
-    create function agent_dock_register_session_event_id()
+    create function pi_cloud_register_session_event_id()
     returns trigger
     language plpgsql
     as $$
@@ -166,7 +166,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
     create trigger session_events_register_event_id
     before insert on session_events
-    for each row execute function agent_dock_register_session_event_id()
+    for each row execute function pi_cloud_register_session_event_id()
   `.execute(db);
 }
 
@@ -191,6 +191,6 @@ export async function down(db: Kysely<unknown>): Promise<void> {
       add constraint context_compactions_completed_event_fk
         foreign key (completed_event_id) references session_events (event_id)
   `.execute(db);
-  await sql`drop function agent_dock_register_session_event_id()`.execute(db);
+  await sql`drop function pi_cloud_register_session_event_id()`.execute(db);
   await sql`drop table session_event_ids`.execute(db);
 }

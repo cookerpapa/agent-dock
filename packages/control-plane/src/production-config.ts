@@ -1,4 +1,4 @@
-import { parseUuidPathParameter } from "@agent-dock/protocol";
+import { parseUuidPathParameter } from "@pi-cloud/protocol";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -69,10 +69,10 @@ function sandboxDomains(value: string): readonly ProductionSandboxDomainConfig[]
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new TypeError("AGENT_DOCK_SANDBOX_DOMAINS_JSON must be valid JSON");
+    throw new TypeError("PI_CLOUD_SANDBOX_DOMAINS_JSON must be valid JSON");
   }
   if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 64) {
-    throw new TypeError("AGENT_DOCK_SANDBOX_DOMAINS_JSON must contain 1 to 64 Domains");
+    throw new TypeError("PI_CLOUD_SANDBOX_DOMAINS_JSON must contain 1 to 64 Domains");
   }
   const domains = parsed.map((entry, index): ProductionSandboxDomainConfig => {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
@@ -191,12 +191,12 @@ function managementUrls(value: string, allowInsecure: boolean): string[] {
   const values = value.split(",");
   if (values.length < 1 || values.length > 256 || values.some((entry) => entry.trim() !== entry)) {
     throw new TypeError(
-      "AGENT_DOCK_TOOL_BROKER_URLS must contain 1-256 comma-separated URLs without whitespace",
+      "PI_CLOUD_TOOL_BROKER_URLS must contain 1-256 comma-separated URLs without whitespace",
     );
   }
   const parsed = values.map((entry) => managementUrl(entry, allowInsecure));
   if (new Set(parsed).size !== parsed.length) {
-    throw new TypeError("AGENT_DOCK_TOOL_BROKER_URLS must contain unique URLs");
+    throw new TypeError("PI_CLOUD_TOOL_BROKER_URLS must contain unique URLs");
   }
   return parsed;
 }
@@ -205,13 +205,13 @@ function managementUrlTemplates(value: string, allowInsecure: boolean): string[]
   const values = value.split(",");
   if (values.length < 1 || values.length > 64 || values.some((entry) => entry.trim() !== entry)) {
     throw new TypeError(
-      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES must contain 1-64 comma-separated templates without whitespace",
+      "PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES must contain 1-64 comma-separated templates without whitespace",
     );
   }
   const parsed = values.map((entry) => managementUrlTemplate(entry, allowInsecure));
   if (new Set(parsed).size !== parsed.length) {
     throw new TypeError(
-      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES must contain unique templates",
+      "PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES must contain unique templates",
     );
   }
   return parsed;
@@ -220,7 +220,7 @@ function managementUrlTemplates(value: string, allowInsecure: boolean): string[]
 function managementUrlTemplate(value: string, allowInsecure: boolean): string {
   if (value.split("{supervisorId}").length !== 2) {
     throw new TypeError(
-      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATE must contain {supervisorId} exactly once",
+      "PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATE must contain {supervisorId} exactly once",
     );
   }
   managementUrl(value.replace("{supervisorId}", "pi-worker-validation"), allowInsecure);
@@ -230,7 +230,7 @@ function managementUrlTemplate(value: string, allowInsecure: boolean): string {
 function supervisorIdPrefixValue(value: string): string {
   if (!/^[a-z0-9](?:[-a-z0-9]{0,62})-$/.test(value)) {
     throw new TypeError(
-      "AGENT_DOCK_SUPERVISOR_ID_PREFIX must be a lowercase DNS-label prefix ending in a hyphen",
+      "PI_CLOUD_SUPERVISOR_ID_PREFIX must be a lowercase DNS-label prefix ending in a hyphen",
     );
   }
   return value;
@@ -280,58 +280,58 @@ async function secret(
 export async function loadProductionControlPlaneConfig(
   environment: ProductionControlPlaneEnvironment = process.env,
 ): Promise<ProductionControlPlaneConfig> {
-  const allowInlineSecrets = booleanValue(environment, "AGENT_DOCK_ALLOW_INLINE_SECRETS");
+  const allowInlineSecrets = booleanValue(environment, "PI_CLOUD_ALLOW_INLINE_SECRETS");
   const allowInsecureInternalHttp = booleanValue(
     environment,
-    "AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP",
+    "PI_CLOUD_ALLOW_INSECURE_INTERNAL_HTTP",
   );
   const publicTenantMaximumUnsettledTurns = integerValue(
     environment,
-    "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
+    "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
     10,
     1,
     1_000_000,
   );
   const publicTenantMaximumConcurrentTurns = integerValue(
     environment,
-    "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS",
+    "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS",
     2,
     1,
     256,
   );
   if (publicTenantMaximumConcurrentTurns > publicTenantMaximumUnsettledTurns) {
     throw new TypeError(
-      "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS cannot exceed AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
+      "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS cannot exceed PI_CLOUD_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
     );
   }
   const platformModelSourceTenantId = parseUuidPathParameter(
-    required(environment, "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID"),
-    "AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID",
+    required(environment, "PI_CLOUD_PLATFORM_MODEL_SOURCE_TENANT_ID"),
+    "PI_CLOUD_PLATFORM_MODEL_SOURCE_TENANT_ID",
   );
-  const configuredPlatformOperatorTenantId = environment.AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID;
+  const configuredPlatformOperatorTenantId = environment.PI_CLOUD_PLATFORM_OPERATOR_TENANT_ID;
   const platformOperatorTenantId = parseUuidPathParameter(
     configuredPlatformOperatorTenantId === undefined ||
       configuredPlatformOperatorTenantId.length === 0
       ? platformModelSourceTenantId
       : configuredPlatformOperatorTenantId,
-    "AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID",
+    "PI_CLOUD_PLATFORM_OPERATOR_TENANT_ID",
   );
   const databaseUrl = await loadProductionDatabaseUrl(environment);
   const databaseNotificationUrl =
-    environment.AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE === undefined &&
-    environment.AGENT_DOCK_DATABASE_NOTIFICATION_URL === undefined
+    environment.PI_CLOUD_DATABASE_NOTIFICATION_URL_FILE === undefined &&
+    environment.PI_CLOUD_DATABASE_NOTIFICATION_URL === undefined
       ? databaseUrl
-      : await secret(environment, "AGENT_DOCK_DATABASE_NOTIFICATION_URL", allowInlineSecrets);
-  const externalWorkerEventLog = booleanValue(environment, "AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG");
+      : await secret(environment, "PI_CLOUD_DATABASE_NOTIFICATION_URL", allowInlineSecrets);
+  const externalWorkerEventLog = booleanValue(environment, "PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG");
   const workerEventIngest = externalWorkerEventLog
     ? {
         workerEventIngestBaseUrl: managementUrl(
-          required(environment, "AGENT_DOCK_WORKER_EVENT_INGEST_URL"),
+          required(environment, "PI_CLOUD_WORKER_EVENT_INGEST_URL"),
           allowInsecureInternalHttp,
         ),
         workerEventIngestToken: await secret(
           environment,
-          "AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN",
+          "PI_CLOUD_WORKER_EVENT_INGEST_TOKEN",
           allowInlineSecrets,
         ),
       }
@@ -343,50 +343,50 @@ export async function loadProductionControlPlaneConfig(
     ...workerEventIngest,
     supervisorEnrollmentToken: await secret(
       environment,
-      "AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN",
+      "PI_CLOUD_SUPERVISOR_ENROLLMENT_TOKEN",
       allowInlineSecrets,
     ),
     supervisorManagementToken: await secret(
       environment,
-      "AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN",
+      "PI_CLOUD_SUPERVISOR_MANAGEMENT_TOKEN",
       allowInlineSecrets,
     ),
     modelCredentialMasterKey: await secret(
       environment,
-      "AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY",
+      "PI_CLOUD_MODEL_CREDENTIAL_MASTER_KEY",
       allowInlineSecrets,
     ),
     cubeEgressConfigToken: await secret(
       environment,
-      "AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN",
+      "PI_CLOUD_CUBE_EGRESS_CONFIG_TOKEN",
       allowInlineSecrets,
     ),
     toolBrokerBaseUrls: managementUrls(
-      required(environment, "AGENT_DOCK_TOOL_BROKER_URLS"),
+      required(environment, "PI_CLOUD_TOOL_BROKER_URLS"),
       allowInsecureInternalHttp,
     ),
     sandboxMaterializerToken: await secret(
       environment,
-      "AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN",
+      "PI_CLOUD_SANDBOX_MATERIALIZER_TOKEN",
       allowInlineSecrets,
     ),
     workspaceTerminalToken: await secret(
       environment,
-      "AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN",
+      "PI_CLOUD_WORKSPACE_TERMINAL_TOKEN",
       allowInlineSecrets,
     ),
     supervisorIdPrefix: supervisorIdPrefixValue(
-      required(environment, "AGENT_DOCK_SUPERVISOR_ID_PREFIX"),
+      required(environment, "PI_CLOUD_SUPERVISOR_ID_PREFIX"),
     ),
     supervisorMaximumCapacity: integerValue(
       environment,
-      "AGENT_DOCK_SUPERVISOR_MAXIMUM_CAPACITY",
+      "PI_CLOUD_SUPERVISOR_MAXIMUM_CAPACITY",
       2,
       1,
       256,
     ),
     supervisorManagementBaseUrlTemplates: managementUrlTemplates(
-      required(environment, "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES"),
+      required(environment, "PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES"),
       allowInsecureInternalHttp,
     ),
     allowInsecureInternalHttp,
@@ -395,23 +395,23 @@ export async function loadProductionControlPlaneConfig(
     platformModelSourceTenantId,
     platformOperatorTenantId,
     environmentImageRevision: bounded(
-      required(environment, "AGENT_DOCK_IMAGE_REVISION"),
-      "AGENT_DOCK_IMAGE_REVISION",
+      required(environment, "PI_CLOUD_IMAGE_REVISION"),
+      "PI_CLOUD_IMAGE_REVISION",
       128,
     ),
-    webSessionCookieSecure: booleanValue(environment, "AGENT_DOCK_WEB_SESSION_COOKIE_SECURE"),
+    webSessionCookieSecure: booleanValue(environment, "PI_CLOUD_WEB_SESSION_COOKIE_SECURE"),
     webSessionTtlMs: integerValue(
       environment,
-      "AGENT_DOCK_WEB_SESSION_TTL_MS",
+      "PI_CLOUD_WEB_SESSION_TTL_MS",
       30 * 24 * 60 * 60 * 1_000,
       60_000,
       365 * 24 * 60 * 60 * 1_000,
     ),
     publicRegistration: {
-      enabled: booleanValue(environment, "AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED"),
+      enabled: booleanValue(environment, "PI_CLOUD_PUBLIC_REGISTRATION_ENABLED"),
       maximumTenants: integerValue(
         environment,
-        "AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS",
+        "PI_CLOUD_PUBLIC_REGISTRATION_MAXIMUM_TENANTS",
         32,
         2,
         1_000_000,
@@ -419,14 +419,14 @@ export async function loadProductionControlPlaneConfig(
       tenantQuotas: {
         maximumProjects: integerValue(
           environment,
-          "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS",
+          "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_PROJECTS",
           10,
           1,
           1_000_000,
         ),
         maximumSessions: integerValue(
           environment,
-          "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS",
+          "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_SESSIONS",
           100,
           1,
           1_000_000,
@@ -435,7 +435,7 @@ export async function loadProductionControlPlaneConfig(
         maximumConcurrentTurns: publicTenantMaximumConcurrentTurns,
         maximumActiveSandboxes: integerValue(
           environment,
-          "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES",
+          "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES",
           2,
           1,
           1_000_000,
@@ -451,7 +451,7 @@ export async function loadProductionDatabaseUrl(
   return secret(
     environment,
     "DATABASE_URL",
-    booleanValue(environment, "AGENT_DOCK_ALLOW_INLINE_SECRETS"),
+    booleanValue(environment, "PI_CLOUD_ALLOW_INLINE_SECRETS"),
   );
 }
 
@@ -460,8 +460,8 @@ export async function loadProductionApiToken(
 ): Promise<string> {
   return secret(
     environment,
-    "AGENT_DOCK_API_TOKEN",
-    booleanValue(environment, "AGENT_DOCK_ALLOW_INLINE_SECRETS"),
+    "PI_CLOUD_API_TOKEN",
+    booleanValue(environment, "PI_CLOUD_ALLOW_INLINE_SECRETS"),
   );
 }
 
@@ -469,70 +469,67 @@ export function loadProductionBootstrapConfig(
   environment: ProductionControlPlaneEnvironment = process.env,
 ): ProductionBootstrapConfig {
   const userId = parseUuidPathParameter(
-    required(environment, "AGENT_DOCK_USER_ID"),
-    "AGENT_DOCK_USER_ID",
+    required(environment, "PI_CLOUD_USER_ID"),
+    "PI_CLOUD_USER_ID",
   );
   return {
     tenantId: parseUuidPathParameter(
-      required(environment, "AGENT_DOCK_TENANT_ID"),
-      "AGENT_DOCK_TENANT_ID",
+      required(environment, "PI_CLOUD_TENANT_ID"),
+      "PI_CLOUD_TENANT_ID",
     ),
-    tenantSlug: bounded(
-      environment.AGENT_DOCK_TENANT_SLUG ?? "agent-dock",
-      "AGENT_DOCK_TENANT_SLUG",
-    ),
+    tenantSlug: bounded(environment.PI_CLOUD_TENANT_SLUG ?? "pi-cloud", "PI_CLOUD_TENANT_SLUG"),
     userId,
     apiCredentialId: parseUuidPathParameter(
-      required(environment, "AGENT_DOCK_API_CREDENTIAL_ID"),
-      "AGENT_DOCK_API_CREDENTIAL_ID",
+      required(environment, "PI_CLOUD_API_CREDENTIAL_ID"),
+      "PI_CLOUD_API_CREDENTIAL_ID",
     ),
     credentialBindingId: parseUuidPathParameter(
-      required(environment, "AGENT_DOCK_CREDENTIAL_BINDING_ID"),
-      "AGENT_DOCK_CREDENTIAL_BINDING_ID",
+      required(environment, "PI_CLOUD_CREDENTIAL_BINDING_ID"),
+      "PI_CLOUD_CREDENTIAL_BINDING_ID",
     ),
     modelProfileId: parseUuidPathParameter(
-      required(environment, "AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID"),
-      "AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID",
+      required(environment, "PI_CLOUD_DEFAULT_MODEL_PROFILE_ID"),
+      "PI_CLOUD_DEFAULT_MODEL_PROFILE_ID",
     ),
     modelProfileName: bounded(
-      environment.AGENT_DOCK_MODEL_PROFILE_NAME ?? "deterministic-java-repair",
-      "AGENT_DOCK_MODEL_PROFILE_NAME",
+      environment.PI_CLOUD_MODEL_PROFILE_NAME ?? "deterministic-java-repair",
+      "PI_CLOUD_MODEL_PROFILE_NAME",
     ),
     maximumProjects: integerValue(
       environment,
-      "AGENT_DOCK_TENANT_MAXIMUM_PROJECTS",
+      "PI_CLOUD_TENANT_MAXIMUM_PROJECTS",
       100,
       1,
       1_000_000,
     ),
     maximumSessions: integerValue(
       environment,
-      "AGENT_DOCK_TENANT_MAXIMUM_SESSIONS",
+      "PI_CLOUD_TENANT_MAXIMUM_SESSIONS",
       1_000,
       1,
       1_000_000,
     ),
     maximumUnsettledTurns: integerValue(
       environment,
-      "AGENT_DOCK_TENANT_MAXIMUM_UNSETTLED_TURNS",
+      "PI_CLOUD_TENANT_MAXIMUM_UNSETTLED_TURNS",
       100,
       1,
       1_000_000,
     ),
     maximumConcurrentTurns: integerValue(
       environment,
-      "AGENT_DOCK_TENANT_MAXIMUM_CONCURRENT_TURNS",
+      "PI_CLOUD_TENANT_MAXIMUM_CONCURRENT_TURNS",
       2,
       1,
       256,
     ),
     maximumActiveSandboxes: integerValue(
       environment,
-      "AGENT_DOCK_TENANT_MAXIMUM_ACTIVE_SANDBOXES",
+      "PI_CLOUD_TENANT_MAXIMUM_ACTIVE_SANDBOXES",
       64,
       1,
       1_000_000,
     ),
-    sandboxDomains: sandboxDomains(required(environment, "AGENT_DOCK_SANDBOX_DOMAINS_JSON")),
+    sandboxDomains: sandboxDomains(required(environment, "PI_CLOUD_SANDBOX_DOMAINS_JSON")),
   };
 }

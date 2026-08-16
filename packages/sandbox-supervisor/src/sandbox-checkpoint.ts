@@ -4,7 +4,7 @@ import {
   type EnvironmentValidationReport,
   type SandboxCheckpointBlob,
   type WorkspacePatch,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash } from "node:crypto";
 import { PiTurnError } from "./pi-turn-runtime.ts";
 import { validateWorkspaceSnapshot } from "./workspace-snapshot.ts";

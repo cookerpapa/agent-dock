@@ -2,9 +2,9 @@ apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
   name: controllers
-  namespace: agent-dock-eventing
+  namespace: pi-cloud-eventing
   labels:
-    strimzi.io/cluster: agent-dock-kafka
+    strimzi.io/cluster: pi-cloud-kafka
 spec:
   replicas: 3
   roles: [controller]
@@ -32,16 +32,16 @@ spec:
           whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
-              strimzi.io/cluster: agent-dock-kafka
+              strimzi.io/cluster: pi-cloud-kafka
               strimzi.io/controller-role: "true"
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
   name: brokers
-  namespace: agent-dock-eventing
+  namespace: pi-cloud-eventing
   labels:
-    strimzi.io/cluster: agent-dock-kafka
+    strimzi.io/cluster: pi-cloud-kafka
 spec:
   replicas: 6
   roles: [broker]
@@ -69,14 +69,14 @@ spec:
           whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
-              strimzi.io/cluster: agent-dock-kafka
+              strimzi.io/cluster: pi-cloud-kafka
               strimzi.io/broker-role: "true"
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
-  name: agent-dock-kafka
-  namespace: agent-dock-eventing
+  name: pi-cloud-kafka
+  namespace: pi-cloud-eventing
   annotations:
     strimzi.io/node-pools: enabled
     strimzi.io/kraft: enabled
@@ -107,12 +107,12 @@ spec:
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
 metadata:
-  name: agent-dock-worker-events-v1
-  namespace: agent-dock-eventing
+  name: pi-cloud-worker-events-v1
+  namespace: pi-cloud-eventing
   labels:
-    strimzi.io/cluster: agent-dock-kafka
+    strimzi.io/cluster: pi-cloud-kafka
 spec:
-  topicName: agent-dock-worker-events-v1
+  topicName: pi-cloud-worker-events-v1
   partitions: 256
   replicas: 3
   config:
@@ -124,19 +124,19 @@ spec:
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
-  name: agent-dock-event-gateway
-  namespace: agent-dock-eventing
+  name: pi-cloud-event-gateway
+  namespace: pi-cloud-eventing
   labels:
-    strimzi.io/cluster: agent-dock-kafka
+    strimzi.io/cluster: pi-cloud-kafka
 spec:
   authentication: { type: scram-sha-512 }
   authorization:
     type: simple
     acls:
-      - resource: { type: topic, name: agent-dock-worker-events-v1, patternType: literal }
+      - resource: { type: topic, name: pi-cloud-worker-events-v1, patternType: literal }
         operations: [Read, Write, Describe]
         host: "*"
-      - resource: { type: group, name: agent-dock-worker-event-projector-v2, patternType: literal }
+      - resource: { type: group, name: pi-cloud-worker-event-projector-v2, patternType: literal }
         operations: [Read, Describe]
         host: "*"
       - resource: { type: cluster, name: kafka-cluster, patternType: literal }

@@ -1,13 +1,13 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   type RunCancellationExecutionResult,
   RunCancellationExecutor,
-} from "@agent-dock/runtime-core/run-cancellation-executor";
+} from "@pi-cloud/runtime-core/run-cancellation-executor";
 import {
   type RunCommandExecutionResult,
   RunCommandExecutor,
-} from "@agent-dock/runtime-core/run-command-executor";
-import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
+} from "@pi-cloud/runtime-core/run-command-executor";
+import { TURN_CANCELLATION_OUTBOX_TOPIC, TURN_COMMAND_OUTBOX_TOPIC } from "@pi-cloud/protocol";
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import { Client } from "pg";
@@ -138,11 +138,11 @@ export class PostgresPiWorker {
       application_name: `${this.#identity}-run-queue`,
     });
     listener.on("notification", (message) => {
-      if (message.channel === "agent_dock_run_queue") this.#wake?.();
+      if (message.channel === "pi_cloud_run_queue") this.#wake?.();
     });
     listener.on("error", (error) => this.#observeFailure("listen", error));
     await listener.connect();
-    await listener.query("listen agent_dock_run_queue");
+    await listener.query("listen pi_cloud_run_queue");
     this.#listener = listener;
   }
 

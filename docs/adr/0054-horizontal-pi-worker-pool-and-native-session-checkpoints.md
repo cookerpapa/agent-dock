@@ -59,7 +59,7 @@ knows how to rebuild the active model context from it.
 10. Pi compaction remains native. The full pre-compaction history and the
     appended `compaction` entry stay in JSONL; Pi uses the summary,
     `firstKeptEntryId`, and recent entries to construct the next model
-    `messages[]`. AgentDock stores a separate, non-secret compaction audit row
+    `messages[]`. PiCloud stores a separate, non-secret compaction audit row
     but does not attempt to regenerate the summary.
 
 ## Consequences

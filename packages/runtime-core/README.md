@@ -1,6 +1,6 @@
-# AgentDock runtime core
+# PiCloud runtime core
 
-`@agent-dock/runtime-core` contains execution semantics shared by the Control
+`@pi-cloud/runtime-core` contains execution semantics shared by the Control
 Plane and trusted Pi Workers. It is not an HTTP API package and it does not own
 NestJS controllers, browser authentication, deployment configuration or
 Supervisor WebSocket transport.

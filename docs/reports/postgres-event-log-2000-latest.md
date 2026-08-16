@@ -2,7 +2,7 @@
 
 Generated: 2026-08-09T13:30:52.895Z
 
-This test writes 128,000 durable events for 2,000 active Sessions through the real AgentDock DurableEventStore.
+This test writes 128,000 durable events for 2,000 active Sessions through the real PiCloud DurableEventStore.
 
 - Result: FAIL
 - Throughput: 3,223.04 events/s

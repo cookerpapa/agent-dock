@@ -7,10 +7,10 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import type { CloudStepWorldState } from "./cloud-context.ts";
 
-export const PI_RUNTIME_WORLD_STATE_CUSTOM_TYPE = "agent-dock.runtime_world_state";
-export const PI_SANDBOX_RESET_CUSTOM_TYPE = "agent-dock.sandbox_reset";
-export const PI_ENVIRONMENT_CHANGED_CUSTOM_TYPE = "agent-dock.environment_changed";
-export const PI_TOOL_POLICY_CHANGED_CUSTOM_TYPE = "agent-dock.tool_policy_changed";
+export const PI_RUNTIME_WORLD_STATE_CUSTOM_TYPE = "pi-cloud.runtime_world_state";
+export const PI_SANDBOX_RESET_CUSTOM_TYPE = "pi-cloud.sandbox_reset";
+export const PI_ENVIRONMENT_CHANGED_CUSTOM_TYPE = "pi-cloud.environment_changed";
+export const PI_TOOL_POLICY_CHANGED_CUSTOM_TYPE = "pi-cloud.tool_policy_changed";
 
 export const PI_SANDBOX_RESET_MESSAGE = [
   "<sandbox_reset>",

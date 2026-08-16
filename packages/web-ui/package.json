@@ -1,5 +1,5 @@
 {
-  "name": "@agent-dock/web-ui",
+  "name": "@pi-cloud/web-ui",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest --run"
   },
   "dependencies": {
-    "@agent-dock/protocol": "0.1.0",
+    "@pi-cloud/protocol": "0.1.0",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "highlight.js": "10.7.3",

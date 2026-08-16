@@ -1,21 +1,21 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type {
   TenantApiAuthenticator,
   TenantRequestIdentity,
-} from "@agent-dock/control-plane/tenant-identity";
-import type { AgentDockEvent, EventAckMessage, EventPublishMessage } from "@agent-dock/protocol";
+} from "@pi-cloud/control-plane/tenant-identity";
+import type { PiCloudEvent, EventAckMessage, EventPublishMessage } from "@pi-cloud/protocol";
 import type {
   DurableEventGroupIngestor,
   DurableEventLog,
-} from "@agent-dock/runtime-core/durable-event-store";
-import type { LiveTurnSnapshotSource } from "@agent-dock/runtime-core/live-turn-snapshot";
-import { DurableEventStoreError } from "@agent-dock/runtime-core/durable-event-store";
-import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
+} from "@pi-cloud/runtime-core/durable-event-store";
+import type { LiveTurnSnapshotSource } from "@pi-cloud/runtime-core/live-turn-snapshot";
+import { DurableEventStoreError } from "@pi-cloud/runtime-core/durable-event-store";
+import { HttpDurableEventIngestor } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
 import type {
   SessionEventNotification,
   SessionEventNotificationHandlers,
   SessionEventNotificationTransport,
-} from "@agent-dock/runtime-core/session-event-notifications";
+} from "@pi-cloud/runtime-core/session-event-notifications";
 import type { Kysely, Transaction } from "kysely";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -38,7 +38,7 @@ const identity: TenantRequestIdentity = {
   defaultModelProfileId: "00000000-0000-4000-8000-000000000004",
 };
 
-const event: AgentDockEvent = {
+const event: PiCloudEvent = {
   schemaVersion: 1,
   eventId: "00000000-0000-4000-8000-000000000021",
   sessionId: SESSION_ID,
@@ -123,7 +123,7 @@ afterEach(async () => {
 
 describe("Event Gateway", () => {
   it("loads Kafka TLS/SCRAM only as one complete file-backed identity", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "agent-dock-event-gateway-config-"));
+    const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-event-gateway-config-"));
     try {
       const database = resolve(root, "database-url");
       const ca = resolve(root, "ca.crt");
@@ -136,40 +136,40 @@ describe("Event Gateway", () => {
         writeFile(ca, "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n", {
           mode: 0o600,
         }),
-        writeFile(username, "agent-dock-event-gateway\n", { mode: 0o600 }),
+        writeFile(username, "pi-cloud-event-gateway\n", { mode: 0o600 }),
         writeFile(password, "secret-password\n", { mode: 0o600 }),
         writeFile(ingestToken, `${"i".repeat(48)}\n`, { mode: 0o600 }),
         writeFile(liveEventStoreUrl, "rediss://valkey.example:6379\n", { mode: 0o600 }),
       ]);
       vi.stubEnv("DATABASE_URL_FILE", database);
-      vi.stubEnv("AGENT_DOCK_KAFKA_BROKERS", "kafka.example:9093");
-      vi.stubEnv("AGENT_DOCK_KAFKA_CA_FILE", ca);
+      vi.stubEnv("PI_CLOUD_KAFKA_BROKERS", "kafka.example:9093");
+      vi.stubEnv("PI_CLOUD_KAFKA_CA_FILE", ca);
       await expect(loadEventGatewayProductionConfig()).rejects.toThrow(
         "Kafka TLS/SASL secret files must be configured together",
       );
-      vi.stubEnv("AGENT_DOCK_KAFKA_USERNAME_FILE", username);
-      vi.stubEnv("AGENT_DOCK_KAFKA_PASSWORD_FILE", password);
-      vi.stubEnv("AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE", ingestToken);
-      vi.stubEnv("AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE", liveEventStoreUrl);
+      vi.stubEnv("PI_CLOUD_KAFKA_USERNAME_FILE", username);
+      vi.stubEnv("PI_CLOUD_KAFKA_PASSWORD_FILE", password);
+      vi.stubEnv("PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE", ingestToken);
+      vi.stubEnv("PI_CLOUD_LIVE_EVENT_STORE_URL_FILE", liveEventStoreUrl);
       await expect(loadEventGatewayProductionConfig()).resolves.toMatchObject({
         autoRepairLiveEvents: true,
         liveEventStoreUrl: "rediss://valkey.example:6379",
         kafka: {
           brokers: ["kafka.example:9093"],
           security: {
-            username: "agent-dock-event-gateway",
+            username: "pi-cloud-event-gateway",
             password: "secret-password",
             ca: "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
           },
         },
       });
-      vi.stubEnv("AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS", "false");
+      vi.stubEnv("PI_CLOUD_AUTO_REPAIR_LIVE_EVENTS", "false");
       await expect(loadEventGatewayProductionConfig()).resolves.toMatchObject({
         autoRepairLiveEvents: false,
       });
-      vi.stubEnv("AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS", "sometimes");
+      vi.stubEnv("PI_CLOUD_AUTO_REPAIR_LIVE_EVENTS", "sometimes");
       await expect(loadEventGatewayProductionConfig()).rejects.toThrow(
-        "AGENT_DOCK_AUTO_REPAIR_LIVE_EVENTS must be true or false",
+        "PI_CLOUD_AUTO_REPAIR_LIVE_EVENTS must be true or false",
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -186,7 +186,7 @@ describe("Event Gateway", () => {
     expect(response.json()).toEqual({
       error: {
         code: "authentication_required",
-        message: "A valid AgentDock login session or API credential is required",
+        message: "A valid PiCloud login session or API credential is required",
       },
     });
   });

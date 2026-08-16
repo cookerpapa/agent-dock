@@ -8,7 +8,7 @@
 
 ## Executive conclusion
 
-There is no single store or scheduler that should own the whole AgentDock
+There is no single store or scheduler that should own the whole PiCloud
 system.
 
 The recommended target is:
@@ -36,13 +36,13 @@ CubeSandbox
 
 Temporal is the best-fit mature open-source durable workflow engine if a future
 controlled migration becomes worthwhile. The executable spike passed its core
-mechanism tests, but the present AgentDock Run reduces to one long Pi Activity.
+mechanism tests, but the present PiCloud Run reduces to one long Pi Activity.
 Temporal would therefore add a service and a second persistence boundary while
 leaving Tool idempotency, fencing, tenant fairness, Session ordering, event
-streaming, and checkpoint CAS in AgentDock. Production remains on the current
+streaming, and checkpoint CAS in PiCloud. Production remains on the current
 PostgreSQL Run/Attempt/Lease/Fencing authority.
 
-Conversation state should not be moved into Temporal. AgentDock's current split
+Conversation state should not be moved into Temporal. PiCloud's current split
 is sound: PostgreSQL stores queryable product/control state and Pi's exact JSONL
 is the native resume authority. The original whole-file snapshot remains a
 read-compatible v1; production writes now use content-addressed, line-aligned
@@ -97,12 +97,12 @@ GitHub stars at the observation time were approximately Temporal 21.8k, Dapr
 26.0k, Argo Workflows 16.8k, Netflix Conductor 12.8k, and Cadence 9.4k. These
 numbers did not determine the decision.
 
-## Why Temporal fits AgentDock
+## Why Temporal fits PiCloud
 
 The current system already contains many concepts that Temporal standardizes:
 
 ```text
-AgentDock today                 Temporal primitive
+PiCloud today                 Temporal primitive
 -----------------------------------------------------------------
 durable Run                     Workflow Execution
 outbound Supervisor connection Task Queue polling Worker
@@ -115,7 +115,7 @@ Run history                    Workflow Event History
 
 The important mismatch is arbitrary Agent side effects. Temporal recommends
 idempotent Activities and can execute an Activity more than once. It cannot
-make an unknown `bash`, GitHub write, or model charge exactly once. AgentDock
+make an unknown `bash`, GitHub write, or model charge exactly once. PiCloud
 must retain:
 
 - unique Tool Call IDs;
@@ -130,7 +130,7 @@ idempotency and fencing.
 
 ## Proposed Temporal ownership boundary
 
-Use one bounded `RunWorkflow` per accepted AgentDock Run, not one indefinitely
+Use one bounded `RunWorkflow` per accepted PiCloud Run, not one indefinitely
 growing Workflow containing a complete user Session.
 
 ```text
@@ -139,7 +139,7 @@ HTTP transaction
         |
 tenant-fair admission
         |
-idempotent start Workflow ID = agent-dock/run/<runId>
+idempotent start Workflow ID = pi-cloud/run/<runId>
         |
 Temporal RunWorkflow
   allocate fenced RunAttempt
@@ -206,7 +206,7 @@ proved:
 This is strong evidence that Temporal's mechanisms work. It is not evidence
 that migrating today is a net improvement:
 
-- the Activity body would still contain the complete Pi Run and AgentDock
+- the Activity body would still contain the complete Pi Run and PiCloud
   fencing protocol;
 - model and arbitrary Tool side effects cannot be blindly replayed;
 - PostgreSQL remains necessary for transactional admission, Session order,
@@ -235,7 +235,7 @@ the direct pattern: it creates a per-attempt AgentSession, injects model and
 tool adapters, forwards cancellation, flushes transcript state, and disposes
 the session.
 
-AgentDock's existing direct-SDK rehydration probe also passed 1,000 cold logical
+PiCloud's existing direct-SDK rehydration probe also passed 1,000 cold logical
 Sessions with only ten active runtimes, and the new 20-sample benchmark measured:
 
 | Boundary | p50 | p95 |
@@ -270,9 +270,9 @@ the production Run path.
 
 PostgreSQL keeps bounded, tenant-scoped conversation projections for the Web
 product. It is optimized for list/detail/search and may be rebuilt from durable
-AgentDock events. It is not a Pi resume format.
+PiCloud events. It is not a Pi resume format.
 
-### 2. AgentDock durable event stream
+### 2. PiCloud durable event stream
 
 PostgreSQL keeps immutable, ordered domain events and sequence cursors for SSE,
 audit, and failure recovery. This follows selective event sourcing: append-only
@@ -326,7 +326,7 @@ Each canonical immutable manifest contains:
 
 ```json
 {
-  "format": "agent-dock.pi-session-manifest.v2",
+  "format": "pi-cloud.pi-session-manifest.v2",
   "piVersion": "pinned version",
   "previousManifestSha256": "optional",
   "segments": [
@@ -360,7 +360,7 @@ Restore:
 5. Start pinned Pi with `--session`.
 
 Pi compaction remains correct because compaction is another appended native
-JSONL entry. Neither AgentDock nor Temporal reconstructs its summary.
+JSONL entry. Neither PiCloud nor Temporal reconstructs its summary.
 
 To prevent too many small object reads, periodically create a consolidated base
 segment when measured segment count/restore latency crosses a threshold.
@@ -370,7 +370,7 @@ retention and GC permit removal.
 ## Implemented checkpoint-v2 evidence
 
 The production checkpoint adapter now writes
-`agent-dock.pi-session-manifest.v2`. Old NDJSON artifact rows remain readable,
+`pi-cloud.pi-session-manifest.v2`. Old NDJSON artifact rows remain readable,
 so deployment is an online forward migration: the next settled Run reads v1
 and writes v2. New objects are scoped as:
 
@@ -407,7 +407,7 @@ was stopped. The peer Worker restored the native Pi state, recovered the
 previous-turn marker and committed another v2 checkpoint. Four additional Runs
 then occupied both Worker connections. Direct PostgreSQL inspection confirmed
 that the six new `pi_session_snapshot` artifacts use
-`application/vnd.agent-dock.pi-session-manifest+json` and immutable
+`application/vnd.pi-cloud.pi-session-manifest+json` and immutable
 `pi-sessions/.../manifests/<sha256>.json` object keys. This verifies the
 production read/write path and cross-Worker restore, while the separate pinned
 Pi integration test remains the evidence for threshold compaction fidelity.
@@ -420,13 +420,13 @@ Pi integration test remains the evidence for threshold compaction fidelity.
   transcript/blob store.
 - Kafka/Pulsar are distributed logs, but introduce a separate cluster without
   solving Pi byte fidelity or committed checkpoint-head CAS.
-- EventStoreDB/Kurrent can hold domain streams, but AgentDock already needs
+- EventStoreDB/Kurrent can hold domain streams, but PiCloud already needs
   PostgreSQL transactions for tenant admission, projections, fences, and usage.
 - Git/Iceberg/Delta Lake solve different repository or analytical-table
   problems and would add impedance rather than remove custom Pi adaptation.
 
 PostgreSQL plus S3-compatible storage are already mature open-source
-foundations. The small AgentDock-owned manifest format is the required adapter
+foundations. The small PiCloud-owned manifest format is the required adapter
 between those general systems and Pi's documented byte format.
 
 ## Primary sources

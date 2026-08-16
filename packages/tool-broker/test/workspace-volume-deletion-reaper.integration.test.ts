@@ -1,4 +1,4 @@
-import { createDatabase, runMigrations } from "@agent-dock/database";
+import { createDatabase, runMigrations } from "@pi-cloud/database";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { lstat, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -31,7 +31,7 @@ describe("WorkspaceVolumeDeletionReaper", () => {
   it("waits for the live Cube activation before purging POSIX Workspace data", async () => {
     const pglite = await PGlite.create();
     const socket = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port: 0 });
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "agent-dock-delete-reaper-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "pi-cloud-delete-reaper-"));
     await socket.start();
     const database = createDatabase({
       connectionString: `postgresql://postgres@${socket.getServerConn()}/postgres?sslmode=disable`,
@@ -76,7 +76,7 @@ describe("WorkspaceVolumeDeletionReaper", () => {
         sessionId: "session-delete",
         volumeId,
       });
-      const volumeRoot = join(workspaceRoot, `agentdock-posix-${volumeId}`);
+      const volumeRoot = join(workspaceRoot, `picloud-posix-${volumeId}`);
       await writeFile(join(volumeRoot, "workspace", "private.txt"), "private\n");
       await database
         .updateTable("workspaces")

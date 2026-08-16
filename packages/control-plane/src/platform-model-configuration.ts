@@ -1,9 +1,9 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type { Kysely } from "kysely";
 import {
   PostgresTenantModelCredentialResolver,
   type TenantModelCredentialVault,
-} from "@agent-dock/runtime-core/model-credential-runtime";
+} from "@pi-cloud/runtime-core/model-credential-runtime";
 import type { PrivateTenantInitialModel } from "./tenant-administration.ts";
 
 export class PlatformModelConfigurationError extends Error {
@@ -46,7 +46,7 @@ export async function resolvePlatformInitialModel(
   if (profile === undefined || !profile.enabled || profile.credentialStatus !== "active") {
     throw new PlatformModelConfigurationError("Platform default model is unavailable");
   }
-  if (profile.provider === "agent-dock-fake" && profile.modelId === "agent-dock-fake") {
+  if (profile.provider === "pi-cloud-fake" && profile.modelId === "pi-cloud-fake") {
     return undefined;
   }
   if (

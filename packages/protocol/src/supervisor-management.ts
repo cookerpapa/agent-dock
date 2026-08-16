@@ -184,16 +184,16 @@ export type SupervisorManagementRequest = Static<typeof SupervisorManagementRequ
 export type SupervisorManagementResponse = Static<typeof SupervisorManagementResponseSchema>;
 export type InternalServiceError = Static<typeof InternalServiceErrorSchema>;
 
-export class AgentDockInternalProtocolError extends Error {
+export class PiCloudInternalProtocolError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "AgentDockInternalProtocolError";
+    this.name = "PiCloudInternalProtocolError";
   }
 }
 
 function parse<T>(schema: TSchema, value: unknown, label: string): T {
   if (!Value.Check(schema, value)) {
-    throw new AgentDockInternalProtocolError(`${label} failed validation`);
+    throw new PiCloudInternalProtocolError(`${label} failed validation`);
   }
   return value as T;
 }

@@ -13,7 +13,7 @@ import {
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
   type ToolWebProxyBootstrap,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash, randomBytes } from "node:crypto";
 import { isIPv4 } from "node:net";
 import {
@@ -21,7 +21,7 @@ import {
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   parsePersistentVolumeReference,
-} from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/workspace-runtime";
 import {
   CUBESANDBOX_TOOL_SERVICE_PORT,
   OfficialCubeSandboxRuntimeClient,
@@ -77,27 +77,27 @@ export const CUBESANDBOX_TOOL_POLICY: SandboxPolicy = Object.freeze({
 });
 
 const METADATA = Object.freeze({
-  managed: "agentdock.managed",
-  provider: "agentdock.provider",
-  workload: "agentdock.workload",
-  activationId: "agentdock.activation_id",
-  tenantId: "agentdock.tenant_id",
-  projectId: "agentdock.project_id",
-  workspaceId: "agentdock.workspace_id",
-  supervisorId: "agentdock.supervisor_id",
-  bootId: "agentdock.boot_id",
-  sandboxId: "agentdock.sandbox_id",
-  commandId: "agentdock.command_id",
-  sessionId: "agentdock.session_id",
-  turnId: "agentdock.turn_id",
-  attemptId: "agentdock.attempt_id",
-  leaseId: "agentdock.lease_id",
-  fencingToken: "agentdock.fencing_token",
-  bindingSha256: "agentdock.binding_sha256",
-  imageRevision: "agentdock.image_revision",
+  managed: "picloud.managed",
+  provider: "picloud.provider",
+  workload: "picloud.workload",
+  activationId: "picloud.activation_id",
+  tenantId: "picloud.tenant_id",
+  projectId: "picloud.project_id",
+  workspaceId: "picloud.workspace_id",
+  supervisorId: "picloud.supervisor_id",
+  bootId: "picloud.boot_id",
+  sandboxId: "picloud.sandbox_id",
+  commandId: "picloud.command_id",
+  sessionId: "picloud.session_id",
+  turnId: "picloud.turn_id",
+  attemptId: "picloud.attempt_id",
+  leaseId: "picloud.lease_id",
+  fencingToken: "picloud.fencing_token",
+  bindingSha256: "picloud.binding_sha256",
+  imageRevision: "picloud.image_revision",
 } as const);
 
-const ASSIGNMENT_METADATA_PREFIX = "agentdock.assignment.v1.";
+const ASSIGNMENT_METADATA_PREFIX = "picloud.assignment.v1.";
 
 type CubeAssignmentMetadata = Readonly<{
   activationId: string;
@@ -250,7 +250,7 @@ function physicalBindingSha256(
   environment: SandboxCreateSpec["environment"],
 ): string {
   return createHash("sha256")
-    .update("agent-dock.cubesandbox-binding.v1\0")
+    .update("pi-cloud.cubesandbox-binding.v1\0")
     .update(
       JSON.stringify({
         activationId,
@@ -466,7 +466,7 @@ function assignmentFromMetadata(
 
 function runtimeUuid(sandboxId: string): string {
   const bytes = createHash("sha256")
-    .update(`agentdock:cubesandbox:${sandboxId}`)
+    .update(`picloud:cubesandbox:${sandboxId}`)
     .digest()
     .subarray(0, 16);
   bytes[6] = (bytes[6]! & 0x0f) | 0x50;
@@ -633,7 +633,7 @@ export class CubeSandboxProvider implements SandboxProvider {
     );
     const authoritySecret = handoffSecret();
     const volumeId = workspaceVolumeId(spec.assignment);
-    await this.#client.ensureVolume(volumeId, "agentdock-posix");
+    await this.#client.ensureVolume(volumeId, "picloud-posix");
     const prepared = await this.#workspaceVolumeGateway.prepare({
       tenantId: spec.assignment.tenantId,
       workspaceId: spec.assignment.workspaceId,

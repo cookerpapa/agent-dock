@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  AgentDockProtocolError,
-  createAgentDockEventFactory,
+  PiCloudProtocolError,
+  createPiCloudEventFactory,
   modelSamplingHeaders,
-  parseAgentDockEvent,
+  parsePiCloudEvent,
   parseModelSamplingIdentity,
-  type AgentDockEventBody,
+  type PiCloudEventBody,
 } from "../src/index.ts";
 
 const EVENT_IDS = [
@@ -16,7 +16,7 @@ const EVENT_IDS = [
 
 function createFactory(initialSequence = 0) {
   let idIndex = 0;
-  return createAgentDockEventFactory(
+  return createPiCloudEventFactory(
     { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
     {
       initialSequence,
@@ -26,7 +26,7 @@ function createFactory(initialSequence = 0) {
   );
 }
 
-describe("AgentDockEventSchema", () => {
+describe("PiCloudEventSchema", () => {
   it("creates validated, monotonically sequenced events", () => {
     const factory = createFactory(40);
     const first = factory.next({ type: "turn.started", payload: { inputKind: "prompt" } });
@@ -35,11 +35,11 @@ describe("AgentDockEventSchema", () => {
     expect(first).toMatchObject({ schemaVersion: 1, seq: 41, turnId: "turn-1" });
     expect(second).toMatchObject({ seq: 42, type: "assistant.text.delta" });
     expect(factory.currentSequence()).toBe(42);
-    expect(parseAgentDockEvent(second)).toEqual(second);
+    expect(parsePiCloudEvent(second)).toEqual(second);
   });
 
   it("covers the public v1 event categories", () => {
-    const bodies: AgentDockEventBody[] = [
+    const bodies: PiCloudEventBody[] = [
       { type: "turn.started", payload: { inputKind: "continue" } },
       { type: "session.state.changed", payload: { from: "idle", to: "running" } },
       {
@@ -107,7 +107,7 @@ describe("AgentDockEventSchema", () => {
     ];
 
     let id = 0;
-    const factory = createAgentDockEventFactory(
+    const factory = createPiCloudEventFactory(
       { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
       {
         clock: () => new Date("2026-07-18T08:00:00.000Z"),
@@ -124,11 +124,11 @@ describe("AgentDockEventSchema", () => {
       payload: { message: "ok", level: "info" },
     });
 
-    expect(() => parseAgentDockEvent({ ...valid, sessionId: "" })).toThrow(AgentDockProtocolError);
-    expect(() => parseAgentDockEvent({ ...valid, seq: 0 })).toThrow(AgentDockProtocolError);
+    expect(() => parsePiCloudEvent({ ...valid, sessionId: "" })).toThrow(PiCloudProtocolError);
+    expect(() => parsePiCloudEvent({ ...valid, seq: 0 })).toThrow(PiCloudProtocolError);
     expect(() =>
-      parseAgentDockEvent({ ...valid, piRawEvent: { type: "extension_ui_request" } }),
-    ).toThrow(AgentDockProtocolError);
+      parsePiCloudEvent({ ...valid, piRawEvent: { type: "extension_ui_request" } }),
+    ).toThrow(PiCloudProtocolError);
   });
 
   it("accepts a bounded final workspace patch on turn completion", () => {
@@ -143,7 +143,7 @@ describe("AgentDockEventSchema", () => {
         },
       },
     });
-    expect(parseAgentDockEvent(completion)).toEqual(completion);
+    expect(parsePiCloudEvent(completion)).toEqual(completion);
 
     expect(() =>
       createFactory().next({
@@ -157,7 +157,7 @@ describe("AgentDockEventSchema", () => {
           },
         },
       }),
-    ).toThrow(AgentDockProtocolError);
+    ).toThrow(PiCloudProtocolError);
 
     expect(() =>
       createFactory().next({
@@ -187,9 +187,9 @@ describe("AgentDockEventSchema", () => {
     const headers = modelSamplingHeaders(identity);
     expect(
       parseModelSamplingIdentity({
-        stepSequence: headers["x-agent-dock-step-sequence"],
-        stepSha256: headers["x-agent-dock-step-sha256"],
-        samplingAttempt: headers["x-agent-dock-sampling-attempt"],
+        stepSequence: headers["x-pi-cloud-step-sequence"],
+        stepSha256: headers["x-pi-cloud-step-sha256"],
+        samplingAttempt: headers["x-pi-cloud-sampling-attempt"],
       }),
     ).toEqual(identity);
     expect(() =>
@@ -203,7 +203,7 @@ describe("AgentDockEventSchema", () => {
 
   it("allows null turn IDs only for session-level events", () => {
     let idIndex = 0;
-    const factory = createAgentDockEventFactory(
+    const factory = createPiCloudEventFactory(
       { sessionId: "session-1", turnId: null, agentId: "root" },
       {
         clock: () => new Date("2026-07-18T08:00:00.000Z"),
@@ -218,7 +218,7 @@ describe("AgentDockEventSchema", () => {
     expect(stateEvent).toMatchObject({ seq: 1, turnId: null });
 
     expect(() => factory.next({ type: "turn.started", payload: { inputKind: "prompt" } })).toThrow(
-      AgentDockProtocolError,
+      PiCloudProtocolError,
     );
     expect(factory.currentSequence()).toBe(1);
   });
@@ -228,9 +228,9 @@ describe("AgentDockEventSchema", () => {
     const invalidBody = {
       type: "ui.notification",
       payload: { message: "bad level", level: "debug" },
-    } as unknown as AgentDockEventBody;
+    } as unknown as PiCloudEventBody;
 
-    expect(() => factory.next(invalidBody)).toThrow(AgentDockProtocolError);
+    expect(() => factory.next(invalidBody)).toThrow(PiCloudProtocolError);
     expect(factory.currentSequence()).toBe(0);
 
     const valid = factory.next({

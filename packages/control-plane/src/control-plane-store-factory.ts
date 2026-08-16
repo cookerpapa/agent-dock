@@ -1,20 +1,20 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type { Kysely } from "kysely";
 import { ControlPlaneStore } from "./control-plane-store.ts";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
-import type { AgentDockMetrics } from "@agent-dock/observability";
+import type { PiCloudMetrics } from "@pi-cloud/observability";
 
 export class ControlPlaneStoreFactory {
   readonly #database: Kysely<Database>;
   readonly #idGenerator: (() => string) | undefined;
   readonly #environmentImageRevision: string | undefined;
-  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #metrics: PiCloudMetrics | undefined;
 
   constructor(options: {
     database: Kysely<Database>;
     idGenerator?: () => string;
     environmentImageRevision?: string;
-    metrics?: AgentDockMetrics;
+    metrics?: PiCloudMetrics;
   }) {
     this.#database = options.database;
     this.#idGenerator = options.idGenerator;

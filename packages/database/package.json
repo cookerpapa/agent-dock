@@ -1,5 +1,5 @@
 {
-  "name": "@agent-dock/database",
+  "name": "@pi-cloud/database",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
     "migrate:down": "node src/migrate.ts down"
   },
   "dependencies": {
-    "@agent-dock/domain": "0.1.0",
+    "@pi-cloud/domain": "0.1.0",
     "kysely": "0.29.4",
     "pg": "8.22.0"
   },

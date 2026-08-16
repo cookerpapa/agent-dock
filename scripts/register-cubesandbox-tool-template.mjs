@@ -16,20 +16,20 @@ const CUBE_COMMIT = "8721dd151971ce3c2966482bbd32904ad98f378e";
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 const explicitKubeconfig = process.env.KUBECONFIG;
 const kubeconfig = explicitKubeconfig ?? "/etc/rancher/k3s/k3s.yaml";
-let directCubeMasterAddress = process.env.AGENT_DOCK_CUBE_MASTER_ADDRESS;
-let directCubeMasterPort = process.env.AGENT_DOCK_CUBE_MASTER_PORT ?? "8089";
-let directCubeMasterCli = process.env.AGENT_DOCK_CUBE_MASTER_CLI;
-let directRegistryAddress = process.env.AGENT_DOCK_CUBE_REGISTRY_ADDRESS;
-let directRegistryPort = process.env.AGENT_DOCK_CUBE_REGISTRY_PORT ?? "5000";
+let directCubeMasterAddress = process.env.PI_CLOUD_CUBE_MASTER_ADDRESS;
+let directCubeMasterPort = process.env.PI_CLOUD_CUBE_MASTER_PORT ?? "8089";
+let directCubeMasterCli = process.env.PI_CLOUD_CUBE_MASTER_CLI;
+let directRegistryAddress = process.env.PI_CLOUD_CUBE_REGISTRY_ADDRESS;
+let directRegistryPort = process.env.PI_CLOUD_CUBE_REGISTRY_PORT ?? "5000";
 let directManagement = false;
 const registryHost = "localhost:5000";
-const registryRepository = `${registryHost}/agent-dock/cubesandbox-tool`;
+const registryRepository = `${registryHost}/pi-cloud/cubesandbox-tool`;
 const clusterRegistryRepository =
-  "agent-dock-cube-template-registry.cube-system.svc.cluster.local:5000/agent-dock/cubesandbox-tool";
+  "pi-cloud-cube-template-registry.cube-system.svc.cluster.local:5000/pi-cloud/cubesandbox-tool";
 const templatePath = resolve(runtimeDirectory, "cubesandbox/template.json");
 const clusterPath = resolve(runtimeDirectory, "cubesandbox/cluster.json");
 const credentialPath = resolve(runtimeDirectory, "secrets/cubesandbox-api-key");
@@ -121,7 +121,7 @@ async function repositoryHead() {
     "HEAD",
   ]);
   if (!/^[a-f0-9]{40}$/.test(revision)) {
-    throw new Error("AgentDock Git revision is invalid");
+    throw new Error("PiCloud Git revision is invalid");
   }
   return revision;
 }
@@ -229,7 +229,7 @@ async function startRegistryForward() {
       "-n",
       "cube-system",
       "port-forward",
-      "service/agent-dock-cube-template-registry",
+      "service/pi-cloud-cube-template-registry",
       "5000:5000",
       "--address",
       "127.0.0.1",
@@ -345,7 +345,7 @@ async function currentTemplateId() {
 }
 
 async function pruneCubeTemplates(inventory, protectedTemplateIds, phase) {
-  const retention = parseCubeTemplateRetention(process.env.AGENT_DOCK_CUBE_TEMPLATE_RETENTION);
+  const retention = parseCubeTemplateRetention(process.env.PI_CLOUD_CUBE_TEMPLATE_RETENTION);
   const selected = selectCubeTemplatesForDeletion({
     inventory: inventory?.data,
     protectedTemplateIds,
@@ -376,7 +376,7 @@ const dirty = await capture(
   { timeout: 10_000 },
 );
 if (dirty.length > 0) {
-  throw new Error("Commit AgentDock changes before registering an immutable Cube template");
+  throw new Error("Commit PiCloud changes before registering an immutable Cube template");
 }
 const clusterFile = await readPrivate(clusterPath, 64 * 1_024, "Cube cluster evidence");
 const cluster = parseJson(clusterFile.value, "Cube cluster evidence");
@@ -409,7 +409,7 @@ if (
     directRegistryAddress === undefined)
 ) {
   throw new Error(
-    "Direct Cube management requires AGENT_DOCK_CUBE_MASTER_ADDRESS, AGENT_DOCK_CUBE_MASTER_CLI and AGENT_DOCK_CUBE_REGISTRY_ADDRESS together",
+    "Direct Cube management requires PI_CLOUD_CUBE_MASTER_ADDRESS, PI_CLOUD_CUBE_MASTER_CLI and PI_CLOUD_CUBE_REGISTRY_ADDRESS together",
   );
 }
 if (!explicitlyConfiguredDirectManagement) {
@@ -463,7 +463,7 @@ if (!directManagement) {
     "cube-system",
     "rollout",
     "status",
-    "deployment/agent-dock-cube-template-registry",
+    "deployment/pi-cloud-cube-template-registry",
     "--timeout=120s",
   ]);
 }
@@ -493,9 +493,9 @@ await run("docker", [
   "--file",
   "deploy/cubesandbox/Dockerfile.tool",
   "--build-arg",
-  "AGENT_DOCK_VERSION=cube-primary",
+  "PI_CLOUD_VERSION=cube-primary",
   "--build-arg",
-  `AGENT_DOCK_REVISION=${revision}`,
+  `PI_CLOUD_REVISION=${revision}`,
   "--tag",
   imageTag,
   ".",
@@ -503,14 +503,14 @@ await run("docker", [
 await run("npm", ["run", "cubesandbox:template-check"], {
   environment: {
     ...environment,
-    AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE: imageTag,
-    AGENT_DOCK_IMAGE_REVISION: revision,
+    PI_CLOUD_CUBESANDBOX_TOOL_IMAGE: imageTag,
+    PI_CLOUD_IMAGE_REVISION: revision,
   },
 });
 
 const forward = await startRegistryForward();
 let digest;
-const isolatedDockerConfig = await mkdtemp(join(tmpdir(), "agent-dock-docker-config-"));
+const isolatedDockerConfig = await mkdtemp(join(tmpdir(), "pi-cloud-docker-config-"));
 try {
   const configHandle = await open(join(isolatedDockerConfig, "config.json"), "wx", 0o600);
   try {

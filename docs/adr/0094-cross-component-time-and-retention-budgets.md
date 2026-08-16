@@ -6,7 +6,7 @@ Accepted on 2026-08-12.
 
 ## Context
 
-AgentDock crosses several independently configured failure detectors and
+PiCloud crosses several independently configured failure detectors and
 durability windows. A value can be locally valid while still making the whole
 path incorrect. For example, a five-minute Tool command behind a five-minute
 HTTP timeout can finish in Cube but lose its response at the Manager boundary,

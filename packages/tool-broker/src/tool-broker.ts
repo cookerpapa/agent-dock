@@ -13,13 +13,13 @@ import type {
   ToolSandboxReleaseResponse,
   ToolBrokerMaterializeFileRequest,
   ToolBrokerMaterializeFileResponse,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   canonicalEnvironmentRecipeJson,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
   DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   DEFAULT_TOOL_SANDBOX_POLICY,

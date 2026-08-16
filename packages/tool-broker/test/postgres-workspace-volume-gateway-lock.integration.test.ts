@@ -1,9 +1,9 @@
-import { createDatabase } from "@agent-dock/database";
+import { createDatabase } from "@pi-cloud/database";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostgresWorkspaceVolumeGatewayLock } from "../src/index.ts";
 
-const connectionString = process.env.AGENT_DOCK_POSTGRES_INTEGRATION_URL;
+const connectionString = process.env.PI_CLOUD_POSTGRES_INTEGRATION_URL;
 const resources: Array<() => Promise<void>> = [];
 
 afterEach(async () => {

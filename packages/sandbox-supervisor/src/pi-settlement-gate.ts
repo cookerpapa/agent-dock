@@ -1,9 +1,9 @@
-import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import type { ExecuteTurnCommandMessage } from "@pi-cloud/protocol";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 
 export const SETTLEMENT_GATE_COMMAND_ID = "settlement-gate" as const;
-export const PI_SETTLEMENT_GATE_CUSTOM_TYPE = "agent-dock.settlement_gate" as const;
+export const PI_SETTLEMENT_GATE_CUSTOM_TYPE = "pi-cloud.settlement_gate" as const;
 
 export type PiSettlementGatePolicy = Readonly<{
   command: string;

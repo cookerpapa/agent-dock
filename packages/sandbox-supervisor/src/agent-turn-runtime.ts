@@ -1,4 +1,4 @@
-import type { AgentModelRuntime, ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import type { AgentModelRuntime, ExecuteTurnCommandMessage } from "@pi-cloud/protocol";
 
 export type AgentTurnScenario =
   "text" | "java_repair" | "java_followup" | "coding_eval" | "tool_hold" | "timeout";

@@ -1,6 +1,6 @@
-export const MODEL_STEP_SEQUENCE_HEADER = "x-agent-dock-step-sequence" as const;
-export const MODEL_STEP_SHA256_HEADER = "x-agent-dock-step-sha256" as const;
-export const MODEL_SAMPLING_ATTEMPT_HEADER = "x-agent-dock-sampling-attempt" as const;
+export const MODEL_STEP_SEQUENCE_HEADER = "x-pi-cloud-step-sequence" as const;
+export const MODEL_STEP_SHA256_HEADER = "x-pi-cloud-step-sha256" as const;
+export const MODEL_SAMPLING_ATTEMPT_HEADER = "x-pi-cloud-sampling-attempt" as const;
 
 export type ModelSamplingIdentity = Readonly<{
   stepSequence: number;

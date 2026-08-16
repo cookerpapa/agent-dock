@@ -1,0 +1,6 @@
+dependencies:
+- name: pi-cloud-pi-worker-pool
+  repository: file://../pi-cloud-pi-worker-pool
+  version: 0.1.0
+digest: sha256:6c649b62e57d14f9dd8a620f4c9f060ca5e16fe4863cd6369d0bcd30c3386e30
+generated: "2026-08-16T14:57:30.223283338+08:00"

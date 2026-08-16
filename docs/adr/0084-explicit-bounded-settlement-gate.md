@@ -11,7 +11,7 @@ Workspace without running the project's actual verification command. A generic
 "always review once more" loop would add latency and model cost to chat-only
 Runs, guess completion criteria from prompts, and risk unbounded self-review.
 
-AgentDock already freezes a project environment recipe in the accepted Turn.
+PiCloud already freezes a project environment recipe in the accepted Turn.
 Its verification commands are trusted project configuration rather than model
 output, so one deliberately named command can define an opt-in completion
 criterion without adding another mutable configuration channel.

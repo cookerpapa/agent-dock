@@ -1,29 +1,29 @@
-import { RunCancellationExecutor } from "@agent-dock/runtime-core/run-cancellation-executor";
+import { RunCancellationExecutor } from "@pi-cloud/runtime-core/run-cancellation-executor";
 import {
   type CheckpointObjectStore,
   PostgresSandboxCheckpointStore,
   TtlCheckpointObjectStore,
-} from "@agent-dock/runtime-core/checkpoint-runtime";
-import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
-import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
-import { GroupedDurableEventIngestor } from "@agent-dock/runtime-core/grouped-durable-event-ingestor";
-import { PostgresEventProjectionBarrier } from "@agent-dock/runtime-core/event-projection-barrier";
-import { LocalSupervisorExecutionBackend } from "@agent-dock/runtime-core/local-supervisor-execution-backend";
+} from "@pi-cloud/runtime-core/checkpoint-runtime";
+import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
+import { HttpDurableEventIngestor } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
+import { GroupedDurableEventIngestor } from "@pi-cloud/runtime-core/grouped-durable-event-ingestor";
+import { PostgresEventProjectionBarrier } from "@pi-cloud/runtime-core/event-projection-barrier";
+import { LocalSupervisorExecutionBackend } from "@pi-cloud/runtime-core/local-supervisor-execution-backend";
 import {
   PostgresTenantModelCredentialResolver,
   TenantModelCredentialVault,
-} from "@agent-dock/runtime-core/model-credential-runtime";
-import { RunCommandExecutor } from "@agent-dock/runtime-core/run-command-executor";
-import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
-import { PostgresRunAttemptPhaseObserver } from "@agent-dock/runtime-core/run-attempt-runtime";
-import { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
-import { HttpTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
-import { createDatabase, type Database } from "@agent-dock/database";
-import { GitHubGatewayClient } from "@agent-dock/github-gateway";
-import { operationalLog, type AgentDockMetrics } from "@agent-dock/observability";
-import { openPostgresDurableAgentSession } from "@agent-dock/pi-session-postgres";
-import type { SupervisorBootProvisionRequest } from "@agent-dock/protocol";
-import { ReplicatedToolBrokerClient } from "@agent-dock/tool-broker";
+} from "@pi-cloud/runtime-core/model-credential-runtime";
+import { RunCommandExecutor } from "@pi-cloud/runtime-core/run-command-executor";
+import { PostgresSessionEventNotifications } from "@pi-cloud/runtime-core/postgres-session-event-notifications";
+import { PostgresRunAttemptPhaseObserver } from "@pi-cloud/runtime-core/run-attempt-runtime";
+import { SessionLeaseCoordinator } from "@pi-cloud/runtime-core/session-lease-coordinator";
+import { HttpTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
+import { createDatabase, type Database } from "@pi-cloud/database";
+import { GitHubGatewayClient } from "@pi-cloud/github-gateway";
+import { operationalLog, type PiCloudMetrics } from "@pi-cloud/observability";
+import { openPostgresDurableAgentSession } from "@pi-cloud/pi-session-postgres";
+import type { SupervisorBootProvisionRequest } from "@pi-cloud/protocol";
+import { ReplicatedToolBrokerClient } from "@pi-cloud/tool-broker";
 import {
   WalEventSpoolStore,
   LocalSandboxSupervisor,
@@ -32,7 +32,7 @@ import {
   type AgentTurnScenario,
   type AgentTurnScenarioContext,
   type ReconnectingSupervisorWebSocketClientStop,
-} from "@agent-dock/sandbox-supervisor";
+} from "@pi-cloud/sandbox-supervisor";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { sql, type Kysely } from "kysely";
@@ -62,7 +62,7 @@ export type SupervisorHostRuntimeOptions = {
   toolBroker?: SupervisorToolBroker;
   idGenerator?: () => string;
   connectionSecretGenerator?: () => string;
-  metrics?: AgentDockMetrics;
+  metrics?: PiCloudMetrics;
   runWorkerFactory?: (options: PostgresPiWorkerOptions) => SupervisorRunWorker;
 };
 
@@ -88,7 +88,7 @@ export type SupervisorToolBroker = Pick<
 
 export type SupervisorHostTerminalReason = "owner_stopped" | "connection_failed";
 
-export const PRODUCTION_CANCELLATION_PROBE_PROMPT = "agent-dock://acceptance/cancellation-hold";
+export const PRODUCTION_CANCELLATION_PROBE_PROMPT = "pi-cloud://acceptance/cancellation-hold";
 
 export function resolveProductionSandboxScenario({
   command,
@@ -97,7 +97,7 @@ export function resolveProductionSandboxScenario({
   if (restoring) return "java_followup";
   if (
     command.payload.input.kind === "prompt" &&
-    command.payload.input.text.startsWith("agent-dock-eval://")
+    command.payload.input.text.startsWith("pi-cloud-eval://")
   ) {
     return "coding_eval";
   }
@@ -141,7 +141,7 @@ export class SupervisorHostRuntime {
   readonly #toolBroker: SupervisorToolBroker;
   readonly #idGenerator: () => string;
   readonly #connectionSecretGenerator: () => string;
-  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #metrics: PiCloudMetrics | undefined;
   readonly #runWorkerFactory: (options: PostgresPiWorkerOptions) => SupervisorRunWorker;
   readonly #ownerStoppedPromise: Promise<void>;
   readonly #resolveOwnerStopped: () => void;
@@ -465,7 +465,7 @@ export class SupervisorHostRuntime {
         eventIngestor: groupedEventIngestor,
         onUnexpectedError: (error) =>
           operationalLog({
-            service: "agent-dock-supervisor-host",
+            service: "pi-cloud-supervisor-host",
             level: "error",
             event: "supervisor.execution-unexpected-failure",
             attributes: {
@@ -499,7 +499,7 @@ export class SupervisorHostRuntime {
         }),
         onFailure: (operation, error) =>
           operationalLog({
-            service: "agent-dock-supervisor-host",
+            service: "pi-cloud-supervisor-host",
             level: "error",
             event: "postgres-run-worker.failure",
             attributes: {
@@ -558,7 +558,7 @@ export class SupervisorHostRuntime {
   #observeClientStop(result: ReconnectingSupervisorWebSocketClientStop): void {
     if (this.#state === "draining" || this.#state === "stopped") return;
     operationalLog({
-      service: "agent-dock-supervisor-host",
+      service: "pi-cloud-supervisor-host",
       level: result.reason === "terminal_failure" ? "error" : "info",
       event: "worker-control-channel.stopped",
       attributes: {

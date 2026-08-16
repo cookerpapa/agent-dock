@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   DomainModelValidationError,
   resolveTurnModel,
   type ModelProfile,
   type ModelThinkingLevel,
   type SessionState,
-} from "@agent-dock/domain";
+} from "@pi-cloud/domain";
 import type {
   AcceptTurnRequest,
   AcceptedTurnCancellationResource,
@@ -28,7 +28,7 @@ import type {
   WorkspaceSourceSetSnapshot,
   WorkspaceDeletionResource,
   WorkspaceListResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
@@ -43,10 +43,10 @@ import {
   parseWorkspaceSourceSetSnapshot,
   TURN_CANCELLATION_OUTBOX_TOPIC,
   TURN_COMMAND_OUTBOX_TOPIC,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
-import { materializeConversationTurnProjections } from "@agent-dock/runtime-core/conversation-turn-projection";
-import type { AgentDockMetrics } from "@agent-dock/observability";
+import { materializeConversationTurnProjections } from "@pi-cloud/runtime-core/conversation-turn-projection";
+import type { PiCloudMetrics } from "@pi-cloud/observability";
 
 export type ControlPlaneStoreOptions = {
   database: Kysely<Database>;
@@ -54,7 +54,7 @@ export type ControlPlaneStoreOptions = {
   defaultModelProfileId: string;
   idGenerator?: () => string;
   environmentImageRevision?: string;
-  metrics?: AgentDockMetrics;
+  metrics?: PiCloudMetrics;
 };
 
 export type ControlPlaneStoreErrorCode =
@@ -578,7 +578,7 @@ export class ControlPlaneStore {
   readonly #defaultModelProfileId: string;
   readonly #idGenerator: () => string;
   readonly #environmentImageRevision: string;
-  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #metrics: PiCloudMetrics | undefined;
 
   constructor(options: ControlPlaneStoreOptions) {
     this.#database = options.database;
@@ -2093,7 +2093,7 @@ export class ControlPlaneStore {
         .values({
           id: runId,
           trace_id: createHash("sha256")
-            .update("agent-dock.run-trace.v1\0", "utf8")
+            .update("pi-cloud.run-trace.v1\0", "utf8")
             .update(runId, "utf8")
             .digest("hex")
             .slice(0, 32),

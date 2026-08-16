@@ -1,5 +1,5 @@
 {
-  "name": "@agent-dock/cube-api-authorizer",
+  "name": "@pi-cloud/cube-api-authorizer",
   "version": "0.1.0",
   "private": true,
   "type": "module",

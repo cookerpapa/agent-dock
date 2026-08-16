@@ -1,21 +1,21 @@
-import type { Database } from "@agent-dock/database";
-import type { TenantApiAuthenticator } from "@agent-dock/control-plane/tenant-identity";
-import { readWebSessionCookie } from "@agent-dock/control-plane/web-authentication";
+import type { Database } from "@pi-cloud/database";
+import type { TenantApiAuthenticator } from "@pi-cloud/control-plane/tenant-identity";
+import { readWebSessionCookie } from "@pi-cloud/control-plane/web-authentication";
 import {
   DurableEventStoreError,
   type DurableEventGroupIngestor,
   type DurableEventLog,
-} from "@agent-dock/runtime-core/durable-event-store";
-import { WORKER_EVENT_INGEST_PATH } from "@agent-dock/runtime-core/http-durable-event-ingestor";
-import type { LiveTurnSnapshotSource } from "@agent-dock/runtime-core/live-turn-snapshot";
-import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
-import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
-import { SessionEventStream } from "@agent-dock/runtime-core/session-event-stream";
+} from "@pi-cloud/runtime-core/durable-event-store";
+import { WORKER_EVENT_INGEST_PATH } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
+import type { LiveTurnSnapshotSource } from "@pi-cloud/runtime-core/live-turn-snapshot";
+import { SessionEventHub } from "@pi-cloud/runtime-core/session-event-hub";
+import type { SessionEventNotificationTransport } from "@pi-cloud/runtime-core/session-event-notifications";
+import { SessionEventStream } from "@pi-cloud/runtime-core/session-event-stream";
 import {
   parsePrepareTerminalTurnProjectionInput,
   TERMINAL_TURN_PROJECTION_PATH,
   type TerminalTurnProjectionSource,
-} from "@agent-dock/runtime-core/terminal-turn-projection";
+} from "@pi-cloud/runtime-core/terminal-turn-projection";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { sql, type Kysely } from "kysely";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -138,7 +138,7 @@ export class EventGateway {
             reply,
             503,
             "authentication_unavailable",
-            "The AgentDock identity service is temporarily unavailable",
+            "The PiCloud identity service is temporarily unavailable",
           );
           return;
         }
@@ -148,7 +148,7 @@ export class EventGateway {
             reply,
             401,
             "authentication_required",
-            "A valid AgentDock login session or API credential is required",
+            "A valid PiCloud login session or API credential is required",
           );
           return;
         }
@@ -257,7 +257,7 @@ export class EventGateway {
           reply,
           503,
           "authentication_unavailable",
-          "The AgentDock identity service is temporarily unavailable",
+          "The PiCloud identity service is temporarily unavailable",
         );
         return;
       }
@@ -267,7 +267,7 @@ export class EventGateway {
           reply,
           401,
           "authentication_required",
-          "A valid AgentDock login session or API credential is required",
+          "A valid PiCloud login session or API credential is required",
         );
         return;
       }

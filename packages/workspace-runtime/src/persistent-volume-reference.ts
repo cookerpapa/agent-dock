@@ -1,7 +1,7 @@
 import {
   MAX_WORKSPACE_SNAPSHOT_BYTES,
   type EnvironmentRecipeCommandResult,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { TextDecoder } from "node:util";
 import {
   MAX_WORKSPACE_INDEX_TOTAL_BYTES,
@@ -10,7 +10,7 @@ import {
 } from "./workspace-index.ts";
 import { WorkspaceRuntimeError } from "./workspace-error.ts";
 
-export const PERSISTENT_VOLUME_REFERENCE_FORMAT = "agent-dock.workspace-volume-reference.v1";
+export const PERSISTENT_VOLUME_REFERENCE_FORMAT = "pi-cloud.workspace-volume-reference.v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;

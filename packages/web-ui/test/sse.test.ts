@@ -1,11 +1,11 @@
-import type { AgentDockEvent } from "@agent-dock/protocol";
+import type { PiCloudEvent } from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
 import { SseFrameParser, streamSessionEvents, type SessionStreamStatus } from "../src/sse.ts";
 
 const SESSION_ID = "10000000-0000-4000-8000-000000000001";
 const TURN_ID = "20000000-0000-4000-8000-000000000001";
 
-function event(sequence: number, text: string): AgentDockEvent {
+function event(sequence: number, text: string): PiCloudEvent {
   return {
     schemaVersion: 1,
     eventId: `30000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
@@ -19,7 +19,7 @@ function event(sequence: number, text: string): AgentDockEvent {
   };
 }
 
-function frame(value: AgentDockEvent, id = String(value.seq)): string {
+function frame(value: PiCloudEvent, id = String(value.seq)): string {
   return `id: ${id}\nevent: ${value.type}\ndata: ${JSON.stringify(value)}\n\n`;
 }
 

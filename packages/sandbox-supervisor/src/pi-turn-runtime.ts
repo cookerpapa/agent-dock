@@ -2,7 +2,7 @@ import type {
   CancelTurnCommandMessage,
   EventPublishMessage,
   WorkspacePatch,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 
 export type PiModelRuntimeConfig = {
   provider: string;
@@ -32,7 +32,7 @@ export type PiTurnResult = {
 };
 
 export type PiCancellationSignal = {
-  kind: "agent-dock.turn-cancellation";
+  kind: "pi-cloud.turn-cancellation";
   reason: CancelTurnCommandMessage["payload"]["reason"];
   gracePeriodMs: number;
 };

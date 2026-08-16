@@ -1,12 +1,12 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type {
   ArchiveSessionRequest,
   WorkspaceFileListResource,
   WorkspaceOperationResource,
   WorkspaceVersionListResource,
   WorkspaceVersionResource,
-} from "@agent-dock/protocol";
-import { workspaceSnapshotMetadata } from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/protocol";
+import { workspaceSnapshotMetadata } from "@pi-cloud/workspace-runtime";
 import { createHash, randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 

@@ -37,7 +37,7 @@ usage() {
   cat <<'EOF'
 Usage: ./install.sh [options]
 
-Install or reconcile AgentDock on one x86_64 Linux host (native Linux or
+Install or reconcile PiCloud on one x86_64 Linux host (native Linux or
 WSL2 with systemd and KVM).
 
 Options:
@@ -48,7 +48,7 @@ Options:
   --pi-workers MODE             MODE is kubernetes or compose. Fresh installs
                                  default to kubernetes.
   --runtime-dir PATH            Private runtime directory.
-  --cube-repository PATH        Existing or AgentDock-managed Cube checkout.
+  --cube-repository PATH        Existing or PiCloud-managed Cube checkout.
   --bind-address ADDRESS        Fresh-install Web bind address (default: 127.0.0.1).
   --port PORT                   Fresh-install Web port (default: 8080).
   -h, --help                    Show this help.
@@ -58,10 +58,10 @@ those through the administrator page after deployment.
 EOF
 }
 
-log() { printf '\n[AgentDock] %s\n' "$*"; }
-note() { printf '[AgentDock] %s\n' "$*"; }
+log() { printf '\n[PiCloud] %s\n' "$*"; }
+note() { printf '[PiCloud] %s\n' "$*"; }
 fail() {
-  printf '[AgentDock] ERROR (%s): %s\n' "${current_phase}" "$*" >&2
+  printf '[PiCloud] ERROR (%s): %s\n' "${current_phase}" "$*" >&2
   exit 1
 }
 cleanup() {
@@ -71,8 +71,8 @@ cleanup() {
 }
 on_error() {
   local status=$?
-  printf '\n[AgentDock] Installation stopped during: %s\n' "${current_phase}" >&2
-  printf '[AgentDock] Fix the cause and run the same command again; completed phases are reused.\n' >&2
+  printf '\n[PiCloud] Installation stopped during: %s\n' "${current_phase}" >&2
+  printf '[PiCloud] Fix the cause and run the same command again; completed phases are reused.\n' >&2
   exit "${status}"
 }
 trap cleanup EXIT
@@ -118,7 +118,7 @@ done
 
 print_plan() {
   cat <<EOF
-AgentDock self-hosted deployment plan
+PiCloud self-hosted deployment plan
 
   Repository:       ${repository_root}
   Runtime data:     ${runtime_directory}
@@ -131,9 +131,9 @@ AgentDock self-hosted deployment plan
   3. Install checksum-verified Node.js ${NODE_VERSION} and Helm ${HELM_VERSION}.
   4. Install/reuse single-node K3s ${K3S_VERSION}.
   5. Check out CubeSandbox at ${CUBE_COMMIT}.
-  6. Initialize private AgentDock/Cube runtime material.
+  6. Initialize private PiCloud/Cube runtime material.
   7. Reconcile Cube's KVM plane and register the Tool template.
-  8. Build/start AgentDock and the selected Pi Worker Pool.
+  8. Build/start PiCloud and the selected Pi Worker Pool.
   9. Verify Web, Compose services and Worker Pool status.
 
 No model credential or administrator password is read by this installer.
@@ -204,10 +204,10 @@ run_read_only_checks() {
   [[ -f "${runtime_directory}/deployment.json" ]] && check_pass "production runtime is initialized" ||
     check_warn "production runtime is not initialized"
   ((check_result_failures == 0)) || {
-    printf '\n[AgentDock] Preflight found %d blocking condition(s).\n' "${check_result_failures}"
+    printf '\n[PiCloud] Preflight found %d blocking condition(s).\n' "${check_result_failures}"
     return 1
   }
-  printf '\n[AgentDock] Preflight passed.\n'
+  printf '\n[PiCloud] Preflight passed.\n'
 }
 
 if [[ "${check_only}" == "true" ]]; then
@@ -239,7 +239,7 @@ if [[ "${assume_yes}" != "true" ]]; then
   [[ "${answer}" == "y" || "${answer}" == "Y" ]] || { note "Cancelled without host changes."; exit 0; }
 fi
 
-temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/agent-dock-install.XXXXXXXX")"
+temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/pi-cloud-install.XXXXXXXX")"
 current_phase="privilege acquisition"
 command -v sudo >/dev/null 2>&1 || fail "sudo is required"
 sudo -v
@@ -364,7 +364,7 @@ write_fresh_k3s_configuration() {
   cat >"${config}" <<'EOF'
 write-kubeconfig-mode: "0600"
 tls-san:
-  - agent-dock-kubernetes
+  - pi-cloud-kubernetes
 disable:
   - traefik
   - servicelb
@@ -379,16 +379,16 @@ EOF
   fi
 
   if grep -qi microsoft-standard-wsl /proc/sys/kernel/osrelease; then
-    local helper="${temporary_directory}/agent-dock-prepare-k3s-wsl"
+    local helper="${temporary_directory}/pi-cloud-prepare-k3s-wsl"
     cat >"${helper}" <<'EOF'
 #!/bin/sh
 set -eu
 
-if ! ip link show dev agentdock0 >/dev/null 2>&1; then
-  ip link add name agentdock0 type dummy
+if ! ip link show dev picloud0 >/dev/null 2>&1; then
+  ip link add name picloud0 type dummy
 fi
-ip link set dev agentdock0 mtu 1500 up
-ip address replace 10.255.255.254/32 dev agentdock0
+ip link set dev picloud0 mtu 1500 up
+ip address replace 10.255.255.254/32 dev picloud0
 mount --make-rshared /
 mountpoint -q /sys/fs/bpf || mount -t bpf bpf /sys/fs/bpf
 
@@ -400,17 +400,17 @@ if awk 'NF != 6 { print; invalid=1 } END { exit invalid ? 0 : 1 }' /proc/mounts 
   exit 1
 fi
 EOF
-    local dropin="${temporary_directory}/agent-dock-containerd-socket.conf"
+    local dropin="${temporary_directory}/pi-cloud-containerd-socket.conf"
     cat >"${dropin}" <<'EOF'
 [Service]
-ExecStartPre=/usr/local/libexec/agent-dock-prepare-k3s-wsl
+ExecStartPre=/usr/local/libexec/pi-cloud-prepare-k3s-wsl
 ExecStartPost=/bin/sh -eu -c 'for attempt in $(seq 1 100); do test -S /run/k3s/containerd/containerd.sock && break; sleep 0.1; done; chgrp docker /run/k3s/containerd/containerd.sock; chmod 0660 /run/k3s/containerd/containerd.sock'
 EOF
     sudo install -d -m 0755 /usr/local/libexec /etc/systemd/system/k3s.service.d
-    if [[ ! -e /usr/local/libexec/agent-dock-prepare-k3s-wsl ]]; then
-      sudo install -m 0755 "${helper}" /usr/local/libexec/agent-dock-prepare-k3s-wsl
+    if [[ ! -e /usr/local/libexec/pi-cloud-prepare-k3s-wsl ]]; then
+      sudo install -m 0755 "${helper}" /usr/local/libexec/pi-cloud-prepare-k3s-wsl
     fi
-    sudo install -m 0644 "${dropin}" /etc/systemd/system/k3s.service.d/agent-dock-containerd-socket.conf
+    sudo install -m 0644 "${dropin}" /etc/systemd/system/k3s.service.d/pi-cloud-containerd-socket.conf
   fi
 }
 
@@ -477,8 +477,8 @@ run_root_node() {
   local clean_path="${PATH}"
   if [[ -n "${docker_wrapper_directory}" ]]; then clean_path="${clean_path#${docker_wrapper_directory}:}"; fi
   sudo env PATH="${clean_path}" \
-    AGENT_DOCK_RUNTIME_DIRECTORY="${runtime_directory}" \
-    AGENT_DOCK_CUBESANDBOX_REPOSITORY="${cube_repository}" \
+    PI_CLOUD_RUNTIME_DIRECTORY="${runtime_directory}" \
+    PI_CLOUD_CUBESANDBOX_REPOSITORY="${cube_repository}" \
     HTTP_PROXY="${HTTP_PROXY:-}" HTTPS_PROXY="${HTTPS_PROXY:-}" NO_PROXY="${NO_PROXY:-}" \
     http_proxy="${http_proxy:-}" https_proxy="${https_proxy:-}" no_proxy="${no_proxy:-}" \
     node "$@"
@@ -492,21 +492,21 @@ enable_docker_for_current_run
 install_k3s_if_needed
 prepare_cube_repository
 
-export AGENT_DOCK_RUNTIME_DIRECTORY="${runtime_directory}"
-export AGENT_DOCK_CUBESANDBOX_REPOSITORY="${cube_repository}"
-export AGENT_DOCK_HTTP_BIND_ADDRESS="${bind_address}"
-export AGENT_DOCK_HTTP_PORT="${http_port}"
+export PI_CLOUD_RUNTIME_DIRECTORY="${runtime_directory}"
+export PI_CLOUD_CUBESANDBOX_REPOSITORY="${cube_repository}"
+export PI_CLOUD_HTTP_BIND_ADDRESS="${bind_address}"
+export PI_CLOUD_HTTP_PORT="${http_port}"
 
 runtime_was_initialized="false"
 [[ -f "${runtime_directory}/deployment.json" ]] && runtime_was_initialized="true"
 
 current_phase="Node dependency installation"
-log "Installing pinned AgentDock dependencies"
+log "Installing pinned PiCloud dependencies"
 (cd "${repository_root}" && npm ci --ignore-scripts)
 run_npm run dependencies:harden
 
 current_phase="private runtime initialization"
-log "Initializing private AgentDock and Cube runtime material"
+log "Initializing private PiCloud and Cube runtime material"
 run_npm run production:init
 run_npm run cubesandbox:init
 
@@ -516,7 +516,7 @@ if [[ -z "${pi_workers}" ]]; then
   if [[ -r "${install_intent_path}" ]]; then
     pi_workers="$(<"${install_intent_path}")"
   elif [[ "${runtime_was_initialized}" == "true" ]]; then
-    pi_workers="$(runtime_environment_value AGENT_DOCK_PI_WORKER_DEPLOYMENT || true)"
+    pi_workers="$(runtime_environment_value PI_CLOUD_PI_WORKER_DEPLOYMENT || true)"
   else
     pi_workers="kubernetes"
   fi
@@ -525,8 +525,8 @@ fi
 [[ "${pi_workers}" == "compose" || "${pi_workers}" == "kubernetes" ]] ||
   fail "persisted Pi Worker install intent is invalid"
 
-configured_bind_address="$(runtime_environment_value AGENT_DOCK_HTTP_BIND_ADDRESS || true)"
-configured_http_port="$(runtime_environment_value AGENT_DOCK_HTTP_PORT || true)"
+configured_bind_address="$(runtime_environment_value PI_CLOUD_HTTP_BIND_ADDRESS || true)"
+configured_http_port="$(runtime_environment_value PI_CLOUD_HTTP_PORT || true)"
 if [[ "${bind_address_explicit}" == "true" && "${configured_bind_address}" != "${bind_address}" ]]; then
   fail "existing runtime uses bind address ${configured_bind_address}; bootstrap options do not overwrite it"
 fi
@@ -536,7 +536,7 @@ fi
 bind_address="${configured_bind_address:-${bind_address}}"
 http_port="${configured_http_port:-${http_port}}"
 
-current_mode="$(runtime_environment_value AGENT_DOCK_PI_WORKER_DEPLOYMENT || true)"
+current_mode="$(runtime_environment_value PI_CLOUD_PI_WORKER_DEPLOYMENT || true)"
 if [[ "${pi_workers_explicit}" == "true" && "${pi_workers}" == "compose" && "${current_mode}" == "kubernetes" ]]; then
   fail "existing deployment uses Kubernetes Workers; use npm run kubernetes:pi-workers:down for explicit downgrade"
 fi
@@ -549,11 +549,11 @@ current_phase="CubeSandbox cluster reconciliation"
 log "Reconciling CubeSandbox's KVM execution plane"
 run_root_node "${repository_root}/scripts/install-cubesandbox-k3s.mjs"
 
-current_phase="AgentDock production deployment"
-log "Building and starting AgentDock"
+current_phase="PiCloud production deployment"
+log "Building and starting PiCloud"
 run_npm run production:deploy
 
-current_mode="$(runtime_environment_value AGENT_DOCK_PI_WORKER_DEPLOYMENT || true)"
+current_mode="$(runtime_environment_value PI_CLOUD_PI_WORKER_DEPLOYMENT || true)"
 if [[ "${pi_workers}" == "kubernetes" && "${current_mode}" != "kubernetes" ]]; then
   current_phase="Kubernetes Pi Worker Pool deployment"
   log "Switching the Pi Worker Pool to Kubernetes"
@@ -563,7 +563,7 @@ fi
 current_phase="post-deployment verification"
 log "Verifying the deployed product"
 run_npm run production:ps
-if [[ "$(runtime_environment_value AGENT_DOCK_PI_WORKER_DEPLOYMENT || true)" == "kubernetes" ]]; then
+if [[ "$(runtime_environment_value PI_CLOUD_PI_WORKER_DEPLOYMENT || true)" == "kubernetes" ]]; then
   run_npm run kubernetes:pi-workers:status
 fi
 
@@ -576,13 +576,13 @@ rm -f -- "${install_intent_path}"
 
 cat <<EOF
 
-[AgentDock] Deployment completed successfully.
+[PiCloud] Deployment completed successfully.
 
   Open: http://${display_host}:${http_port}
 
   Next:
     1. Register the dedicated platform administrator account.
-    2. Put its tenant UUID in AGENT_DOCK_PLATFORM_OPERATOR_TENANT_ID in:
+    2. Put its tenant UUID in PI_CLOUD_PLATFORM_OPERATOR_TENANT_ID in:
        ${runtime_directory}/.env
     3. Restart the Control Plane and configure the provider/model key in the
        administrator page. The key is never handled by this installer.

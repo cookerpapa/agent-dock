@@ -76,7 +76,7 @@ describe("versioned project environments migration", () => {
         {
           id: project,
           version_number: 1,
-          profile_key: "agent-dock-fullstack",
+          profile_key: "pi-cloud-fullstack",
           profile_version: "1",
           image_revision: "legacy",
           state: "pending",
@@ -95,7 +95,7 @@ describe("versioned project environments migration", () => {
             (id, tenant_id, project_id, version_number, profile_key, profile_version,
              image_revision, spec_sha256, state, active)
            values ('30000000-0000-4000-8000-000000000001', $1, $2, 2,
-                   'agent-dock-fullstack', '1', 'next',
+                   'pi-cloud-fullstack', '1', 'next',
                    'e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630',
                    'pending', true)`,
           [tenant, project],

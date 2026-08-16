@@ -1,10 +1,10 @@
-import type { Database, TenantApiCredentialRole } from "@agent-dock/database";
+import type { Database, TenantApiCredentialRole } from "@pi-cloud/database";
 import type {
   AuthSessionResource,
   LoginAccountRequest,
   RegisterAccountRequest,
   TenantIdentityResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import type { Kysely } from "kysely";
 import {
@@ -15,7 +15,7 @@ import {
 } from "./tenant-administration.ts";
 import type { TenantApiAuthenticator, TenantRequestIdentity } from "./tenant-identity.ts";
 
-export const WEB_SESSION_COOKIE_NAME = "agent_dock_session";
+export const WEB_SESSION_COOKIE_NAME = "pi_cloud_session";
 const SESSION_SECRET_BYTES = 32;
 const PASSWORD_SALT_BYTES = 16;
 const PASSWORD_HASH_BYTES = 32;

@@ -1,0 +1,73 @@
+# PiCloud local K3s validation profile for CubeSandbox v0.6.0.
+# Merge after upstream values-single-node.yaml and a private secret-values file.
+# This profile deliberately does not install/boot a PVM host kernel.
+
+persistence:
+  storageClassName: local-path
+
+controlPlane:
+  master:
+    env:
+      # The private template-build registry certificate is signed by the
+      # chart-managed CubeEgress CA already mounted at this path.
+      - name: SSL_CERT_FILE
+        value: /etc/cube/ca/cube-root-ca.crt
+  api:
+    service:
+      type: ClusterIP
+      port: 3000
+    internalLoadBalancer:
+      enabled: false
+    env:
+      - name: AUTH_CALLBACK_URL
+        value: http://pi-cloud-cube-api-authorizer.cube-system.svc.cluster.local:8080/verify
+
+webui:
+  enabled: false
+
+cubeOps:
+  enabled: false
+
+cubeProxy:
+  domain: cube.app
+  advertiseIP: ""
+  configureClusterDNS: false
+  service:
+    type: ClusterIP
+    annotations: {}
+  ingress:
+    enabled: false
+  tls:
+    mode: selfSigned
+
+cubeEgress:
+  enabled: true
+  network:
+    enabled: true
+    ingressInterface: cube-dev
+    tproxyOnIP: 172.16.0.1
+
+cubeNode:
+  pvmGuestKernel:
+    enabled: false
+  network:
+    cidr: 172.16.0.0/18
+    cidrSkipConflictCheck: false
+
+bootstrap:
+  pvmHostKernel:
+    enabled: false
+    reboot:
+      enabled: false
+    startupGate:
+      enabled: false
+      requirePreflight: false
+  nodeInit:
+    enabled: true
+    requireKVM: true
+    requireXFS: true
+    dataCubelet:
+      loopback:
+        enabled: true
+        imagePath: /data/cubelet-xfs.img
+        size: 64G

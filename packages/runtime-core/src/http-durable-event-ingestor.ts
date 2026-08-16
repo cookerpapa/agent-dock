@@ -2,7 +2,7 @@ import {
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
   type EventAckMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { DurableEventGroupIngestor } from "./durable-event-store.ts";
 
 export const WORKER_EVENT_INGEST_PATH = "/internal/v1/worker-events";

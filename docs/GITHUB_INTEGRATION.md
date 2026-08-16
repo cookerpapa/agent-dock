@@ -54,7 +54,7 @@ suspension and repository removal disable future use.
 ## Configuration and current evidence
 
 The default private deployment starts the Gateway in a fail-closed,
-not-configured mode. Set `AGENT_DOCK_GITHUB_APP_ID` and replace
+not-configured mode. Set `PI_CLOUD_GITHUB_APP_ID` and replace
 `secrets/github-app-private-key.pem` with the registered App private key to
 enable live private import and PR delivery. Contract tests use a simulated
 GitHub API and prove token isolation, exact-commit import, deletion-aware tree

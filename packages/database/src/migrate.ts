@@ -3,7 +3,7 @@ import { runMigrations, type MigrationDirection } from "./run-migrations.ts";
 
 const direction = process.argv[2];
 if (direction !== "up" && direction !== "down") {
-  throw new Error("Usage: npm run migrate --workspace @agent-dock/database -- <up|down>");
+  throw new Error("Usage: npm run migrate --workspace @pi-cloud/database -- <up|down>");
 }
 
 const connectionString = process.env.DATABASE_URL;

@@ -1,4 +1,4 @@
-import type { AgentDockEvent } from "@agent-dock/protocol";
+import type { PiCloudEvent } from "@pi-cloud/protocol";
 
 export type SessionEventWake = {
   throughSequence: number | null;
@@ -114,7 +114,7 @@ export class SessionEventHub {
     return subscription;
   }
 
-  publish(tenantId: string, event: AgentDockEvent): void {
+  publish(tenantId: string, event: PiCloudEvent): void {
     this.notifyThrough(tenantId, event.sessionId, event.seq);
   }
 

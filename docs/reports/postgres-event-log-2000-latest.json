@@ -1,5 +1,5 @@
 {
-  "format": "agent-dock.postgres-event-log-capacity.v1",
+  "format": "pi-cloud.postgres-event-log-capacity.v1",
   "generatedAt": "2026-08-09T13:30:52.895Z",
   "gitRevision": "4cddb77eb822198c538f5bb8566e4cde33dbedb9",
   "database": {

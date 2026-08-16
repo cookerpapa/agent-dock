@@ -31,7 +31,7 @@ export async function startGitHubGateway(): Promise<void> {
   });
   await server.listen();
   process.stdout.write(
-    `AgentDock GitHub Gateway listening on ${config.host}:${String(config.port)} configured=${String(apiClient !== undefined)}\n`,
+    `PiCloud GitHub Gateway listening on ${config.host}:${String(config.port)} configured=${String(apiClient !== undefined)}\n`,
   );
   const close = (): void => {
     void server.close().catch(() => {
@@ -45,7 +45,7 @@ export async function startGitHubGateway(): Promise<void> {
 const entrypoint = process.argv[1];
 if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
   startGitHubGateway().catch(() => {
-    process.stderr.write("AgentDock GitHub Gateway failed to start\n");
+    process.stderr.write("PiCloud GitHub Gateway failed to start\n");
     process.exitCode = 1;
   });
 }

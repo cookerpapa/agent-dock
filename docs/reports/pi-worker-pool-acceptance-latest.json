@@ -3,10 +3,10 @@
   "checkedAt": "2026-08-14T15:29:51.585Z",
   "model": { "provider": "deepseek", "modelId": "deepseek-v4-flash" },
   "workerDeployment": "compose",
-  "workers": ["agent-dock-worker-1", "agent-dock-worker-2"],
+  "workers": ["pi-cloud-worker-1", "pi-cloud-worker-2"],
   "failover": {
-    "firstWorker": "agent-dock-worker-1",
-    "followUpWorker": "agent-dock-worker-2",
+    "firstWorker": "pi-cloud-worker-1",
+    "followUpWorker": "pi-cloud-worker-2",
     "differentWorker": true,
     "postgresSessionRestored": true,
     "markerRecovered": true,
@@ -17,13 +17,13 @@
   "concurrency": {
     "runs": 4,
     "workerIds": [
-      "agent-dock-worker-2",
-      "agent-dock-worker-1",
-      "agent-dock-worker-1",
-      "agent-dock-worker-2"
+      "pi-cloud-worker-2",
+      "pi-cloud-worker-1",
+      "pi-cloud-worker-1",
+      "pi-cloud-worker-2"
     ],
     "distinctWorkers": 2,
-    "observedWorkerIds": ["agent-dock-worker-1", "agent-dock-worker-2"],
+    "observedWorkerIds": ["pi-cloud-worker-1", "pi-cloud-worker-2"],
     "settledMs": [10782, 4778, 8932, 6176]
   },
   "totalUsage": {

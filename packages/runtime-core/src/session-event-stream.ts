@@ -1,4 +1,4 @@
-import type { AgentDockEvent } from "@agent-dock/protocol";
+import type { PiCloudEvent } from "@pi-cloud/protocol";
 import type { ServerResponse } from "node:http";
 import {
   DurableEventStoreError,
@@ -34,7 +34,7 @@ function positiveInteger(value: number, name: string): number {
   return value;
 }
 
-function eventFrame(event: AgentDockEvent): string {
+function eventFrame(event: PiCloudEvent): string {
   return `id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
@@ -80,7 +80,7 @@ export class OpenSessionEventStream {
   readonly #tenantId: string;
   readonly #sessionId: string;
   readonly #highWaterMark: number;
-  readonly #initialEvents: readonly AgentDockEvent[];
+  readonly #initialEvents: readonly PiCloudEvent[];
   readonly #afterSequence: number;
   readonly #heartbeatIntervalMs: number;
   readonly #replayPageSize: number;
@@ -91,7 +91,7 @@ export class OpenSessionEventStream {
     tenantId: string;
     sessionId: string;
     highWaterMark: number;
-    initialEvents: readonly AgentDockEvent[];
+    initialEvents: readonly PiCloudEvent[];
     afterSequence: number;
     heartbeatIntervalMs: number;
     replayPageSize: number;

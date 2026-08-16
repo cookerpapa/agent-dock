@@ -1,4 +1,4 @@
-import { parseSupervisorToControlMessage, type EventAckMessage } from "@agent-dock/protocol";
+import { parseSupervisorToControlMessage, type EventAckMessage } from "@pi-cloud/protocol";
 import type { DurableEventGroupIngestor, DurableEventIngestor } from "./durable-event-store.ts";
 
 type PendingPublication = {

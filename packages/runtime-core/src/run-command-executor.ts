@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   isTerminalRunAttemptState,
   transitionCommand,
@@ -9,20 +9,20 @@ import {
   type CommandState,
   type SessionState,
   type TurnState,
-} from "@agent-dock/domain";
+} from "@pi-cloud/domain";
 import {
   TURN_COMMAND_OUTBOX_TOPIC,
   parseEnvironmentRuntimeSnapshot,
   parseTurnCommandOutboxPayload,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type {
   CancelTurnCommandMessage,
   TurnBudgetSnapshot,
   WorkspacePatch,
-} from "@agent-dock/protocol";
-import type { EnvironmentRuntimeSnapshot, TraceContext } from "@agent-dock/protocol";
-import { virtualRunTraceCarrier, withSpan } from "@agent-dock/observability";
-import type { AgentDockMetrics } from "@agent-dock/observability";
+} from "@pi-cloud/protocol";
+import type { EnvironmentRuntimeSnapshot, TraceContext } from "@pi-cloud/protocol";
+import { virtualRunTraceCarrier, withSpan } from "@pi-cloud/observability";
+import type { PiCloudMetrics } from "@pi-cloud/observability";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
 import type { EventProjectionBarrier } from "./event-projection-barrier.ts";
@@ -52,7 +52,7 @@ export type TurnExecutionRequest = {
     kind: "prompt";
     prompt: string;
   };
-  sandboxRetention: import("@agent-dock/protocol").SandboxRetentionPolicy;
+  sandboxRetention: import("@pi-cloud/protocol").SandboxRetentionPolicy;
   model: {
     profileId: string;
     provider: string;
@@ -191,7 +191,7 @@ export type RunCommandExecutorOptions = {
   claimOwnerId?: string;
   idGenerator?: () => string;
   leaseManager?: TurnExecutionLeaseManager;
-  metrics?: AgentDockMetrics;
+  metrics?: PiCloudMetrics;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
   eventProjectionBarrier?: EventProjectionBarrier;
   terminalTurnProjectionSource?: TerminalTurnProjectionSource;
@@ -211,10 +211,10 @@ type LifecycleRows = {
   sessionState: SessionState;
   outboxAttempts: number;
   outboxPublishedAt: Date | string | null;
-  runState: import("@agent-dock/domain").RunState;
+  runState: import("@pi-cloud/domain").RunState;
   runVersion: string;
   currentAttemptId: string | null;
-  runAttemptState: import("@agent-dock/domain").RunAttemptState;
+  runAttemptState: import("@pi-cloud/domain").RunAttemptState;
 };
 
 type ExecutionFailure = {
@@ -307,7 +307,7 @@ export class RunCommandExecutor {
   readonly #claimOwnerId: string;
   readonly #idGenerator: () => string;
   readonly #leaseManager: TurnExecutionLeaseManager | undefined;
-  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #metrics: PiCloudMetrics | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #eventProjectionBarrier: EventProjectionBarrier | undefined;
   readonly #terminalTurnProjectionSource: TerminalTurnProjectionSource | undefined;
@@ -361,13 +361,13 @@ export class RunCommandExecutor {
     const executionStartedAt = performance.now();
     try {
       const result = await withSpan<RunCommandExecutionResult>({
-        serviceName: "agent-dock-control-plane",
+        serviceName: "pi-cloud-control-plane",
         name: "run.dispatch",
         ...(claim.request.traceContext === undefined ? {} : { parent: claim.request.traceContext }),
         attributes: {
-          "agent_dock.run.id": claim.request.runId,
-          "agent_dock.attempt.id": claim.request.attemptId,
-          "agent_dock.session.id": claim.request.sessionId,
+          "pi_cloud.run.id": claim.request.runId,
+          "pi_cloud.attempt.id": claim.request.attemptId,
+          "pi_cloud.session.id": claim.request.sessionId,
         },
         run: async () => {
           let started = false;

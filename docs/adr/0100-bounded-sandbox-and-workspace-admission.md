@@ -61,5 +61,5 @@ boundary.
 AbortSignal cancellation and queue introspection. `p-limit` only limits
 concurrency, while Bottleneck and adaptive concurrency libraries introduce
 distributed rate-limiting or feedback-control concepts that are unnecessary
-for this process-local gate. AgentDock therefore adopts `p-queue` and keeps
+for this process-local gate. PiCloud therefore adopts `p-queue` and keeps
 durable/distributed correctness in PostgreSQL.

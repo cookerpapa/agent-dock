@@ -12,7 +12,7 @@ import {
 const environment = {
   environmentVersionId: "10000000-0000-4000-8000-000000000001",
   versionNumber: 1,
-  profileKey: "agent-dock-fullstack",
+  profileKey: "pi-cloud-fullstack",
   profileVersion: "1",
   imageRevision: "development",
   specSha256: DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256,

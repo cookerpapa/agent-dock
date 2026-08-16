@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,7 +32,7 @@ const CONFIG: ProductionBootstrapConfig = {
       id: "sandbox-domain-bootstrap",
       displayName: "Bootstrap Sandbox Domain",
       state: "active",
-      toolBrokerBaseUrl: "http://tool-broker.agent-dock-sandbox-bootstrap:4300",
+      toolBrokerBaseUrl: "http://tool-broker.pi-cloud-sandbox-bootstrap:4300",
       workspaceStorageKey: "workspace-domain-bootstrap",
       maximumActiveSandboxes: 1_024,
     },
@@ -196,64 +196,64 @@ describe.sequential("production bootstrap and configuration", () => {
   });
 
   it("keeps the runtime tenant-neutral while bootstrap reads its private API token", async () => {
-    const root = await mkdtemp(join(tmpdir(), "agent-dock-control-config-"));
+    const root = await mkdtemp(join(tmpdir(), "pi-cloud-control-config-"));
     roots.push(root);
     const environment = {
-      DATABASE_URL_FILE: await secret(root, "database", "postgresql://db.invalid/agentdock"),
-      AGENT_DOCK_DATABASE_NOTIFICATION_URL_FILE: await secret(
+      DATABASE_URL_FILE: await secret(root, "database", "postgresql://db.invalid/picloud"),
+      PI_CLOUD_DATABASE_NOTIFICATION_URL_FILE: await secret(
         root,
         "database-notifications",
-        "postgresql://postgres-direct.invalid/agentdock",
+        "postgresql://postgres-direct.invalid/picloud",
       ),
-      AGENT_DOCK_API_TOKEN_FILE: await secret(
+      PI_CLOUD_API_TOKEN_FILE: await secret(
         root,
         "api",
         `adk_40000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
       ),
-      AGENT_DOCK_SUPERVISOR_ENROLLMENT_TOKEN_FILE: await secret(
+      PI_CLOUD_SUPERVISOR_ENROLLMENT_TOKEN_FILE: await secret(
         root,
         "enrollment",
         `enroll-${"e".repeat(48)}`,
       ),
-      AGENT_DOCK_SUPERVISOR_MANAGEMENT_TOKEN_FILE: await secret(
+      PI_CLOUD_SUPERVISOR_MANAGEMENT_TOKEN_FILE: await secret(
         root,
         "management",
         `manage-${"m".repeat(48)}`,
       ),
-      AGENT_DOCK_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
+      PI_CLOUD_MODEL_CREDENTIAL_MASTER_KEY_FILE: await secret(
         root,
         "model-master-key",
         Buffer.alloc(32, 5).toString("base64url"),
       ),
-      AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE: await secret(
+      PI_CLOUD_CUBE_EGRESS_CONFIG_TOKEN_FILE: await secret(
         root,
         "cube-egress-config-token",
         `cube-egress-${"c".repeat(48)}`,
       ),
-      AGENT_DOCK_TOOL_BROKER_URLS: "http://tool-broker:4300",
-      AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE: await secret(
+      PI_CLOUD_TOOL_BROKER_URLS: "http://tool-broker:4300",
+      PI_CLOUD_SANDBOX_MATERIALIZER_TOKEN_FILE: await secret(
         root,
         "sandbox-materializer-token",
         `materializer-${"s".repeat(48)}`,
       ),
-      AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE: await secret(
+      PI_CLOUD_WORKSPACE_TERMINAL_TOKEN_FILE: await secret(
         root,
         "workspace-terminal-token",
         `terminal-${"w".repeat(48)}`,
       ),
-      AGENT_DOCK_SUPERVISOR_ID_PREFIX: "pi-worker-",
-      AGENT_DOCK_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
-      AGENT_DOCK_API_CREDENTIAL_ID: "40000000-0000-4000-8000-000000000003",
-      AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES:
+      PI_CLOUD_SUPERVISOR_ID_PREFIX: "pi-worker-",
+      PI_CLOUD_PLATFORM_MODEL_SOURCE_TENANT_ID: CONFIG.tenantId,
+      PI_CLOUD_API_CREDENTIAL_ID: "40000000-0000-4000-8000-000000000003",
+      PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES:
         "http://{supervisorId}:4100,http://{supervisorId}.cell-0002:4100",
-      AGENT_DOCK_IMAGE_REVISION: "sha-0123456789abcdef",
-      AGENT_DOCK_ALLOW_INSECURE_INTERNAL_HTTP: "true",
+      PI_CLOUD_IMAGE_REVISION: "sha-0123456789abcdef",
+      PI_CLOUD_ALLOW_INSECURE_INTERNAL_HTTP: "true",
       HOST: "0.0.0.0",
     };
     const runtime = await loadProductionControlPlaneConfig(environment);
     expect(runtime).toMatchObject({
-      databaseUrl: "postgresql://db.invalid/agentdock",
-      databaseNotificationUrl: "postgresql://postgres-direct.invalid/agentdock",
+      databaseUrl: "postgresql://db.invalid/picloud",
+      databaseNotificationUrl: "postgresql://postgres-direct.invalid/picloud",
       supervisorIdPrefix: "pi-worker-",
       supervisorManagementBaseUrlTemplates: [
         "http://{supervisorId}:4100",
@@ -285,7 +285,7 @@ describe.sequential("production bootstrap and configuration", () => {
       `adk_40000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
     );
 
-    const apiPath = environment.AGENT_DOCK_API_TOKEN_FILE;
+    const apiPath = environment.PI_CLOUD_API_TOKEN_FILE;
     await chmod(apiPath, 0o644);
     await expect(loadProductionApiToken(environment)).rejects.toThrow(
       "not a private bounded regular file",

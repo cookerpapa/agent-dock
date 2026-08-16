@@ -1,4 +1,4 @@
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import type {
@@ -6,7 +6,7 @@ import type {
   ProjectResource,
   SessionResource,
   TenantIdentityResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
 import type { Kysely } from "kysely";
@@ -190,7 +190,7 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
       expect(response.json()).toEqual({
         error: {
           code: "authentication_required",
-          message: "A valid AgentDock login session or API credential is required",
+          message: "A valid PiCloud login session or API credential is required",
         },
       });
       expect(response.body).not.toContain("sha256");

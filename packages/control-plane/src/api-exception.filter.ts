@@ -1,8 +1,8 @@
 import { Catch, type ArgumentsHost, type ExceptionFilter, HttpException } from "@nestjs/common";
-import { ControlPlaneApiValidationError, type ControlPlaneApiError } from "@agent-dock/protocol";
+import { ControlPlaneApiValidationError, type ControlPlaneApiError } from "@pi-cloud/protocol";
 import type { FastifyReply } from "fastify";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
-import { DurableEventStoreError } from "@agent-dock/runtime-core/durable-event-store";
+import { DurableEventStoreError } from "@pi-cloud/runtime-core/durable-event-store";
 import { PublicTenantRegistrationError } from "./public-tenant-registration.ts";
 import { TenantRequestContextError } from "./tenant-request-context.ts";
 import { TenantModelConfigurationError } from "./tenant-model-configuration.ts";

@@ -43,7 +43,7 @@ observability network:
 | Event Gateway | `event-gateway:9467/metrics` | group size, durability latency, projection lag and stream process signals |
 | Live Stream Compactor | `event-retention:9468/metrics` | Valkey trim/replay-floor process signals |
 
-`agent_dock_sandbox_active{provider="cubesandbox"}` reports assigned and
+`pi_cloud_sandbox_active{provider="cubesandbox"}` reports assigned and
 exact-Session warm Cube activations. Provider lifecycle, warm reuse and cleanup
 are also visible through Run/Tool spans and Cube reconciliation logs.
 
@@ -51,7 +51,7 @@ The bearer token is generated under the private runtime directory and mounted
 read-only. It is not the user API token. Prometheus is available through the
 loopback proxy at `http://127.0.0.1:9090`.
 
-The `AgentDock Platform` Grafana dashboard at `http://127.0.0.1:3001` contains
+The `PiCloud Platform` Grafana dashboard at `http://127.0.0.1:3001` contains
 active/queued Runs, outcomes, p95 queue/Run/model/sandbox latency, token/cost,
 tool failures, and process/resource panels. The administrator password is in
 the runtime secret directory and is never printed by deployment commands.

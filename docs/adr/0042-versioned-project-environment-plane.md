@@ -5,7 +5,7 @@
 
 ## Context
 
-AgentDock currently executes every untrusted Tool Call in an operator-managed
+PiCloud currently executes every untrusted Tool Call in an operator-managed
 Cube environment template. The guest image is isolated, but its identity is implicit:
 projects do not own a durable environment version, Runs do not snapshot the
 environment they were accepted against, warm Sandbox reuse only considers the
@@ -27,7 +27,7 @@ must not be confused with running project code in a restricted Tool Sandbox.
 
 1. Every Project owns an append-only sequence of environment versions. Exactly
    one version is active for new Runs.
-2. Version 1 uses the operator-managed `agent-dock-fullstack` profile. The
+2. Version 1 uses the operator-managed `pi-cloud-fullstack` profile. The
    profile is immutable and identifies its expected Node.js, Java, Python and
    Git toolchain, the Tool Sandbox image revision and a canonical specification
    hash.

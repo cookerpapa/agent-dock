@@ -11,8 +11,8 @@ function documents(path) {
 
 const namespace = documents("deploy/enterprise/kafka/namespace.yaml")[0];
 assert.equal(namespace.kind, "Namespace");
-assert.equal(namespace.metadata.name, "agent-dock-eventing");
-assert.equal(namespace.metadata.labels["agent-dock.io/trusted-plane"], "true");
+assert.equal(namespace.metadata.name, "pi-cloud-eventing");
+assert.equal(namespace.metadata.labels["pi-cloud.io/trusted-plane"], "true");
 
 const resources = documents("deploy/enterprise/kafka/cluster.yaml");
 const find = (kind, name) => {
@@ -37,18 +37,18 @@ assert.equal(
   brokers.spec.template.pod.topologySpreadConstraints[0].topologyKey,
   "topology.kubernetes.io/zone",
 );
-const kafka = find("Kafka", "agent-dock-kafka");
+const kafka = find("Kafka", "pi-cloud-kafka");
 assert.equal(kafka.spec.kafka.rack.topologyKey, "topology.kubernetes.io/zone");
 assert.equal(kafka.spec.kafka.config["min.insync.replicas"], 2);
 assert.equal(kafka.spec.kafka.config["unclean.leader.election.enable"], false);
 assert.equal(kafka.spec.kafka.listeners[0].port, 9093);
 assert.equal(kafka.spec.kafka.listeners[0].tls, true);
 assert.equal(kafka.spec.kafka.listeners[0].authentication.type, "scram-sha-512");
-const topic = find("KafkaTopic", "agent-dock-worker-events-v1");
+const topic = find("KafkaTopic", "pi-cloud-worker-events-v1");
 assert.equal(topic.spec.partitions, 256);
 assert.equal(topic.spec.replicas, 3);
 assert.equal(topic.spec.config["min.insync.replicas"], 2);
-const user = find("KafkaUser", "agent-dock-event-gateway");
+const user = find("KafkaUser", "pi-cloud-event-gateway");
 assert.equal(user.spec.authentication.type, "scram-sha-512");
 assert.equal(user.spec.authorization.type, "simple");
 assert.ok(

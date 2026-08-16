@@ -6,14 +6,14 @@ import {
   TenantModelCredentialVault,
   createPrivateTenant,
   type TenantRequestIdentity,
-} from "@agent-dock/control-plane";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+} from "@pi-cloud/control-plane";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   modelSamplingHeaders,
   type ExecuteTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { TenantModelGateway } from "../src/index.ts";
@@ -117,7 +117,7 @@ beforeAll(async () => {
       tenant_id: tenant.tenantId,
       project_id: IDS.project,
       version_number: 1,
-      profile_key: "agent-dock-fullstack",
+      profile_key: "pi-cloud-fullstack",
       profile_version: "1",
       image_revision: "development",
       spec_sha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -257,7 +257,7 @@ beforeAll(async () => {
       environment: {
         environmentVersionId: IDS.environment,
         versionNumber: 1,
-        profileKey: "agent-dock-fullstack",
+        profileKey: "pi-cloud-fullstack",
         profileVersion: "1",
         imageRevision: "development",
         specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",

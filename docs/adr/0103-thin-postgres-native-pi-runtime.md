@@ -12,16 +12,16 @@ production JSONL path was retired.
 Pi 0.84.1 exposes useful public primitives: `Agent`, `Session`,
 `SessionStorage`, context projection and compaction. Its packaged
 `AgentHarness` still reserves the execution methods, so an earlier experiment
-implemented the complete public Harness contract inside AgentDock.
+implemented the complete public Harness contract inside PiCloud.
 
 That implementation proved that Pi-native entries can live in PostgreSQL, but
 it also reproduced lanes, navigation, templates, skills, manual drive,
-deferred responses and generic Hook machinery that AgentDock does not expose.
+deferred responses and generic Hook machinery that PiCloud does not expose.
 More importantly, production still restored a complete `session.jsonl` object
 for every cold Run. API completeness therefore added code without shortening
 the real cloud execution path.
 
-AgentDock needs a smaller contract:
+PiCloud needs a smaller contract:
 
 - restore the active context from the newest compaction and its suffix;
 - execute Pi's native Agent Loop with remote Cube Tools;
@@ -50,7 +50,7 @@ AgentDock needs a smaller contract:
    arguments. Product Run terminal commit keeps its existing fenced/CAS check.
 6. Perform automatic compaction from Pi's public compaction primitives and
    append the resulting native compaction entry to the same Session.
-7. Keep AgentDock's cloud-specific world state, interruption markers,
+7. Keep PiCloud's cloud-specific world state, interruption markers,
    settlement gate, event mapping and model-request governance as small
    adapters around the native Agent Loop; do not recreate generic Harness
    Hooks or unused product surfaces.
@@ -78,7 +78,7 @@ AgentDock needs a smaller contract:
 
 - retaining the full in-repo Harness would preserve unused behavior and leave
   production on JSONL snapshots;
-- patching or forking Pi's unimplemented Harness would bind AgentDock to private
+- patching or forking Pi's unimplemented Harness would bind PiCloud to private
   upstream details;
 - storing only final browser messages would lose Tool context, compaction and
   model-visible recovery facts;

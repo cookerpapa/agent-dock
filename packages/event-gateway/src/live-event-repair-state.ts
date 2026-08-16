@@ -1,5 +1,5 @@
-import type { Database } from "@agent-dock/database";
-import type { LiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
+import type { Database } from "@pi-cloud/database";
+import type { LiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
 import type { Kysely } from "kysely";
 
 const PAGE_SIZE = 500;

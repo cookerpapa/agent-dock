@@ -1,8 +1,8 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
-import { parseSupervisorToControlMessage } from "@agent-dock/protocol";
-import { LocalSandboxSupervisor, SupervisorWebSocketClient } from "@agent-dock/sandbox-supervisor";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
+import { parseSupervisorToControlMessage } from "@pi-cloud/protocol";
+import { LocalSandboxSupervisor, SupervisorWebSocketClient } from "@pi-cloud/sandbox-supervisor";
 import Fastify from "fastify";
 import { type Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -20,7 +20,7 @@ import {
 
 const CONTROL_PLANE_1 = "20000000-0000-4000-8000-000000000001";
 const CONTROL_PLANE_2 = "20000000-0000-4000-8000-000000000002";
-const TOKEN = `agent-dock-${"a".repeat(48)}`;
+const TOKEN = `pi-cloud-${"a".repeat(48)}`;
 
 let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
@@ -127,7 +127,7 @@ async function startGateway(options: {
       .values({
         id: credentialId,
         tenant_id: tenantId,
-        provider: "agent-dock-fake",
+        provider: "pi-cloud-fake",
         kind: "brokered",
         secret_ref: `broker://${tenantId}/fake`,
         version: 1,
@@ -140,8 +140,8 @@ async function startGateway(options: {
         id: profileId,
         tenant_id: tenantId,
         name: "default",
-        provider: "agent-dock-fake",
-        model_id: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        model_id: "pi-cloud-fake",
         default_thinking_level: "off",
         allowed_thinking_levels: ["off"],
         credential_binding_id: credentialId,

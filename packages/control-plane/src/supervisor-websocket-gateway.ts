@@ -5,7 +5,7 @@ import {
   type EventPublishBatchMessage,
   type EventPublishMessage,
   type EventRejectedMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { TLSSocket } from "node:tls";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -21,7 +21,7 @@ import {
   type SupervisorTransportAuthority,
 } from "./supervisor-connection-manager.ts";
 import type { SupervisorConnectionManager } from "./supervisor-connection-manager.ts";
-import type { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
+import type { SessionLeaseCoordinator } from "@pi-cloud/runtime-core/session-lease-coordinator";
 import { RemoteSupervisorSteerBackend } from "./remote-supervisor-steer-backend.ts";
 
 export const SUPERVISOR_WEBSOCKET_PATH = "/internal/v1/supervisor";

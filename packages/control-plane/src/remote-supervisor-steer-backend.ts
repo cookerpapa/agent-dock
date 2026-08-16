@@ -1,16 +1,16 @@
 import {
-  AgentDockWireProtocolError,
+  PiCloudWireProtocolError,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
   type CommandAckMessage,
   type CommandCommitMessage,
   type CommandReleaseMessage,
   type SteerTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,
-} from "@agent-dock/runtime-core/session-lease-coordinator";
+} from "@pi-cloud/runtime-core/session-lease-coordinator";
 import {
   WorkerControlChannelError,
   type RemoteWorkerControlTransport,
@@ -86,7 +86,7 @@ function normalizeSteerError(error: unknown, committed: boolean): TurnSteerBacke
       committed && error.ambiguous,
     );
   }
-  if (error instanceof AgentDockWireProtocolError) {
+  if (error instanceof PiCloudWireProtocolError) {
     return new TurnSteerBackendError(
       "backend_protocol_violation",
       "Remote supervisor steer protocol validation failed",

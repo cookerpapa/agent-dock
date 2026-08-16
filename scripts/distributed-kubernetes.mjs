@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const chart = resolve(repositoryRoot, "deploy/helm/agent-dock-platform");
+const chart = resolve(repositoryRoot, "deploy/helm/pi-cloud-platform");
 
 function fail(message) {
-  process.stderr.write(`AgentDock distributed deployment: ${message}\n`);
+  process.stderr.write(`PiCloud distributed deployment: ${message}\n`);
   process.exit(1);
 }
 
@@ -69,7 +69,7 @@ function ensureNamespace(namespace) {
   }
   run(
     "kubectl",
-    ["label", "namespace", namespace, "agent-dock.io/trusted-plane=true", "--overwrite"],
+    ["label", "namespace", namespace, "pi-cloud.io/trusted-plane=true", "--overwrite"],
     { inherit: true },
   );
 }
@@ -86,9 +86,9 @@ function preflight(namespace, values) {
         (condition) => condition.type === "Ready" && condition.status === "True",
       ),
   );
-  if (readyNodes.length < 2 && process.env.AGENT_DOCK_ALLOW_SINGLE_NODE_DISTRIBUTED !== "1") {
+  if (readyNodes.length < 2 && process.env.PI_CLOUD_ALLOW_SINGLE_NODE_DISTRIBUTED !== "1") {
     fail(
-      "at least two Ready schedulable nodes are required; set AGENT_DOCK_ALLOW_SINGLE_NODE_DISTRIBUTED=1 only for a non-HA test cluster",
+      "at least two Ready schedulable nodes are required; set PI_CLOUD_ALLOW_SINGLE_NODE_DISTRIBUTED=1 only for a non-HA test cluster",
     );
   }
   if (optional("kubectl", ["get", "crd", "scaledobjects.keda.sh"]).status !== 0) {
@@ -143,8 +143,8 @@ function preflight(namespace, values) {
 }
 
 const action = process.argv[2] ?? "help";
-const namespace = argument("--namespace", "agent-dock-system");
-const release = argument("--release", "agent-dock");
+const namespace = argument("--namespace", "pi-cloud-system");
+const release = argument("--release", "pi-cloud");
 const configuredValues = argument("--values", "");
 const valuesPath = configuredValues === "" ? "" : resolve(process.cwd(), configuredValues);
 
@@ -213,5 +213,5 @@ if (action === "deploy") {
     ],
     { inherit: true },
   );
-  process.stdout.write(`AgentDock distributed release ${release} is ready.\n`);
+  process.stdout.write(`PiCloud distributed release ${release} is ready.\n`);
 }

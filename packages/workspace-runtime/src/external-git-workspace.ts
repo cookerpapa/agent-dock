@@ -1,4 +1,4 @@
-import { MAX_WORKSPACE_PATCH_BYTES, type WorkspacePatch } from "@agent-dock/protocol";
+import { MAX_WORKSPACE_PATCH_BYTES, type WorkspacePatch } from "@pi-cloud/protocol";
 import { execFile } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -89,8 +89,8 @@ export async function initializeExternalGitWorkspaceBaseline(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
   await executeGit(workspace, ["init", "--quiet"], environment);
-  await executeGit(workspace, ["config", "user.name", "AgentDock"], environment);
-  await executeGit(workspace, ["config", "user.email", "platform@agent-dock.invalid"], environment);
+  await executeGit(workspace, ["config", "user.name", "PiCloud"], environment);
+  await executeGit(workspace, ["config", "user.email", "platform@pi-cloud.invalid"], environment);
   await executeGit(workspace, ["config", "core.hooksPath", "/dev/null"], environment);
   await writeFile(join(workspace.gitDirectory, "info", "exclude"), "/.git/\n", {
     encoding: "utf8",
@@ -99,7 +99,7 @@ export async function initializeExternalGitWorkspaceBaseline(
   await executeGit(workspace, ["add", "--all", "--", "."], environment);
   await executeGit(
     workspace,
-    ["commit", "--allow-empty", "--quiet", "-m", "AgentDock Workspace baseline"],
+    ["commit", "--allow-empty", "--quiet", "-m", "PiCloud Workspace baseline"],
     environment,
   );
   return inspectExternalGitWorkspaceBaseline(workspace, environment);

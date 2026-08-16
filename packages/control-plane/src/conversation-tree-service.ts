@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type {
   ConversationForkResource,
   ConversationTreeBranchResource,
@@ -7,7 +7,7 @@ import type {
   ConversationTreeResource,
   ConversationTreeView,
   CreateConversationForkRequest,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
 

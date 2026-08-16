@@ -12,6 +12,6 @@ tmp/
 workspaces/
 packages/web-ui/Caddyfile
 deploy/observability/Caddyfile
-deploy/helm/agent-dock-execution-plane/templates/
-deploy/helm/agent-dock-pi-worker-pool/templates/
-deploy/helm/agent-dock-platform/templates/
+deploy/helm/pi-cloud-execution-plane/templates/
+deploy/helm/pi-cloud-pi-worker-pool/templates/
+deploy/helm/pi-cloud-platform/templates/

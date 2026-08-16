@@ -1,7 +1,7 @@
-import { createDatabase } from "@agent-dock/database";
-import { operationalLog, startServiceObservability } from "@agent-dock/observability";
-import { ValkeyLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
-import { SessionLiveStreamCompactionService } from "@agent-dock/runtime-core/session-event-retention";
+import { createDatabase } from "@pi-cloud/database";
+import { operationalLog, startServiceObservability } from "@pi-cloud/observability";
+import { ValkeyLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
+import { SessionLiveStreamCompactionService } from "@pi-cloud/runtime-core/session-event-retention";
 import { readFile } from "node:fs/promises";
 
 const DEFAULT_IDLE_INTERVAL_MS = 60_000;
@@ -47,34 +47,34 @@ async function wait(delayMs: number, signal: AbortSignal): Promise<void> {
 
 export async function startEventRetentionWorker(): Promise<void> {
   const [databaseUrl, liveEventStoreUrl] = await Promise.all([
-    secret(process.env.DATABASE_URL_FILE ?? "/run/agent-dock-secrets/database-url", "Database URL"),
+    secret(process.env.DATABASE_URL_FILE ?? "/run/pi-cloud-secrets/database-url", "Database URL"),
     secret(
-      process.env.AGENT_DOCK_LIVE_EVENT_STORE_URL_FILE ??
-        "/run/agent-dock-secrets/live-event-store-url",
+      process.env.PI_CLOUD_LIVE_EVENT_STORE_URL_FILE ??
+        "/run/pi-cloud-secrets/live-event-store-url",
       "Valkey live event store URL",
     ),
   ]);
   const database = createDatabase({ connectionString: databaseUrl, maxConnections: 4 });
   const liveEvents = new ValkeyLiveSessionEventStore({ url: liveEventStoreUrl });
   const observability = await startServiceObservability({
-    serviceName: "agent-dock-live-stream-compactor",
+    serviceName: "pi-cloud-live-stream-compactor",
     defaultMetricsPort: 9468,
   });
   const controller = new AbortController();
   const idleIntervalMs = integerEnvironment(
-    "AGENT_DOCK_EVENT_RETENTION_INTERVAL_MS",
+    "PI_CLOUD_EVENT_RETENTION_INTERVAL_MS",
     DEFAULT_IDLE_INTERVAL_MS,
     1_000,
     24 * 60 * 60 * 1_000,
   );
   const errorRetryMs = integerEnvironment(
-    "AGENT_DOCK_EVENT_RETENTION_ERROR_RETRY_MS",
+    "PI_CLOUD_EVENT_RETENTION_ERROR_RETRY_MS",
     DEFAULT_ERROR_RETRY_MS,
     1_000,
     60 * 60 * 1_000,
   );
   const batchSize = integerEnvironment(
-    "AGENT_DOCK_EVENT_RETENTION_BATCH_SIZE",
+    "PI_CLOUD_EVENT_RETENTION_BATCH_SIZE",
     DEFAULT_BATCH_SIZE,
     1,
     10_000,
@@ -93,7 +93,7 @@ export async function startEventRetentionWorker(): Promise<void> {
           if (result.status === "idle") break;
           compacted += 1;
           operationalLog({
-            service: "agent-dock-live-stream-compactor",
+            service: "pi-cloud-live-stream-compactor",
             level: "info",
             event: "live-stream.compacted",
             attributes: { throughSequence: result.throughSequence },
@@ -102,7 +102,7 @@ export async function startEventRetentionWorker(): Promise<void> {
         await wait(compacted === batchSize ? 1_000 : idleIntervalMs, controller.signal);
       } catch (error: unknown) {
         operationalLog({
-          service: "agent-dock-live-stream-compactor",
+          service: "pi-cloud-live-stream-compactor",
           level: "error",
           event: "live-stream.compaction-failed",
           attributes: { code: error instanceof Error ? error.name : "unknown" },
@@ -120,6 +120,6 @@ export async function startEventRetentionWorker(): Promise<void> {
 }
 
 startEventRetentionWorker().catch(() => {
-  process.stderr.write("AgentDock live stream compactor failed to start\n");
+  process.stderr.write("PiCloud live stream compactor failed to start\n");
   process.exitCode = 1;
 });

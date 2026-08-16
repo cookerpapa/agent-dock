@@ -1,4 +1,4 @@
-import type { EventAckMessage, EventPublishMessage } from "@agent-dock/protocol";
+import type { EventAckMessage, EventPublishMessage } from "@pi-cloud/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { DurableEventGroupIngestor } from "../src/durable-event-store.ts";
 import { GroupedDurableEventIngestor } from "../src/grouped-durable-event-ingestor.ts";

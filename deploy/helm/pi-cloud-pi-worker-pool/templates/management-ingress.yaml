@@ -1,0 +1,54 @@
+{{- if .Values.management.ingress.enabled }}
+{{- $root := . }}
+{{- $poolName := include "pi-cloud-pi-worker-pool.name" . }}
+{{- $replicas := ternary (int .Values.autoscaling.maxReplicas) (int .Values.workerPool.replicas) .Values.autoscaling.enabled }}
+{{- range $ordinal := until $replicas }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-%d" $poolName $ordinal }}
+  labels:
+    {{- include "pi-cloud-pi-worker-pool.labels" $root | nindent 4 }}
+    pi-cloud.io/worker-ordinal: {{ $ordinal | quote }}
+spec:
+  selector:
+    statefulset.kubernetes.io/pod-name: {{ printf "%s-%d" $poolName $ordinal }}
+  ports:
+    - { name: management, port: 4100, targetPort: management }
+    - { name: metrics, port: 9465, targetPort: metrics }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ printf "%s-%d" $poolName $ordinal }}
+  labels:
+    {{- include "pi-cloud-pi-worker-pool.labels" $root | nindent 4 }}
+    pi-cloud.io/worker-ordinal: {{ $ordinal | quote }}
+spec:
+  {{- if $root.Values.management.ingress.className }}
+  ingressClassName: {{ $root.Values.management.ingress.className | quote }}
+  {{- end }}
+  rules:
+    - host: {{ printf "%s-%d.%s" $poolName $ordinal $root.Values.management.ingress.hostSuffix | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ printf "%s-%d" $poolName $ordinal }}
+                port:
+                  name: management
+    - host: {{ printf "%s-%d.metrics.%s" $poolName $ordinal $root.Values.management.ingress.hostSuffix | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ printf "%s-%d" $poolName $ordinal }}
+                port:
+                  name: metrics
+---
+{{- end }}
+{{- end }}

@@ -1,9 +1,9 @@
-import type { Database } from "@agent-dock/database";
-import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import type { Database } from "@pi-cloud/database";
+import type { ExecuteTurnCommandMessage } from "@pi-cloud/protocol";
 import type {
   RunAttemptExecutionPhase,
   RunAttemptPhaseObserver,
-} from "@agent-dock/sandbox-supervisor";
+} from "@pi-cloud/sandbox-supervisor";
 import type { Kysely } from "kysely";
 import { randomUUID } from "node:crypto";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";

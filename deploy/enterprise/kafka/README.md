@@ -7,7 +7,7 @@ to local policy, and then apply these manifests:
 ```bash
 kubectl apply -f deploy/enterprise/kafka/namespace.yaml
 kubectl apply -f deploy/enterprise/kafka/cluster.yaml
-kubectl -n agent-dock-eventing wait kafka/agent-dock-kafka \
+kubectl -n pi-cloud-eventing wait kafka/pi-cloud-kafka \
   --for=condition=Ready --timeout=20m
 ```
 
@@ -27,23 +27,23 @@ same zone label so replicas are distributed across failure domains instead of
 only across processes on one machine.
 
 Strimzi creates the user password in
-`agent-dock-eventing/agent-dock-event-gateway` and the CA in
-`agent-dock-eventing/agent-dock-kafka-cluster-ca-cert`. Before the global plane
+`pi-cloud-eventing/pi-cloud-event-gateway` and the CA in
+`pi-cloud-eventing/pi-cloud-kafka-cluster-ca-cert`. Before the global plane
 is deployed, synchronize those values into the global namespace's existing
 platform Secret under these keys:
 
 ```text
-kafka-username = agent-dock-event-gateway
+kafka-username = pi-cloud-event-gateway
 kafka-password = generated Secret key `password`
 kafka-ca.crt    = generated Secret key `ca.crt`
 ```
 
 Use the organization's External Secrets/secret replication controller for
-continuous synchronization. AgentDock's enterprise preflight fails closed when
+continuous synchronization. PiCloud's enterprise preflight fails closed when
 any of the three keys is absent. Neither value is copied to a Pi Worker or Cube
 sandbox.
 
-AgentDock uses Kafka as the enterprise Worker stream's first shared payload
+PiCloud uses Kafka as the enterprise Worker stream's first shared payload
 durability boundary. Pi Workers call an authenticated internal Event Gateway
 endpoint and never receive Kafka credentials. A cumulative Worker ACK means
 Kafka accepted the ordered Session-keyed batch; the consumer group then
@@ -56,13 +56,13 @@ never overtakes its visible text or Tool events.
 The global platform Secret must also contain the independent
 `worker-event-ingest-token` key configured by
 `external.eventIngest.tokenSecretKey`. This credential is shared only by
-trusted AgentDock Workers, Control Plane and Event Gateway; it must not be
+trusted PiCloud Workers, Control Plane and Event Gateway; it must not be
 copied into Cube guests.
 
 The same Secret must contain `live-event-store-url`, pointing to an HA Valkey
 deployment with persistence and `noeviction`. Valkey is a rebuildable read
 model, not a business-state authority. Keep Kafka topic retention longer than
-AgentDock's live replay window. Configure an explicit data-memory ceiling below
+PiCloud's live replay window. Configure an explicit data-memory ceiling below
 the Pod/container limit; retain `noeviction` so saturation is visible rather
 than silently removing replay data. Event Gateway startup checks the retained
 live range and automatically rebuilds missing streams from Kafka under a

@@ -15,7 +15,7 @@ function identity(supervisorId = "supervisor-ledger-test") {
 }
 
 async function root(): Promise<string> {
-  const value = await mkdtemp(join(tmpdir(), "agent-dock-boot-ledger-"));
+  const value = await mkdtemp(join(tmpdir(), "pi-cloud-boot-ledger-"));
   roots.push(value);
   return value;
 }

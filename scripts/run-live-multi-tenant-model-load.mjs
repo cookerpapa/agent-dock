@@ -6,24 +6,24 @@ import { mkdir, open, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
-import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
+import { PiCloudApi, PiCloudApiError, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-if (process.env.AGENT_DOCK_LIVE_MULTI_TENANT_LOAD !== "1") {
+if (process.env.PI_CLOUD_LIVE_MULTI_TENANT_LOAD !== "1") {
   throw new Error(
-    "Set AGENT_DOCK_LIVE_MULTI_TENANT_LOAD=1 to acknowledge real multi-tenant model usage",
+    "Set PI_CLOUD_LIVE_MULTI_TENANT_LOAD=1 to acknowledge real multi-tenant model usage",
   );
 }
 
-const tenantCount = Number(process.env.AGENT_DOCK_LIVE_MULTI_TENANT_COUNT ?? "6");
+const tenantCount = Number(process.env.PI_CLOUD_LIVE_MULTI_TENANT_COUNT ?? "6");
 if (!Number.isSafeInteger(tenantCount) || tenantCount < 2 || tenantCount > 12) {
-  throw new Error("AGENT_DOCK_LIVE_MULTI_TENANT_COUNT must be an integer from 2 to 12");
+  throw new Error("PI_CLOUD_LIVE_MULTI_TENANT_COUNT must be an integer from 2 to 12");
 }
 
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 
 async function readPrivate(path, maximumBytes, label) {
@@ -54,8 +54,8 @@ const environment = Object.fromEntries(
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
 );
-const bindAddress = environment.AGENT_DOCK_HTTP_BIND_ADDRESS;
-const port = environment.AGENT_DOCK_HTTP_PORT;
+const bindAddress = environment.PI_CLOUD_HTTP_BIND_ADDRESS;
+const port = environment.PI_CLOUD_HTTP_PORT;
 if (bindAddress === undefined || port === undefined) {
   throw new Error("Production HTTP endpoint configuration is missing");
 }
@@ -104,9 +104,9 @@ async function psql(query) {
     "postgres",
     "psql",
     "--username",
-    "agent_dock",
+    "pi_cloud",
     "--dbname",
-    "agent_dock",
+    "pi_cloud",
     "--no-align",
     "--tuples-only",
     "--set",
@@ -192,7 +192,7 @@ async function registerTenant(index, suffix) {
   ) {
     throw new Error(`Tenant registration returned HTTP ${String(response.status)}`);
   }
-  const api = new AgentDockApi(fetchFromProduction, body.apiToken);
+  const api = new PiCloudApi(fetchFromProduction, body.apiToken);
   const model = await api.getModelConfiguration();
   assert.equal(model.mode, "real", `${tenantSlug} did not inherit the platform real model`);
   const project = await api.createProject(`Multi-tenant model load ${suffix}`);
@@ -365,7 +365,7 @@ for (let index = 0; index < lanes.length; index += 1) {
   const foreign = lanes[(index + 1) % lanes.length];
   await assert.rejects(
     current.api.getConversation(foreign.session.sessionId),
-    (error) => error instanceof AgentDockApiError && error.status === 404,
+    (error) => error instanceof PiCloudApiError && error.status === 404,
   );
 }
 

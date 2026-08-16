@@ -1,8 +1,8 @@
 import {
   PostgresTenantModelCredentialResolver,
   type TenantModelCredentialIdentity,
-} from "@agent-dock/runtime-core/model-credential-runtime";
-import type { Database } from "@agent-dock/database";
+} from "@pi-cloud/runtime-core/model-credential-runtime";
+import type { Database } from "@pi-cloud/database";
 import {
   MODEL_SAMPLING_ATTEMPT_HEADER,
   MODEL_STEP_SEQUENCE_HEADER,
@@ -10,9 +10,9 @@ import {
   parseModelSamplingIdentity,
   type ExecuteTurnCommandMessage,
   type ModelSamplingIdentity,
-} from "@agent-dock/protocol";
-import type { TrustedModelRuntimeLease } from "@agent-dock/sandbox-supervisor";
-import { parseTraceCarrier, withSpan, type AgentDockMetrics } from "@agent-dock/observability";
+} from "@pi-cloud/protocol";
+import type { TrustedModelRuntimeLease } from "@pi-cloud/sandbox-supervisor";
+import { parseTraceCarrier, withSpan, type PiCloudMetrics } from "@pi-cloud/observability";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -85,7 +85,7 @@ export type TenantModelGatewayOptions = {
   clock?: () => Date;
   randomBytes?: (size: number) => Buffer;
   idGenerator?: () => string;
-  metrics?: AgentDockMetrics;
+  metrics?: PiCloudMetrics;
 };
 
 export class TenantModelGatewayError extends Error {
@@ -378,7 +378,7 @@ export class TenantModelGateway {
   readonly #clock: () => Date;
   readonly #randomBytes: (size: number) => Buffer;
   readonly #idGenerator: () => string;
-  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #metrics: PiCloudMetrics | undefined;
   readonly #server: Server;
   readonly #capabilities = new Map<string, ActiveCapability>();
   #started = false;
@@ -434,21 +434,21 @@ export class TenantModelGateway {
         tracestate: request.headers.tracestate,
       });
       void withSpan({
-        serviceName: "agent-dock-model-gateway",
+        serviceName: "pi-cloud-model-gateway",
         name: "model.request",
         ...(parent === undefined ? {} : { parent }),
         attributes: {
           ...(active === undefined
             ? {}
             : {
-                "agent_dock.run.id": active.runId,
-                "agent_dock.attempt.id": active.attemptId,
+                "pi_cloud.run.id": active.runId,
+                "pi_cloud.attempt.id": active.attemptId,
                 ...(sampling === undefined
                   ? {}
                   : {
-                      "agent_dock.step.sequence": sampling.stepSequence,
-                      "agent_dock.step.sha256": sampling.stepSha256,
-                      "agent_dock.sampling.attempt": sampling.samplingAttempt,
+                      "pi_cloud.step.sequence": sampling.stepSequence,
+                      "pi_cloud.step.sha256": sampling.stepSha256,
+                      "pi_cloud.sampling.attempt": sampling.samplingAttempt,
                     }),
                 "gen_ai.system": active.provider,
                 "gen_ai.request.model": active.modelId,

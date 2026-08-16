@@ -2,7 +2,7 @@
 
 ## Role
 
-CubeSandbox is AgentDock's sole untrusted execution plane. Pi and provider
+CubeSandbox is PiCloud's sole untrusted execution plane. Pi and provider
 authentication stay in the trusted Worker. User commands and repository code
 run inside one KVM microVM bound to a tenant/Workspace/Session.
 
@@ -28,7 +28,7 @@ Cube supplies the capabilities needed by an interactive coding Agent:
 - pause/resume primitives;
 - independent process and filesystem environment.
 
-AgentDock does not treat Cube lifecycle state as durable conversation state.
+PiCloud does not treat Cube lifecycle state as durable conversation state.
 Pi Session checkpoints and Workspace checkpoints remain external and fenced.
 
 ## Template
@@ -37,7 +37,7 @@ The deployment-owned template contains:
 
 - Debian userland;
 - Node.js 24, Java 17, Python 3 and Git;
-- the AgentDock Tool service;
+- the PiCloud Tool service;
 - a fixed unprivileged user;
 - `/workspace` volume mount;
 - no deployment secrets.
@@ -81,14 +81,14 @@ promised across activation destruction or failure.
 
 ## Interactive terminal
 
-AgentDock allocates a real guest PTY through its fenced Cube Tool Service for
+PiCloud allocates a real guest PTY through its fenced Cube Tool Service for
 the Workspace Web Terminal. The browser never connects to Cube or a public port
 directly: authenticated browser WebSocket → Control Plane proxy → Tool Broker →
 authenticated Cube Tool Service → guest PTY. The PTY starts an interactive
 login shell as the fixed unprivileged user in `/workspace` and supports bounded
 input, output and resize frames.
 
-Cube's general-purpose `envd` remains absent from the AgentDock image.
+Cube's general-purpose `envd` remains absent from the PiCloud image.
 Re-enabling it would create a second command channel outside the Tool handoff
 secret and fencing checks. Terminal open, input, resize and close therefore use
 the same private port 49984 and current activation authority as every other
@@ -111,7 +111,7 @@ through the trusted Cube egress gateway. The gateway:
 - has no tenant/model/database credential.
 
 Tools that ignore `HTTP_PROXY`/`HTTPS_PROXY` do not gain a secret direct route
-through AgentDock's gateway.
+through PiCloud's gateway.
 
 ## Runtime evidence
 

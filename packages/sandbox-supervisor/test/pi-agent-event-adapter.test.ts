@@ -1,4 +1,4 @@
-import { createAgentDockEventFactory } from "@agent-dock/protocol";
+import { createPiCloudEventFactory } from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
 import { PiAgentEventAdapter } from "../src/index.ts";
 
@@ -12,7 +12,7 @@ function createAdapter() {
     "55555555-5555-4555-8555-555555555555",
   ];
   return new PiAgentEventAdapter(
-    createAgentDockEventFactory(
+    createPiCloudEventFactory(
       { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
       {
         initialSequence: 10,
@@ -90,7 +90,7 @@ describe("PiAgentEventAdapter", () => {
   it("correlates one logical Step across a bounded provider retry and Tool result", () => {
     let eventId = 0;
     const adapter = new PiAgentEventAdapter(
-      createAgentDockEventFactory(
+      createPiCloudEventFactory(
         { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
         {
           idGenerator: () => `${String(++eventId).padStart(8, "0")}-0000-4000-8000-000000000000`,
@@ -224,7 +224,7 @@ describe("PiAgentEventAdapter", () => {
     expect(adapter.adapt({ type: "future_pi_event", raw: "must-not-pass" })).toEqual({
       kind: "invalid",
       sourceType: "future_pi_event",
-      reason: "No reviewed AgentDock v1 mapping exists for Pi event type: future_pi_event",
+      reason: "No reviewed PiCloud v1 mapping exists for Pi event type: future_pi_event",
     });
   });
 
@@ -426,7 +426,7 @@ describe("PiAgentEventAdapter", () => {
 
   it("bounds persisted tool output", () => {
     const adapter = new PiAgentEventAdapter(
-      createAgentDockEventFactory(
+      createPiCloudEventFactory(
         { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
         { idGenerator: () => "11111111-1111-4111-8111-111111111111" },
       ),

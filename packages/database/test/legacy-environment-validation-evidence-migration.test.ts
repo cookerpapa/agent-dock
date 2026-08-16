@@ -9,7 +9,7 @@ import { applyCompiledQueries, compileMigration } from "./postgres-test-harness.
 const RECIPE_SHA256 = "5a851a442529ef2a092e5fb4f8f217703766a0142b267e4beb14fb1201aa1b6d";
 
 const LEGACY_REPORT = {
-  profileKey: "agent-dock-fullstack",
+  profileKey: "pi-cloud-fullstack",
   profileVersion: "1",
   imageRevision: "legacy",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",

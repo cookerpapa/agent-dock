@@ -1,4 +1,4 @@
-import { createDatabase, runMigrations } from "@agent-dock/database";
+import { createDatabase, runMigrations } from "@pi-cloud/database";
 import { pathToFileURL } from "node:url";
 import { bootstrapProductionDatabase, ProductionBootstrapError } from "./production-bootstrap.ts";
 import {
@@ -43,7 +43,7 @@ if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
         : error instanceof Error
           ? { name: error.name, message: error.message }
           : { name: "UnknownError", message: "Unknown production bootstrap failure" };
-    process.stderr.write(`AgentDock production bootstrap failed ${JSON.stringify(failure)}\n`);
+    process.stderr.write(`PiCloud production bootstrap failed ${JSON.stringify(failure)}\n`);
     process.exitCode = 1;
   });
 }

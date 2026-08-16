@@ -3,7 +3,7 @@ import { mkdir, rename, rm } from "node:fs/promises";
 
 const containerdAddress = "/run/k3s/containerd/containerd.sock";
 const k3sImageDirectory = "/var/lib/rancher/k3s/agent/images";
-const archivePath = `${k3sImageDirectory}/agent-dock-cubesandbox-v0.6.0.tar`;
+const archivePath = `${k3sImageDirectory}/pi-cloud-cubesandbox-v0.6.0.tar`;
 const partialArchivePath = `${archivePath}.partial`;
 const images = [
   "busybox:1.36",

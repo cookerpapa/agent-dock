@@ -10,7 +10,7 @@ export const MAX_WORKSPACE_INDEX_TOTAL_BYTES = 1 * 1_024 * 1_024 * 1_024;
 
 const MAX_PATH_BYTES = 512;
 const MAX_SYMLINK_TARGET_BYTES = 4 * 1_024;
-const SYMLINK_DIGEST_DOMAIN = Buffer.from("agent-dock.workspace-symlink.v1\0", "utf8");
+const SYMLINK_DIGEST_DOMAIN = Buffer.from("pi-cloud.workspace-symlink.v1\0", "utf8");
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 export type WorkspaceSnapshotFileMetadata = Readonly<{

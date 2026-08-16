@@ -116,7 +116,7 @@ if (missingPatches.length > 0) {
     }
 
     const targetRoot = securityPatch.targetRoot;
-    const temporaryRoot = `${targetRoot}.agent-dock-${process.pid}`;
+    const temporaryRoot = `${targetRoot}.pi-cloud-${process.pid}`;
     rmSync(temporaryRoot, { recursive: true, force: true });
     cpSync(sourceRoot, temporaryRoot, {
       recursive: true,

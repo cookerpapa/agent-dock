@@ -2,7 +2,7 @@
 
 ## Positioning
 
-AgentDock is a self-hosted Cloud Coding Agent platform, not a hosted CLI
+PiCloud is a self-hosted Cloud Coding Agent platform, not a hosted CLI
 process. Its differentiating project value is:
 
 - durable and recoverable Pi Sessions;
@@ -37,7 +37,7 @@ network configuration.
 | PostgreSQL queue | durable Run admission, FIFO and Worker claiming |
 | Pi Worker pool | Agent Loop, Pi Session state and model events |
 | Model Gateway | credential isolation and usage |
-| Tool Broker | AgentDock Tool authority, fencing and Cube lifecycle adapter |
+| Tool Broker | PiCloud Tool authority, fencing and Cube lifecycle adapter |
 | Cube execution plane | untrusted bash/build/test processes |
 | Data plane | PostgreSQL conversation state, persistent Cube Volumes |
 | Evaluation | correctness, security, failure and load evidence |

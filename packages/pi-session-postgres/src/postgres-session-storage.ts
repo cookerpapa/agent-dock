@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   Session,
   SessionError,
@@ -20,7 +20,7 @@ import type { ExecutionAuthority } from "./execution-authority.ts";
 
 export type { ActiveExecutionAuthority, ExecutionAuthority } from "./execution-authority.ts";
 
-export type AgentDockPiSessionMetadata = SessionMetadata & {
+export type PiCloudPiSessionMetadata = SessionMetadata & {
   tenantId: string;
 };
 
@@ -99,7 +99,7 @@ function recordFromRow(row: {
 }
 
 /** PostgreSQL implementation of Pi 0.84's public bounded SessionStorage port. */
-export class PostgresPiSessionStorage implements SessionStorage<AgentDockPiSessionMetadata> {
+export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSessionMetadata> {
   readonly #database: Kysely<Database>;
   readonly #tenantId: string;
   readonly #sessionId: string;
@@ -147,11 +147,11 @@ export class PostgresPiSessionStorage implements SessionStorage<AgentDockPiSessi
     return storage;
   }
 
-  asSession(): Session<AgentDockPiSessionMetadata> {
+  asSession(): Session<PiCloudPiSessionMetadata> {
     return new Session(this);
   }
 
-  async getMetadata(): Promise<AgentDockPiSessionMetadata> {
+  async getMetadata(): Promise<PiCloudPiSessionMetadata> {
     const row = await this.#database
       .selectFrom("pi_sessions")
       .select(["id", "tenant_id", "created_at_ms", "parent_session_id"])

@@ -1,4 +1,4 @@
-import type { EventAckMessage, EventPublishMessage } from "@agent-dock/protocol";
+import type { EventAckMessage, EventPublishMessage } from "@pi-cloud/protocol";
 import { lstat, readdir, rename, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-dock/tool-broker",
+  "name": "@pi-cloud/tool-broker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,10 +13,10 @@
     "test": "vitest --run"
   },
   "dependencies": {
-    "@agent-dock/database": "0.1.0",
-    "@agent-dock/observability": "0.1.0",
-    "@agent-dock/protocol": "0.1.0",
-    "@agent-dock/workspace-runtime": "0.1.0",
+    "@pi-cloud/database": "0.1.0",
+    "@pi-cloud/observability": "0.1.0",
+    "@pi-cloud/protocol": "0.1.0",
+    "@pi-cloud/workspace-runtime": "0.1.0",
     "@fastify/websocket": "11.3.0",
     "fastify": "5.10.0",
     "kysely": "0.29.4",

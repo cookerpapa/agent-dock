@@ -1,9 +1,9 @@
 # Helm execution-plane acceptance
 
 - Checked at: 2026-07-23T06:52:32+08:00
-- Release: `agent-dock-execution-plane`
-- Chart: `agent-dock-execution-plane` 0.1.0
-- RuntimeClass: `agent-dock-gvisor` -> `runsc`
+- Release: `pi-cloud-execution-plane`
+- Chart: `pi-cloud-execution-plane` 0.1.0
+- RuntimeClass: `pi-cloud-gvisor` -> `runsc`
 - Ready dependency-egress proxy endpoints: 2
 - Production trust fingerprint checks: 8/8 matched
 - Manager live gVisor tests: 5/5 passed

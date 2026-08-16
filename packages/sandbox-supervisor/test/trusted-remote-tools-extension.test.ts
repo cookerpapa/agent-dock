@@ -56,7 +56,7 @@ const BASE_CONFIGURATION = {
   captureStepContext: createStepCapture(),
   remainingToolCalls: 0,
   maximumToolOutputBytes: 1_024,
-  toolOutputDirectory: "/tmp/agent-dock-tool-output-test",
+  toolOutputDirectory: "/tmp/pi-cloud-tool-output-test",
   traceparent: "00-11111111111111111111111111111111-2222222222222222-01",
 } as const;
 
@@ -92,7 +92,7 @@ describe("trusted remote tools extension governance", () => {
     await expect(runtime.transformHeaders({ "x-test": "yes" })).resolves.toMatchObject({
       "x-test": "yes",
       traceparent: BASE_CONFIGURATION.traceparent,
-      "x-agent-dock-step-sequence": "1",
+      "x-pi-cloud-step-sequence": "1",
     });
   });
 
@@ -114,9 +114,9 @@ describe("trusted remote tools extension governance", () => {
     const resumedAgentHeaders = await runtime.transformHeaders();
 
     expect(purposes).toEqual(["agent", "context_maintenance", "agent"]);
-    expect(agentHeaders["x-agent-dock-step-sequence"]).toBe("1");
-    expect(compactionHeaders["x-agent-dock-step-sequence"]).toBe("2");
-    expect(resumedAgentHeaders["x-agent-dock-step-sequence"]).toBe("3");
+    expect(agentHeaders["x-pi-cloud-step-sequence"]).toBe("1");
+    expect(compactionHeaders["x-pi-cloud-step-sequence"]).toBe("2");
+    expect(resumedAgentHeaders["x-pi-cloud-step-sequence"]).toBe("3");
   });
 
   it("binds SDK tool identity from an activation-local object instead of process.env", () => {
@@ -131,7 +131,7 @@ describe("trusted remote tools extension governance", () => {
       captureStepContext: createStepCapture(),
       remainingToolCalls: 0,
       maximumToolOutputBytes: 1_024,
-      toolOutputDirectory: "/tmp/agent-dock-sdk-tool-output-test",
+      toolOutputDirectory: "/tmp/pi-cloud-sdk-tool-output-test",
       projectInstructions: "SDK activation-local instructions.",
     });
     if (typeof extension !== "function") throw new Error("Expected an inline extension factory");
@@ -278,7 +278,7 @@ describe("trusted remote tools extension governance", () => {
           ...capture(activeTools),
           modelMessages: [
             {
-              customType: "agent-dock.sandbox_reset",
+              customType: "pi-cloud.sandbox_reset",
               content: "<sandbox_reset>reset</sandbox_reset>",
               display: false,
               details: { schemaVersion: 1, changeSha256: "e".repeat(64) },
@@ -355,7 +355,7 @@ describe("trusted remote tools extension governance", () => {
   });
 
   it("layers bounded project instructions and preserves a large read result", async () => {
-    const directory = await mkdtemp(resolve(tmpdir(), "agent-dock-tool-output-extension-test-"));
+    const directory = await mkdtemp(resolve(tmpdir(), "pi-cloud-tool-output-extension-test-"));
     try {
       const registered: ToolDefinition[] = [];
       const handlers = new Map<string, (...args: never[]) => unknown>();
@@ -427,8 +427,8 @@ describe("trusted remote tools extension governance", () => {
         headers: providerHeaders,
       } as never);
       expect(providerHeaders.traceparent).toBe(BASE_CONFIGURATION.traceparent);
-      expect(providerHeaders["x-agent-dock-step-sequence"]).toMatch(/^[1-9][0-9]*$/);
-      expect(providerHeaders["x-agent-dock-sampling-attempt"]).toBe("1");
+      expect(providerHeaders["x-pi-cloud-step-sequence"]).toMatch(/^[1-9][0-9]*$/);
+      expect(providerHeaders["x-pi-cloud-sampling-attempt"]).toBe("1");
 
       await registered
         .find((tool) => tool.name === "read")!
@@ -450,7 +450,7 @@ describe("trusted remote tools extension governance", () => {
   });
 
   it("selects one recoverable head-tail Bash preview from the original output", async () => {
-    const directory = await mkdtemp(resolve(tmpdir(), "agent-dock-bash-preview-test-"));
+    const directory = await mkdtemp(resolve(tmpdir(), "pi-cloud-bash-preview-test-"));
     try {
       const registered: ToolDefinition[] = [];
       const handlers = new Map<string, (...args: never[]) => unknown>();

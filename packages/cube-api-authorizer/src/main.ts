@@ -4,7 +4,7 @@ import { createCubeApiAuthorizerServer } from "./server.ts";
 const config = await loadCubeApiAuthorizerConfig();
 const server = createCubeApiAuthorizerServer(config.credential);
 server.listen(config.port, config.host, () => {
-  process.stdout.write("AgentDock Cube API authorizer ready\n");
+  process.stdout.write("PiCloud Cube API authorizer ready\n");
 });
 
 let closing = false;
@@ -13,7 +13,7 @@ const close = (): void => {
   closing = true;
   server.close((error) => {
     if (error !== undefined) {
-      process.stderr.write("AgentDock Cube API authorizer shutdown failed\n");
+      process.stderr.write("PiCloud Cube API authorizer shutdown failed\n");
       process.exitCode = 1;
     }
   });

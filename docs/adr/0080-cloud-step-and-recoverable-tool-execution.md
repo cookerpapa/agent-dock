@@ -15,7 +15,7 @@ another.
 
 Tool operations also used a single request/response connection. If either the
 trusted Worker-to-Manager connection or the Manager-to-Cube connection was
-briefly lost after a command started, AgentDock correctly refused to replay the
+briefly lost after a command started, PiCloud correctly refused to replay the
 command, but immediately classified the result as unknown and destroyed the
 Cube. This is safe but unnecessarily turns a recoverable transport interruption
 into an execution failure.
@@ -52,7 +52,7 @@ untyped hidden sandbox marker. These invariants should be explicit contracts.
    highestProducedSeq`. The Control Plane remains the sole writer of the public
    terminal event and commits that event with the Run and checkpoint heads in
    one PostgreSQL transaction.
-7. Pi stores a versioned, typed `agent-dock.runtime_world_state` custom entry.
+7. Pi stores a versioned, typed `pi-cloud.runtime_world_state` custom entry.
    Its initial world model tracks Sandbox availability, continuity identity,
    environment fingerprint, Workspace revision and Tool policy fingerprint.
    The entry is hidden from the model. Only a material loss of an active process

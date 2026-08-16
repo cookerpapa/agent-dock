@@ -1,4 +1,4 @@
-# ADR-0002: Versioned AgentDock event envelope
+# ADR-0002: Versioned PiCloud event envelope
 
 - Status: Accepted
 - Date: 2026-07-18
@@ -8,15 +8,15 @@
 The Pi SDK emits useful runtime events, responses, and extension UI requests,
 but those messages are an upstream runtime contract. They do not carry all of the
 tenant/session/turn/agent identity, durable ordering, replay, and compatibility
-metadata required by AgentDock's control plane and browser clients.
+metadata required by PiCloud's control plane and browser clients.
 
 Persisting or publishing raw Pi messages would couple the database, API, and
 frontend to one Pi release. It would also risk exposing upstream request IDs or
-new fields before AgentDock has reviewed their security and tenancy semantics.
+new fields before PiCloud has reviewed their security and tenancy semantics.
 
 ## Decision
 
-1. AgentDock publishes a closed, discriminated union of versioned event schemas.
+1. PiCloud publishes a closed, discriminated union of versioned event schemas.
 2. Every event contains `schemaVersion`, `eventId`, `sessionId`, `turnId`,
    `agentId`, `seq`, `occurredAt`, `type`, and a type-specific `payload`.
 3. `turnId` is explicitly nullable for session-level events; turn-scoped events
@@ -26,7 +26,7 @@ new fields before AgentDock has reviewed their security and tenancy semantics.
 5. Event and payload objects reject additional properties. New public data
    requires a deliberate schema change rather than accidental passthrough.
 6. Only the sandbox-supervisor Pi adapter may inspect raw Pi SDK event shapes. It maps
-   reviewed fields into AgentDock events and keeps the Pi UI request ID private.
+   reviewed fields into PiCloud events and keeps the Pi UI request ID private.
 7. Unknown or malformed Pi events are ignored or reported as adapter outcomes;
    they are never published as an untyped raw-event escape hatch.
 8. Schema version 1 covers turn start/completion/failure, session state, text

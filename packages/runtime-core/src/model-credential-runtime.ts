@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { Kysely } from "kysely";
 
@@ -61,7 +61,7 @@ function boundedIdentity(value: string, name: string): string {
 function associatedData(identity: TenantModelCredentialIdentity, keyVersion: number): Buffer {
   return Buffer.from(
     JSON.stringify({
-      format: "agent-dock.tenant-model-credential.v1",
+      format: "pi-cloud.tenant-model-credential.v1",
       tenantId: boundedIdentity(identity.tenantId, "Tenant ID"),
       credentialBindingId: boundedIdentity(identity.credentialBindingId, "Credential binding ID"),
       credentialBindingVersion: positiveVersion(identity.credentialBindingVersion),

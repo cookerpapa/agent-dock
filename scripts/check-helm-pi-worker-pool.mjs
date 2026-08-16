@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { parseAllDocuments } from "yaml";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const chart = resolve(root, "deploy/helm/agent-dock-pi-worker-pool");
-const helm = process.env.AGENT_DOCK_HELM_BIN ?? "helm";
+const chart = resolve(root, "deploy/helm/pi-cloud-pi-worker-pool");
+const helm = process.env.PI_CLOUD_HELM_BIN ?? "helm";
 
 function run(arguments_) {
   const result = spawnSync(helm, arguments_, { cwd: root, encoding: "utf8" });
@@ -20,7 +20,7 @@ const rendered = run([
   "pi-workers",
   chart,
   "--namespace",
-  "agent-dock-workers",
+  "pi-cloud-workers",
   "--set",
   "autoscaling.enabled=true",
 ]);
@@ -41,12 +41,12 @@ const environment = Object.fromEntries(
     .filter((entry) => entry.value !== undefined)
     .map((entry) => [entry.name, String(entry.value)]),
 );
-assert.equal(environment.DATABASE_URL_FILE, "/run/agent-dock-secrets/database-url");
+assert.equal(environment.DATABASE_URL_FILE, "/run/pi-cloud-secrets/database-url");
 assert.equal(
   environment.DATABASE_NOTIFICATION_URL_FILE,
-  "/run/agent-dock-secrets/database-notification-url",
+  "/run/pi-cloud-secrets/database-notification-url",
 );
-assert.equal(environment.AGENT_DOCK_SUPERVISOR_CAPACITY, "4");
+assert.equal(environment.PI_CLOUD_SUPERVISOR_CAPACITY, "4");
 
 const scaler = find("ScaledObject");
 assert(scaler);

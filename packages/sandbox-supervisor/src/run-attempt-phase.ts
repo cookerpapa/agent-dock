@@ -1,4 +1,4 @@
-import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import type { ExecuteTurnCommandMessage } from "@pi-cloud/protocol";
 
 export type RunAttemptExecutionPhase = "restoring" | "running" | "checkpointing";
 

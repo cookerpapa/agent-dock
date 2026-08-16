@@ -4,11 +4,11 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   type ToolSandboxAssignment,
   type ToolSandboxOperationRequest,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   decodeWorkspaceSnapshotBlob,
   parsePersistentVolumeReference,
-} from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/workspace-runtime";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -43,7 +43,7 @@ const assignment: ToolSandboxAssignment = {
 const environment = {
   environmentVersionId: "10000000-0000-4000-8000-000000000005",
   versionNumber: 1,
-  profileKey: "agent-dock-fullstack" as const,
+  profileKey: "pi-cloud-fullstack" as const,
   profileVersion: "1" as const,
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const,
@@ -298,7 +298,7 @@ describe("CubeSandbox Provider contract", () => {
   it("attests a real-template probe with full-public egress and private ingress", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
@@ -308,13 +308,13 @@ describe("CubeSandbox Provider contract", () => {
     expect(runtime.healthChecks).toBe(1);
     expect(runtime.creates).toHaveLength(1);
     expect(runtime.creates[0]).toMatchObject({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       allowInternetAccess: true,
       allowPublicTraffic: false,
       metadata: {
-        "agentdock.managed": "true",
-        "agentdock.provider": "cubesandbox",
-        "agentdock.workload": "runtime-probe",
+        "picloud.managed": "true",
+        "picloud.provider": "cubesandbox",
+        "picloud.workload": "runtime-probe",
       },
     });
     expect(runtime.destroyed).toEqual(["cube-sandbox-1"]);
@@ -324,7 +324,7 @@ describe("CubeSandbox Provider contract", () => {
   it("rejects callers that try to replace the deployment-owned Cube network policy", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
@@ -353,7 +353,7 @@ describe("CubeSandbox Provider contract", () => {
     const runtime = new FakeCubeRuntimeClient();
     const workspaceVolumeGateway = fakeWorkspaceVolumeGateway();
     const provider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
@@ -456,7 +456,7 @@ describe("CubeSandbox Provider contract", () => {
     });
     const upgradedBroker = new ToolBroker({
       provider: new CubeSandboxProvider({
-        templateId: "agent-dock-tool-v2",
+        templateId: "pi-cloud-tool-v2",
         imageRevision: "next-deployment",
         webProxy: WEB_PROXY,
         runtimeClient: new FakeCubeRuntimeClient(),
@@ -558,7 +558,7 @@ describe("CubeSandbox Provider contract", () => {
     const runtime = new FakeCubeRuntimeClient();
     const workspaceVolumeGateway = fakeWorkspaceVolumeGateway();
     const provider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
@@ -604,7 +604,7 @@ describe("CubeSandbox Provider contract", () => {
     });
     expect(runtime.creates).toHaveLength(2);
     expect(runtime.creates[1]).toMatchObject({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       allowInternetAccess: true,
       allowPublicTraffic: false,
       volumeMounts: [
@@ -617,7 +617,7 @@ describe("CubeSandbox Provider contract", () => {
     expect(
       Object.entries(runtime.creates[1]!.metadata).some(
         ([key, value]) =>
-          key.startsWith("agentdock.assignment.v1.") && value.includes(nextActivationId),
+          key.startsWith("picloud.assignment.v1.") && value.includes(nextActivationId),
       ),
     ).toBe(true);
     await expect(provider.inspect(restored)).resolves.toMatchObject({ state: "running" });
@@ -642,7 +642,7 @@ describe("CubeSandbox Provider contract", () => {
   it("captures a lightweight persistent Volume reference for a Cube Workspace", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
@@ -675,7 +675,7 @@ describe("CubeSandbox Provider contract", () => {
   it("rejects a persistent Volume reference when tenant or fence is stale", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
@@ -724,7 +724,7 @@ describe("CubeSandbox Provider contract", () => {
 
   it("reattaches the persistent Workspace Volume after the Tool image is upgraded", async () => {
     const originalProvider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: new FakeCubeRuntimeClient(),
@@ -750,7 +750,7 @@ describe("CubeSandbox Provider contract", () => {
     const upgradedRuntime = new FakeCubeRuntimeClient("next-deployment");
     const upgradedDataMover = fakeWorkspaceVolumeGateway();
     const upgradedProvider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v2",
+      templateId: "pi-cloud-tool-v2",
       imageRevision: "next-deployment",
       webProxy: WEB_PROXY,
       runtimeClient: upgradedRuntime,
@@ -791,7 +791,7 @@ describe("CubeSandbox Provider contract", () => {
       return originalRequest(instance, input);
     };
     const provider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
@@ -827,7 +827,7 @@ describe("CubeSandbox Provider contract", () => {
       return originalRequest(instance, input);
     };
     const provider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
@@ -884,7 +884,7 @@ describe("CubeSandbox Provider contract", () => {
         .digest("hex") as `${string}`,
     };
     const provider = new CubeSandboxProvider({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,

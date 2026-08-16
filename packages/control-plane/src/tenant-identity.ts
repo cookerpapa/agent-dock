@@ -1,4 +1,4 @@
-import type { Database, TenantApiCredentialRole } from "@agent-dock/database";
+import type { Database, TenantApiCredentialRole } from "@pi-cloud/database";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Kysely } from "kysely";
 import type { FastifyRequest } from "fastify";

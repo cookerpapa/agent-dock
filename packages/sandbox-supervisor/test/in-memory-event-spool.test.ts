@@ -1,4 +1,4 @@
-import { createAgentDockEventFactory, type AgentDockEvent } from "@agent-dock/protocol";
+import { createPiCloudEventFactory, type PiCloudEvent } from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
 import { EventSpoolError, InMemoryEventSpool } from "../src/index.ts";
 
@@ -16,14 +16,14 @@ type PublishMessage = {
     leaseId: string;
     fencingToken: number;
     commandId: string;
-    event: AgentDockEvent;
+    event: PiCloudEvent;
   };
 };
 
 function createFixture(initialSequence = 0) {
   let eventNumber = 0;
   let messageNumber = 0;
-  const eventFactory = createAgentDockEventFactory(
+  const eventFactory = createPiCloudEventFactory(
     { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
     {
       initialSequence,

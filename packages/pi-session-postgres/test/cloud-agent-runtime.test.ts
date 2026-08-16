@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import type {
   AssistantMessage,
   AssistantMessageEvent,
@@ -241,7 +241,7 @@ describe.sequential("CloudAgentRuntime", () => {
         followUpAvailable = false;
         return {
           role: "custom",
-          customType: "agent-dock.test_follow_up",
+          customType: "pi-cloud.test_follow_up",
           content: "verify before settling",
           display: false,
           timestamp: Date.now(),

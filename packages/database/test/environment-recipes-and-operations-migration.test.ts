@@ -68,7 +68,7 @@ describe("environment recipes and operations migration", () => {
         `insert into environment_versions
           (id, tenant_id, project_id, version_number, profile_key, profile_version,
            image_revision, spec_sha256, state, active)
-         values ($1, $2, $3, 2, 'agent-dock-fullstack', '1', 'development',
+         values ($1, $2, $3, 2, 'pi-cloud-fullstack', '1', 'development',
                  'e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630',
                  'failed', false)`,
         [failedEnvironment, tenant, project],

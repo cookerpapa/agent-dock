@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "pi-cloud-pi-worker-pool.name" . }}
+  labels:
+    {{- include "pi-cloud-pi-worker-pool.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.disruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "pi-cloud-pi-worker-pool.selectorLabels" . | nindent 6 }}

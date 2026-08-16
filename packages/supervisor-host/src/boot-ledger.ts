@@ -28,7 +28,7 @@ type LedgerState = {
 };
 
 type LedgerEnvelope = {
-  format: "agent-dock.supervisor-boot-ledger.v1";
+  format: "pi-cloud.supervisor-boot-ledger.v1";
   sha256: string;
   state: LedgerState;
 };
@@ -57,7 +57,7 @@ function sha256(value: string): string {
 function canonicalBytes(state: LedgerState): Buffer {
   const stateJson = JSON.stringify(state);
   const envelope: LedgerEnvelope = {
-    format: "agent-dock.supervisor-boot-ledger.v1",
+    format: "pi-cloud.supervisor-boot-ledger.v1",
     sha256: sha256(stateJson),
     state,
   };
@@ -146,7 +146,7 @@ function parseLedger(bytes: Buffer): LedgerState {
   const envelope = value as Record<string, unknown>;
   if (
     Object.keys(envelope).sort().join(",") !== "format,sha256,state" ||
-    envelope.format !== "agent-dock.supervisor-boot-ledger.v1" ||
+    envelope.format !== "pi-cloud.supervisor-boot-ledger.v1" ||
     typeof envelope.sha256 !== "string" ||
     !/^[0-9a-f]{64}$/.test(envelope.sha256) ||
     typeof envelope.state !== "object" ||

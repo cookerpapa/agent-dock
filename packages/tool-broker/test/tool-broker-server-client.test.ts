@@ -3,20 +3,20 @@ import type {
   ToolSandboxAssignment,
   ToolSandboxCreateRequest,
   ToolSandboxOperationRequest,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
-  AgentDockMetrics,
+  PiCloudMetrics,
   activeTraceCarrier,
   initializeTelemetry,
   virtualRunTraceCarrier,
   withSpan,
   type TelemetryRuntime,
   type TraceCarrier,
-} from "@agent-dock/observability";
+} from "@pi-cloud/observability";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import WebSocket, { type RawData } from "ws";
@@ -52,7 +52,7 @@ const assignment: ToolSandboxAssignment = {
 };
 const runtimeAssignment: SupervisorRuntimeAssignment = {
   containerId: "10000000-0000-4000-8000-000000000020",
-  containerName: "agent-dock-tool-manager-test",
+  containerName: "pi-cloud-tool-manager-test",
   supervisorId: assignment.supervisorId,
   bootId: assignment.bootId,
   sandboxId: assignment.sandboxId,
@@ -131,7 +131,7 @@ function backend(ownerBaseUrl = "http://tool-broker.invalid"): ToolBrokerBackend
       };
     },
     async importGitHub() {
-      return Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n');
+      return Buffer.from('{"format":"pi-cloud.workspace-manifest.v1","files":[]}\n');
     },
     async materializeFile(request) {
       const content = Buffer.from("immutable\n");
@@ -235,7 +235,7 @@ describe("Tool Broker authenticated RPC", () => {
         environment: {
           environmentVersionId: "10000000-0000-4000-8000-000000000086",
           versionNumber: 1,
-          profileKey: "agent-dock-fullstack",
+          profileKey: "pi-cloud-fullstack",
           profileVersion: "1",
           imageRevision: "development",
           specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -365,7 +365,7 @@ describe("Tool Broker authenticated RPC", () => {
         environment: {
           environmentVersionId: "10000000-0000-4000-8000-000000000013",
           versionNumber: 1,
-          profileKey: "agent-dock-fullstack",
+          profileKey: "pi-cloud-fullstack",
           profileVersion: "1",
           imageRevision: "development",
           specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -438,7 +438,7 @@ describe("Tool Broker authenticated RPC", () => {
       environment: {
         environmentVersionId: "10000000-0000-4000-8000-000000000013",
         versionNumber: 1,
-        profileKey: "agent-dock-fullstack",
+        profileKey: "pi-cloud-fullstack",
         profileVersion: "1",
         imageRevision: "development",
         specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -451,7 +451,7 @@ describe("Tool Broker authenticated RPC", () => {
   });
 
   it("separates the service credential from the per-activation tool capability", async () => {
-    const metrics = new AgentDockMetrics("tool-broker-test");
+    const metrics = new PiCloudMetrics("tool-broker-test");
     const server = new ToolBrokerServer({
       host: "127.0.0.1",
       port: 0,
@@ -479,7 +479,7 @@ describe("Tool Broker authenticated RPC", () => {
       environment: {
         environmentVersionId: "10000000-0000-4000-8000-000000000013",
         versionNumber: 1,
-        profileKey: "agent-dock-fullstack",
+        profileKey: "pi-cloud-fullstack",
         profileVersion: "1",
         imageRevision: "development",
         specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -528,13 +528,13 @@ describe("Tool Broker authenticated RPC", () => {
         },
         new AbortController().signal,
       ),
-    ).resolves.toEqual(Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n'));
+    ).resolves.toEqual(Buffer.from('{"format":"pi-cloud.workspace-manifest.v1","files":[]}\n'));
     await expect(client.listAssignments(runtimeAssignment.sandboxId)).resolves.toEqual([
       runtimeAssignment,
     ]);
     await expect(client.terminateAndConfirmAbsent(runtimeAssignment)).resolves.toBeUndefined();
 
-    const manifest = Buffer.from('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n');
+    const manifest = Buffer.from('{"format":"pi-cloud.workspace-manifest.v1","files":[]}\n');
     const materializer = new ToolBrokerClient({
       baseUrl: address,
       serviceToken: MATERIALIZER_TOKEN,
@@ -580,19 +580,19 @@ describe("Tool Broker authenticated RPC", () => {
     expect(unauthorized.status).toBe(401);
     const exportedMetrics = await metrics.registry.metrics();
     expect(exportedMetrics).toContain(
-      'agent_dock_sandbox_operation_seconds_count{service="tool-broker-test",operation="reserve",outcome="completed"} 1',
+      'pi_cloud_sandbox_operation_seconds_count{service="tool-broker-test",operation="reserve",outcome="completed"} 1',
     );
     expect(exportedMetrics).toContain(
-      'agent_dock_tool_duration_seconds_count{service="tool-broker-test",tool="bash.exec",outcome="completed"} 1',
+      'pi_cloud_tool_duration_seconds_count{service="tool-broker-test",tool="bash.exec",outcome="completed"} 1',
     );
     expect(exportedMetrics).toContain(
-      'agent_dock_sandbox_admission_active{provider="test-provider",service="tool-broker-test"} 0',
+      'pi_cloud_sandbox_admission_active{provider="test-provider",service="tool-broker-test"} 0',
     );
     expect(exportedMetrics).toContain(
-      'agent_dock_sandbox_admission_limit{provider="test-provider",service="tool-broker-test"} 2',
+      'pi_cloud_sandbox_admission_limit{provider="test-provider",service="tool-broker-test"} 2',
     );
     expect(exportedMetrics).toContain(
-      'agent_dock_sandbox_admission_waiting{provider="test-provider",service="tool-broker-test"} 0',
+      'pi_cloud_sandbox_admission_waiting{provider="test-provider",service="tool-broker-test"} 0',
     );
   });
 });

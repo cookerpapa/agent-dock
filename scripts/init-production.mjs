@@ -13,7 +13,7 @@ const apiTokenPattern =
   /^adk_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.[A-Za-z0-9_-]{43,256}$/i;
 
 function parseRuntimeDirectory(argv) {
-  let configured = process.env.AGENT_DOCK_RUNTIME_DIRECTORY;
+  let configured = process.env.PI_CLOUD_RUNTIME_DIRECTORY;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--runtime-dir") {
@@ -318,7 +318,7 @@ async function validateExisting(runtimeDirectory) {
         return [line.slice(0, separator), line.slice(separator + 1)];
       }),
   );
-  if (environment.AGENT_DOCK_API_CREDENTIAL_ID !== apiCredentialId) {
+  if (environment.PI_CLOUD_API_CREDENTIAL_ID !== apiCredentialId) {
     throw new Error("Production API credential identity is inconsistent");
   }
   const apiToken = (await readPrivateFile(resolve(runtimeDirectory, "secrets/api-token"))).trim();
@@ -342,10 +342,10 @@ function boundedEnvironmentValue(name, fallback, pattern, maximum = 256) {
 }
 
 function httpPort() {
-  const value = process.env.AGENT_DOCK_HTTP_PORT ?? "8080";
+  const value = process.env.PI_CLOUD_HTTP_PORT ?? "8080";
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 65_535) {
-    throw new Error("AGENT_DOCK_HTTP_PORT must be an integer from 1 to 65535");
+    throw new Error("PI_CLOUD_HTTP_PORT must be an integer from 1 to 65535");
   }
   return String(parsed);
 }
@@ -451,72 +451,72 @@ const identities = {
 const apiToken = `adk_${identities.apiCredentialId}.${randomBytes(32).toString("base64url")}`;
 const application = applicationIdentity();
 const imageVersion = boundedEnvironmentValue(
-  "AGENT_DOCK_IMAGE_VERSION",
+  "PI_CLOUD_IMAGE_VERSION",
   "production",
   /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/,
   128,
 );
 const bindAddress = boundedEnvironmentValue(
-  "AGENT_DOCK_HTTP_BIND_ADDRESS",
+  "PI_CLOUD_HTTP_BIND_ADDRESS",
   "127.0.0.1",
   /^[a-zA-Z0-9:._-]+$/,
   128,
 );
 const supervisorIdPrefix = boundedEnvironmentValue(
-  "AGENT_DOCK_SUPERVISOR_ID_PREFIX",
-  "agent-dock-worker-",
+  "PI_CLOUD_SUPERVISOR_ID_PREFIX",
+  "pi-cloud-worker-",
   /^[a-z0-9](?:[-a-z0-9]{0,62})-$/,
 );
 const publicRegistrationEnabled = booleanEnvironmentValue(
-  "AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED",
+  "PI_CLOUD_PUBLIC_REGISTRATION_ENABLED",
   "true",
 );
 const publicRegistrationMaximumTenants = integerEnvironmentValue(
-  "AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS",
+  "PI_CLOUD_PUBLIC_REGISTRATION_MAXIMUM_TENANTS",
   32,
   2,
   1_000_000,
 );
 const publicTenantMaximumProjects = integerEnvironmentValue(
-  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS",
+  "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_PROJECTS",
   10,
   1,
   1_000_000,
 );
 const publicTenantMaximumSessions = integerEnvironmentValue(
-  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS",
+  "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_SESSIONS",
   100,
   1,
   1_000_000,
 );
 const publicTenantMaximumUnsettledTurns = integerEnvironmentValue(
-  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
+  "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
   10,
   1,
   1_000_000,
 );
 const publicTenantMaximumConcurrentTurns = integerEnvironmentValue(
-  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS",
+  "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS",
   2,
   1,
   256,
 );
 const publicTenantMaximumActiveSandboxes = integerEnvironmentValue(
-  "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES",
+  "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES",
   2,
   1,
   1_000_000,
 );
 if (Number(publicTenantMaximumConcurrentTurns) > Number(publicTenantMaximumUnsettledTurns)) {
   throw new Error(
-    "AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS cannot exceed AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
+    "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS cannot exceed PI_CLOUD_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS",
   );
 }
 
 await writePrivateFile(resolve(secretsDirectory, "postgres-password"), `${postgresPassword}\n`);
 await writePrivateFile(
   resolve(secretsDirectory, "database-url"),
-  `postgresql://agent_dock:${postgresPassword}@postgres:5432/agent_dock\n`,
+  `postgresql://pi_cloud:${postgresPassword}@postgres:5432/pi_cloud\n`,
 );
 await writePrivateFile(resolve(secretsDirectory, "api-token"), `${apiToken}\n`);
 await writePrivateFile(
@@ -567,37 +567,37 @@ if (application.changeOwnership) {
 }
 
 const environment = [
-  `AGENT_DOCK_RUNTIME_DIRECTORY=${runtimeDirectory}`,
-  `AGENT_DOCK_IMAGE_VERSION=${imageVersion}`,
-  `AGENT_DOCK_HTTP_BIND_ADDRESS=${bindAddress}`,
-  `AGENT_DOCK_HTTP_PORT=${httpPort()}`,
-  `AGENT_DOCK_APPLICATION_UID=${String(application.uid)}`,
-  `AGENT_DOCK_APPLICATION_GID=${String(application.gid)}`,
-  "AGENT_DOCK_TENANT_SLUG=agent-dock",
-  `AGENT_DOCK_TENANT_ID=${identities.tenantId}`,
-  `AGENT_DOCK_USER_ID=${identities.userId}`,
-  `AGENT_DOCK_API_CREDENTIAL_ID=${identities.apiCredentialId}`,
-  `AGENT_DOCK_CREDENTIAL_BINDING_ID=${identities.credentialBindingId}`,
-  `AGENT_DOCK_DEFAULT_MODEL_PROFILE_ID=${identities.modelProfileId}`,
-  `AGENT_DOCK_SUPERVISOR_ID_PREFIX=${supervisorIdPrefix}`,
-  "AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES=http://{supervisorId}:4100",
-  "AGENT_DOCK_PI_WORKER_DEPLOYMENT=compose",
-  "AGENT_DOCK_SUPERVISOR_CAPACITY=1",
-  `AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=${publicRegistrationEnabled}`,
-  `AGENT_DOCK_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=${publicRegistrationMaximumTenants}`,
-  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_PROJECTS=${publicTenantMaximumProjects}`,
-  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_SESSIONS=${publicTenantMaximumSessions}`,
-  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS=${publicTenantMaximumUnsettledTurns}`,
-  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS=${publicTenantMaximumConcurrentTurns}`,
-  `AGENT_DOCK_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES=${publicTenantMaximumActiveSandboxes}`,
-  "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS=2",
-  "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS=32",
-  "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS=30000",
-  "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS=660000",
-  "AGENT_DOCK_GITHUB_APP_ID=",
-  "AGENT_DOCK_PROMETHEUS_PORT=9090",
-  "AGENT_DOCK_GRAFANA_PORT=3001",
-  "AGENT_DOCK_JAEGER_PORT=16686",
+  `PI_CLOUD_RUNTIME_DIRECTORY=${runtimeDirectory}`,
+  `PI_CLOUD_IMAGE_VERSION=${imageVersion}`,
+  `PI_CLOUD_HTTP_BIND_ADDRESS=${bindAddress}`,
+  `PI_CLOUD_HTTP_PORT=${httpPort()}`,
+  `PI_CLOUD_APPLICATION_UID=${String(application.uid)}`,
+  `PI_CLOUD_APPLICATION_GID=${String(application.gid)}`,
+  "PI_CLOUD_TENANT_SLUG=pi-cloud",
+  `PI_CLOUD_TENANT_ID=${identities.tenantId}`,
+  `PI_CLOUD_USER_ID=${identities.userId}`,
+  `PI_CLOUD_API_CREDENTIAL_ID=${identities.apiCredentialId}`,
+  `PI_CLOUD_CREDENTIAL_BINDING_ID=${identities.credentialBindingId}`,
+  `PI_CLOUD_DEFAULT_MODEL_PROFILE_ID=${identities.modelProfileId}`,
+  `PI_CLOUD_SUPERVISOR_ID_PREFIX=${supervisorIdPrefix}`,
+  "PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES=http://{supervisorId}:4100",
+  "PI_CLOUD_PI_WORKER_DEPLOYMENT=compose",
+  "PI_CLOUD_SUPERVISOR_CAPACITY=1",
+  `PI_CLOUD_PUBLIC_REGISTRATION_ENABLED=${publicRegistrationEnabled}`,
+  `PI_CLOUD_PUBLIC_REGISTRATION_MAXIMUM_TENANTS=${publicRegistrationMaximumTenants}`,
+  `PI_CLOUD_PUBLIC_TENANT_MAXIMUM_PROJECTS=${publicTenantMaximumProjects}`,
+  `PI_CLOUD_PUBLIC_TENANT_MAXIMUM_SESSIONS=${publicTenantMaximumSessions}`,
+  `PI_CLOUD_PUBLIC_TENANT_MAXIMUM_UNSETTLED_TURNS=${publicTenantMaximumUnsettledTurns}`,
+  `PI_CLOUD_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS=${publicTenantMaximumConcurrentTurns}`,
+  `PI_CLOUD_PUBLIC_TENANT_MAXIMUM_ACTIVE_SANDBOXES=${publicTenantMaximumActiveSandboxes}`,
+  "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS=2",
+  "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS=32",
+  "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS=30000",
+  "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS=660000",
+  "PI_CLOUD_GITHUB_APP_ID=",
+  "PI_CLOUD_PROMETHEUS_PORT=9090",
+  "PI_CLOUD_GRAFANA_PORT=3001",
+  "PI_CLOUD_JAEGER_PORT=16686",
   "",
 ].join("\n");
 await writePrivateFile(resolve(runtimeDirectory, ".env"), environment);

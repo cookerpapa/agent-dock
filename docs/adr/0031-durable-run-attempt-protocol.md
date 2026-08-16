@@ -55,7 +55,7 @@ than necessary.
 
 ## Delivery claim
 
-AgentDock claims:
+PiCloud claims:
 
 ```text
 at-least-once scheduling

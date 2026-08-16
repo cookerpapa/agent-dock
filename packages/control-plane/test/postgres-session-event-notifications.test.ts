@@ -1,4 +1,4 @@
-import { createDatabase, type Database } from "@agent-dock/database";
+import { createDatabase, type Database } from "@pi-cloud/database";
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import {
@@ -48,12 +48,12 @@ describe("PostgreSQL session event notifications", () => {
     expect(parseSessionEventNotificationPayload("x".repeat(7_901))).toBeUndefined();
   });
 
-  it.skipIf(!process.env.AGENT_DOCK_TEST_DATABASE_URL)(
+  it.skipIf(!process.env.PI_CLOUD_TEST_DATABASE_URL)(
     "publishes all tenant hints only after commit and reconnects one deployment listener",
     async () => {
-      const connectionString = process.env.AGENT_DOCK_TEST_DATABASE_URL!;
+      const connectionString = process.env.PI_CLOUD_TEST_DATABASE_URL!;
       const database: Kysely<Database> = createDatabase({ connectionString, maxConnections: 2 });
-      const applicationName = `agent-dock-notify-${globalThis.crypto.randomUUID().slice(0, 20)}`;
+      const applicationName = `pi-cloud-notify-${globalThis.crypto.randomUUID().slice(0, 20)}`;
       const listener = new PostgresSessionEventNotifications({
         connectionString,
         applicationName,

@@ -3,7 +3,7 @@ import {
   parseSupervisorBootProvisionResponse,
   type SupervisorBootProvisionRequest,
   type SupervisorBootProvisionResponse,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 
 const DEFAULT_PROVISION_PATH = "/internal/v1/supervisor/boots";
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;

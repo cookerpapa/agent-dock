@@ -7,13 +7,13 @@
 
 ## 001 · User · 2026-08-11T01:21:49.571Z
 
-我正在处理llm产生的流式数据与前端交互的问题，具体你可以看看我的agent-dock的代码。我的cloud agent采用流式输出，在前端页面用户看到的也是流式文本。为了让用户看到的流式文本在看到之前都已经被持久化（我感觉这是必要的，因为cloud环境是可能会出现崩溃的），但是如果流式文本全部入pgsql，如果用户很多，将来可能会产生几十亿行的数据。我觉得既然是流式数据，那完全没有必要将流式数据入库，因为像这种流式输出api，在输出完成的时候都会带一条message的完整文本，我觉得pgsql里面存这条message完整文本足矣。但是为了保证前端用户的流式体验，这些delta文本也是需要持久化的，codex提出了用kafka搭配valekey映射的方案（我忘了，可能是叫这个名字），我没太懂这个方案，你审阅一下这个方案
+我正在处理llm产生的流式数据与前端交互的问题，具体你可以看看我的pi-cloud的代码。我的cloud agent采用流式输出，在前端页面用户看到的也是流式文本。为了让用户看到的流式文本在看到之前都已经被持久化（我感觉这是必要的，因为cloud环境是可能会出现崩溃的），但是如果流式文本全部入pgsql，如果用户很多，将来可能会产生几十亿行的数据。我觉得既然是流式数据，那完全没有必要将流式数据入库，因为像这种流式输出api，在输出完成的时候都会带一条message的完整文本，我觉得pgsql里面存这条message完整文本足矣。但是为了保证前端用户的流式体验，这些delta文本也是需要持久化的，codex提出了用kafka搭配valekey映射的方案（我忘了，可能是叫这个名字），我没太懂这个方案，你审阅一下这个方案
 
 ## 002 · Assistant · 2026-08-11T01:25:27.473Z
 
 我看完你现在这条链路后，结论比较明确：**你的判断是对的——“用户已经看到的内容必须先有 durable copy”是必要的，但这不等于“每个 delta 都必须永久存在 PostgreSQL”。**
 
-而且你现在 `agent-dock` 实际上已经走到这个问题的中间状态了。
+而且你现在 `pi-cloud` 实际上已经走到这个问题的中间状态了。
 
 当前代码大致是：
 
@@ -342,7 +342,7 @@ canonicalAssistantMessage += delta
 
 或者从 Pi 最终 session/message state 取得 canonical message。
 
-也就是说，这是 **AgentDock 自己的协议保证**：
+也就是说，这是 **PiCloud 自己的协议保证**：
 
 ```text
 message.delta*
@@ -362,7 +362,7 @@ message.completed {
 
 这比现在 `session_events = 永久 event sourcing` 更适合 Cloud Agent。
 
-下一步我觉得我们可以只讨论一个最麻烦的问题：**如果 Kafka 保存 delta、PG 保存 final message，那么 Agent 在输出到一半崩溃，比如用户已经看到 60% assistant message，恢复后这 60% 到底怎么重新进入 Pi 的 `messages[]`。**  
+下一步我觉得我们可以只讨论一个最麻烦的问题：**如果 Kafka 保存 delta、PG 保存 final message，那么 Agent 在输出到一半崩溃，比如用户已经看到 60% assistant message，恢复后这 60% 到底怎么重新进入 Pi 的 `messages[]`。**
 这个问题比 Kafka/Valkey 本身更关键，因为它决定你的 durable streaming 到底只是“UI 不丢”，还是“Agent 状态也真的不丢”。
 
 ## 003 · User · 2026-08-11T01:30:00.621Z
@@ -375,7 +375,7 @@ message.completed {
 
 最关键的是这三次演进：
 
-1. `35f7bff` — **`refactor enterprise events to Kafka-first ingest`**  
+1. `35f7bff` — **`refactor enterprise events to Kafka-first ingest`**
    这一步把 Kafka 提升成了 **Worker 流式事件的第一个共享持久化边界**。以前是：
 
    ```text
@@ -396,7 +396,7 @@ message.completed {
 
    commit 里明确写的是：**只有 Kafka 接受了 Session-keyed batch，才给 Worker cumulative ACK**。
 
-2. `6b8dd42` — **`feat: tier agent session and event storage`**  
+2. `6b8dd42` — **`feat: tier agent session and event storage`**
    这是一个中间方案。当时 Codex 还是打算：
 
    ```text
@@ -406,7 +406,7 @@ message.completed {
 
    也就是说它当时已经意识到“delta 永久留 PostgreSQL”不可取，但解决办法还是 hot/cold 分层。
 
-3. `7c774b9` — **`feat: separate live streams from canonical conversations`**  
+3. `7c774b9` — **`feat: separate live streams from canonical conversations`**
    这个才是你记得的最终方案，而且名字确实就是 **Valkey**，不是我上次推测出来的。
 
    这个 commit 直接把架构描述改成：
@@ -431,7 +431,7 @@ message.completed {
    + monotonic cursors
    ```
 
-   
+
 
 而且时间也完全吻合。`7c774b9` 的提交时间是 **2026-08-11 00:10（+08:00）**，就是你说的今天凌晨。
 
@@ -564,10 +564,10 @@ seq 34
 Codex 当前实现会给每个 Session 建一个 Valkey Stream：
 
 ```text
-agent-dock:live-events:{sessionId}:stream
+pi-cloud:live-events:{sessionId}:stream
 ```
 
-然后直接把 AgentDock 的 `seq` 当 Stream ID：
+然后直接把 PiCloud 的 `seq` 当 Stream ID：
 
 ```text
 31-0 → event JSON
@@ -1214,7 +1214,7 @@ Enterprise: Kafka / Valkey = 168x
 但我更希望它成为一个**显式架构 invariant**：
 
 ```text
-AGENT_DOCK_LIVE_STREAM_RETENTION_MS = 3600000
+PI_CLOUD_LIVE_STREAM_RETENTION_MS = 3600000
 Kafka retention                   = 604800000
 
 startup:
@@ -1326,7 +1326,7 @@ Kafka 1d / 7d
 PG canonical 永久
 ```
 
-而且 enterprise Kafka 的 durability 参数也比较标准：RF3 + `min.insync.replicas=2`，你的 producer 又是 idempotent + `acks=-1/all`，这正是 Kafka 官方给出的典型高 durability 组合。 
+而且 enterprise Kafka 的 durability 参数也比较标准：RF3 + `min.insync.replicas=2`，你的 producer 又是 idempotent + `acks=-1/all`，这正是 Kafka 官方给出的典型高 durability 组合。
 
 我认为现在最值得改的优先级是：
 
@@ -1583,7 +1583,7 @@ Valkey 幂等 append
 现在所有 Event Gateway 都监听同一个全局 channel：
 
 ```text
-agent_dock_session_events_v1
+pi_cloud_session_events_v1
 ```
 
 每次 projector 推进一个 Session 的 `last_projected_seq`，都会执行一次 `pg_notify`。而 PostgreSQL 会把这个通知发送给所有监听该 channel 的 Event Gateway 副本。
@@ -1773,7 +1773,7 @@ status = deferred
 retryAfterMs = 250
 ```
 
-Workflow 收到后 sleep 250 ms，再次调度 Activity，最多循环 200 次后 `continueAsNew`。 
+Workflow 收到后 sleep 250 ms，再次调度 Activity，最多循环 200 次后 `continueAsNew`。
 
 在正常容量下这没有问题。但当系统有 1000 个 Run、只有 128 个实际 slot 时，大量任务会：
 
@@ -1841,7 +1841,7 @@ Cube ≈ 1000
 
 你的 lazy activation 是正确设计：纯聊天不会触碰 Cube。
 
-更值得警惕的是 persistent sandbox。当前 ephemeral warm sandbox 有 TTL 和 LRU；persistent sandbox 则没有 expiresAt，并且不参与普通 ephemeral warm limit。它仍然占用 `maximumActiveSandboxes`，而 Manager 满载时只会尝试淘汰 ephemeral warm sandbox。 
+更值得警惕的是 persistent sandbox。当前 ephemeral warm sandbox 有 TTL 和 LRU；persistent sandbox 则没有 expiresAt，并且不参与普通 ephemeral warm limit。它仍然占用 `maximumActiveSandboxes`，而 Manager 满载时只会尝试淘汰 ephemeral warm sandbox。
 
 如果大量用户选择 persistent：
 
@@ -1885,7 +1885,7 @@ Kopia snapshot create
 PostgreSQL CAS 推进 Workspace head
 ```
 
-当前 `KopiaWorkspaceDataMover` 对同一个 volume 做了串行锁，这能保证同一 Workspace 的 correctness；但我没有看到跨 volume 的全局并发 semaphore。每个 restore/snapshot 都会启动 Kopia 子进程。 
+当前 `KopiaWorkspaceDataMover` 对同一个 volume 做了串行锁，这能保证同一 Workspace 的 correctness；但我没有看到跨 volume 的全局并发 semaphore。每个 restore/snapshot 都会启动 Kopia 子进程。
 
 因此在 1000 个 Run 同时结束时，可能出现：
 
@@ -2533,7 +2533,7 @@ UPDATE session mailbox
 COMMIT
 ```
 
-代码就是这个顺序。 
+代码就是这个顺序。
 
 所以假设一家企业就是一个 tenant：
 
@@ -2636,7 +2636,7 @@ users
 
 说明设计上明确允许**多个 user 属于同一个 tenant**；Project、Workspace、Model Profile 等也都是以 `tenant_id` 做组织级隔离。
 
-比如你把 AgentDock 部署给“XX 公司”，比较自然的是：
+比如你把 PiCloud 部署给“XX 公司”，比较自然的是：
 
 ```text
 tenant = XX公司
@@ -2831,7 +2831,7 @@ Tenant = 算法部门
 maximumUnsettledTurns 不被超卖
 ```
 
-但实际上拿到锁以后，还继续做 model/environment/source 查询以及 `turn + command + run + outbox + session update`，最后才释放。 
+但实际上拿到锁以后，还继续做 model/environment/source 查询以及 `turn + command + run + outbox + session update`，最后才释放。
 
 所以我们下一步真正值得讨论的是：**能不能把“部门还剩几个 Agent 并发名额”变成一个很短的原子操作，而不让整个发消息事务都拿着 tenant 锁。**这应该就是我们沿链路遇到的第一个需要优化的点。
 
@@ -3483,7 +3483,7 @@ TemporalRunOrchestrator 每 100ms 扫描
 逐条 workflow.start()
 ```
 
-问题在于：`workflow.start()` 成功以后，**outbox 并不会马上变成 published**。`published_at` 要等后面的 Worker 真正 claim 并开始执行时才写。 
+问题在于：`workflow.start()` 成功以后，**outbox 并不会马上变成 published**。`published_at` 要等后面的 Worker 真正 claim 并开始执行时才写。
 
 这会造成一个很典型的 head-of-line 问题。
 
@@ -3864,7 +3864,7 @@ Temporal 已经拿到 Run 以后，**真正限制“同时有多少 Agent Loop �
 你当前每个 Pi Worker 有：
 
 ```text
-AGENT_DOCK_SUPERVISOR_CAPACITY
+PI_CLOUD_SUPERVISOR_CAPACITY
 默认 = 4
 范围 = 1 ~ 16
 ```
@@ -4116,15 +4116,15 @@ workflow.start({
 ```text
 Cell 1
 Temporal Task Queue:
-agent-dock-pi-runs-cell-0001-v1
+pi-cloud-pi-runs-cell-0001-v1
 
 Cell 2
 Temporal Task Queue:
-agent-dock-pi-runs-cell-0002-v1
+pi-cloud-pi-runs-cell-0002-v1
 
 Cell 3
 Temporal Task Queue:
-agent-dock-pi-runs-cell-0003-v1
+pi-cloud-pi-runs-cell-0003-v1
 ```
 
 实际上还是可以共用**同一个 Temporal 集群和 namespace**，只是有不同的 Task Queue。
@@ -4145,8 +4145,8 @@ Cell 3 的 Pi Workers
 Pi Worker 自己启动时也配置了：
 
 ```text
-AGENT_DOCK_EXECUTION_CELL_ID
-AGENT_DOCK_TEMPORAL_TASK_QUEUE
+PI_CLOUD_EXECUTION_CELL_ID
+PI_CLOUD_TEMPORAL_TASK_QUEUE
 ```
 
 而且收到 Activity 后还会验证：
@@ -4517,7 +4517,7 @@ workflow recovery
 
 所以把这一层交给 Temporal。
 
-这是我认为 Temporal 在 AgentDock 中最不可替代的价值。
+这是我认为 Temporal 在 PiCloud 中最不可替代的价值。
 
 下一步其实可以讨论一个很关键的问题：**既然 PostgreSQL 已经保存了这么多 Run/Attempt/Lease 状态，那 Temporal 和 PostgreSQL 有没有职责重叠、是不是做重了。**这个问题我觉得非常值得继续。
 
@@ -4534,7 +4534,7 @@ workflow recovery
 对于你这个中型企业场景，我最推荐的是：
 
 ```text
-同一个 agent-dock 仓库
+同一个 pi-cloud 仓库
 │
 ├── Control Plane
 ├── Temporal orchestration client / workflow code
@@ -4668,7 +4668,7 @@ Persistence DB
 Temporal Server
 ```
 
-塞进 AgentDock Control Plane。
+塞进 PiCloud Control Plane。
 
 你的 Control Plane 只是：
 
@@ -4766,7 +4766,7 @@ Cell：
 
 这对你这种 **1000+ active Agent Loop，但 Control Plane 实际请求 QPS并没有特别夸张** 的系统尤其合适。
 
-而且这里其实顺带解释了为什么你引入 Cell 后，**Cell 应该主要属于执行面，而不是把整个 AgentDock 都复制成 N 份**。Control Plane 和 Temporal 可以继续作为相对全局的服务，真正随着 Agent 并发横向扩张的是 Pi Worker + Sandbox execution plane。
+而且这里其实顺带解释了为什么你引入 Cell 后，**Cell 应该主要属于执行面，而不是把整个 PiCloud 都复制成 N 份**。Control Plane 和 Temporal 可以继续作为相对全局的服务，真正随着 Agent 并发横向扩张的是 Pi Worker + Sandbox execution plane。
 
 ## 045 · User · 2026-08-11T14:01:43.791Z
 
@@ -5044,9 +5044,9 @@ Client ─ start → │ Workflow 状态 │
 
 而它之所以能做到“机器挂了流程还在”，本质不是有什么神奇的进程恢复技术，而是：
 
-> **把流程的决定和结果持久化成 Event History，再用 deterministic replay 重建 Workflow 状态；把会产生副作用的东西放到可重试的 Activity 中；再通过 durable Task Queue 把 Activity 分发给任意可用 Worker。** 
+> **把流程的决定和结果持久化成 Event History，再用 deterministic replay 重建 Workflow 状态；把会产生副作用的东西放到可重试的 Activity 中；再通过 durable Task Queue 把 Activity 分发给任意可用 Worker。**
 
-对于你的 AgentDock，我觉得最值得下一步继续搞清楚的是 **Activity 的 retry 语义**。因为这里有一个特别关键的问题：
+对于你的 PiCloud，我觉得最值得下一步继续搞清楚的是 **Activity 的 retry 语义**。因为这里有一个特别关键的问题：
 
 ```text
 Pi Worker 已经执行了某件事
@@ -5065,7 +5065,7 @@ Temporal retry
 ## 047 · User · 2026-08-11T14:23:21.995Z
 
 听起来不错哦，temporal就是控制面和pi worker之间的中间层，控制面把需要执行的run推送给temporal，然后worker在temporal这里认领run，你还提到了
-Temporal Workflow         ↓ executeRunCommand Activity  
+Temporal Workflow         ↓ executeRunCommand Activity
 executeRunCommand Activity 这是什么东西
 
 ## 048 · Assistant · 2026-08-11T14:23:36.069Z
@@ -5271,7 +5271,7 @@ Worker 死了以后要不要重新投递？
 
 ```text
 Run
-= AgentDock 的业务概念
+= PiCloud 的业务概念
 
 Workflow
 = 这个 Run 的 durable 调度器
@@ -5511,7 +5511,7 @@ PG 创建/确认新的 Attempt + Lease + Fence
 
 ## 052 · Assistant · 2026-08-11T14:41:08.498Z
 
-对。以你刚才那个 **Worker A 直接失联 / SIGKILL** 的场景来看，AgentDock 的恢复机制是在 Temporal 决定 retry 之后介入的。
+对。以你刚才那个 **Worker A 直接失联 / SIGKILL** 的场景来看，PiCloud 的恢复机制是在 Temporal 决定 retry 之后介入的。
 
 可以把它看成两步：
 
@@ -5519,7 +5519,7 @@ PG 创建/确认新的 Attempt + Lease + Fence
 Temporal 负责：
 “这个 Run 还得有人继续处理”
 
-AgentDock 负责：
+PiCloud 负责：
 “新 Worker 应该从什么状态开始处理”
 ```
 
@@ -5818,7 +5818,7 @@ B 会直接得到：
 tool_sandbox_workspace_busy
 ```
 
-不会再创建第二个 Cube Y。 
+不会再创建第二个 Cube Y。
 
 所以不会正常出现：
 
@@ -6027,8 +6027,8 @@ PG Lease renewal：
 60s / 3 = 每 20s 一次
 ```
 
-PG 这边当前代码明确是 `DEFAULT_LEASE_DURATION_MS = 60_000`，`heartbeatIntervalMs = leaseDuration / 3`。  
-Temporal 这边则是 Worker 每 5 秒 heartbeat，Activity 配置 `heartbeatTimeout = 20 seconds`。 
+PG 这边当前代码明确是 `DEFAULT_LEASE_DURATION_MS = 60_000`，`heartbeatIntervalMs = leaseDuration / 3`。
+Temporal 这边则是 Worker 每 5 秒 heartbeat，Activity 配置 `heartbeatTimeout = 20 seconds`。
 
 所以假设 A 在 `t=0` 与 Temporal 断联：
 
@@ -6068,7 +6068,7 @@ pending + queued
 dispatched + dispatching
 ```
 
-进入新的执行 claim。`acknowledged + running` 根本不符合条件。 
+进入新的执行 claim。`acknowledged + running` 根本不符合条件。
 
 所以 B 拿到 Temporal retry Activity 后：
 
@@ -6156,7 +6156,7 @@ run = completed
 
 所以：
 
-> **Temporal Activity attempt 是否活着，并不是 AgentDock Run 的业务 authority。PostgreSQL 才是。**
+> **Temporal Activity attempt 是否活着，并不是 PiCloud Run 的业务 authority。PostgreSQL 才是。**
 
 这个设计是很好的。
 
@@ -6523,7 +6523,7 @@ destroyActivation(...)
 released
 ```
 
-当前 `claimOrphanedActivations()` 会把 orphan 改成 `cleaning` 并换成新 Manager owner；`ToolSandboxManager` 随后调用 provider 去销毁这个旧 activation。 
+当前 `claimOrphanedActivations()` 会把 orphan 改成 `cleaning` 并换成新 Manager owner；`ToolSandboxManager` 随后调用 provider 去销毁这个旧 activation。
 
 所以它不是：
 
@@ -7118,7 +7118,7 @@ Workspace storage
 
 ## 066 · Assistant · 2026-08-12T02:14:36.001Z
 
-对，**你现在的 Agent Loop 确实是通过 Pi SDK 嵌入 Pi Worker 进程里运行的**，不是“一条 Run 启一个 Pi 子进程”。生产路径依赖的是 `@earendil-works/pi-coding-agent 0.80.10`，你的 embedded backend 也是直接 `createAgentSessionRuntime(...) → session.prompt(...) → runtime.dispose()`。 
+对，**你现在的 Agent Loop 确实是通过 Pi SDK 嵌入 Pi Worker 进程里运行的**，不是“一条 Run 启一个 Pi 子进程”。生产路径依赖的是 `@earendil-works/pi-coding-agent 0.80.10`，你的 embedded backend 也是直接 `createAgentSessionRuntime(...) → session.prompt(...) → runtime.dispose()`。
 
 所以从资源角度，它更接近：
 
@@ -7739,7 +7739,7 @@ Cell shared
 
 所以目前我会把结论定成：
 
-> **Cell 本身未必错，但把 Cell 当成 AgentDock 的基础水平扩展单位，很可能是设计过头了。**
+> **Cell 本身未必错，但把 Cell 当成 PiCloud 的基础水平扩展单位，很可能是设计过头了。**
 
 你最新代码把 Sandbox Domain 从 Cell 里拆出来已经是正确的一步；下一步我甚至会考虑把 **Workspace → Cell immutable placement** 这件事也弱化掉，让绝大多数部署默认只有 **1 个 Cell / Worker Pool**，只有真的需要故障域、地域、版本或租户隔离时才增加 Cell。
 
@@ -7850,7 +7850,7 @@ task_queue
 
 ```text
 worker_pool = shared
-task_queue = agent-dock-pi-runs-v1
+task_queue = pi-cloud-pi-runs-v1
 ```
 
 1000 个 Run 全部扔进去。
@@ -8275,7 +8275,7 @@ event.publish_batch
 一次 ingestGroup(...)
 ```
 
-架构文档明确保留了前两层：相邻 text delta 先 coalesce，然后 `BatchedEventPublisher` 再把连续 event 批量发送。  
+架构文档明确保留了前两层：相邻 text delta 先 coalesce，然后 `BatchedEventPublisher` 再把连续 event 批量发送。
 代码里 `BatchedEventPublisher` 默认就是 `20ms / 64 events / 512KiB`，一次 batch 只拿一个 cumulative ACK。
 
 而你之前说的 **“多个 Session 一起 group commit”** 也还在：
@@ -8435,7 +8435,7 @@ Event Gateway
 PG TX + Kafka acks=all
 ```
 
-前两层和第三层的意义完全不同。当前代码就是这么实现的。  
+前两层和第三层的意义完全不同。当前代码就是这么实现的。
 
 ### Kafka 到底会不会被细碎文本打爆？
 
@@ -8884,7 +8884,7 @@ SSE delivery latency
 
 而不是先担心 Kafka bandwidth。
 
-你仓库现在那个 Kafka acceptance 只测到了 16,384 logical events、约 2,540 event/s，而且报告自己明确注明 **不是 capacity claim**；所以它不能用来证明 20k/s，但同样也不能说明 Kafka 到 2.5k 就到顶了。测试脚本本身主要是在验证 Session ordering。 
+你仓库现在那个 Kafka acceptance 只测到了 16,384 logical events、约 2,540 event/s，而且报告自己明确注明 **不是 capacity claim**；所以它不能用来证明 20k/s，但同样也不能说明 Kafka 到 2.5k 就到顶了。测试脚本本身主要是在验证 Session ordering。
 
 ### 我现在的建议
 
@@ -8913,10 +8913,10 @@ SSE delivery latency
 
 重点就两个：
 
-1. **Kafka 不怕 1000+ active run 这个量级。**  
+1. **Kafka 不怕 1000+ active run 这个量级。**
    现在 50ms 一次文本合并、20ms 一次单 Session batch，这两层保留就够了。
 
-2. **真正可以考虑删的是“跨 Session 的 4ms 组提交”。**  
+2. **真正可以考虑删的是“跨 Session 的 4ms 组提交”。**
    它以前主要是为了减少 PostgreSQL transaction 次数；现在 payload 已经进 Kafka 了，这层价值明显变小。
 
 所以我现在的倾向是：
@@ -9274,7 +9274,7 @@ turn.failed
 failure = assignment_lost
 ```
 
-然后当前代码会调用 `TerminalTurnProjectionSource`，**重新从 Valkey 读取这一 Turn 的所有流式事件，拼成完整 transcript，再写进 PostgreSQL。**  
+然后当前代码会调用 `TerminalTurnProjectionSource`，**重新从 Valkey 读取这一 Turn 的所有流式事件，拼成完整 transcript，再写进 PostgreSQL。**
 
 也就是：
 
@@ -9564,7 +9564,7 @@ reason = assignment_lost
         "文件已经修改完成。"
 
                     +
-        
+
         terminal event:
         turn.failed
         assignment_lost
@@ -9574,7 +9574,7 @@ reason = assignment_lost
                PostgreSQL
 ```
 
-这条恢复路径当前代码里已经存在。Reconciler 会调用 `terminalTurnProjectionSource.prepare(...)`，然后把 prepared projection 交给 terminal commit。 
+这条恢复路径当前代码里已经存在。Reconciler 会调用 `terminalTurnProjectionSource.prepare(...)`，然后把 prepared projection 交给 terminal commit。
 
 最终 PG 会变成：
 
@@ -9702,14 +9702,14 @@ Kafka 很擅长：
 你现在实际上把每个 Session 做成一个 Stream：
 
 ```text
-agent-dock:live-events:{sessionId}:stream
+pi-cloud:live-events:{sessionId}:stream
 
 101-0 → event 101
 102-0 → event 102
 103-0 → event 103
 ```
 
-而且代码直接把 AgentDock 自己的 `seq` 当成 Valkey Stream ID，例如 `101-0`。
+而且代码直接把 PiCloud 自己的 `seq` 当成 Valkey Stream ID，例如 `101-0`。
 
 于是浏览器断线以后带着：
 
@@ -10278,7 +10278,7 @@ assistant.text.delta "你好，"
 assistant.text.delta "我..."
 ```
 
-然后 AgentDock 自己给这些 event 编：
+然后 PiCloud 自己给这些 event 编：
 
 ```text
 seq = 81
@@ -10296,7 +10296,7 @@ seq = 82
 86 turn.completed
 ```
 
-`seq` 是 `AgentDockEvent` 自己的公共字段，event factory 内部维护递增 sequence。 
+`seq` 是 `PiCloudEvent` 自己的公共字段，event factory 内部维护递增 sequence。
 
 所以它不是：
 
@@ -10304,7 +10304,7 @@ seq = 82
 
 而是：
 
-> **“这个 Session 的第 81 个 AgentDock 公共事件”。**
+> **“这个 Session 的第 81 个 PiCloud 公共事件”。**
 
 ---
 
@@ -10446,14 +10446,14 @@ DeepSeek 也是 SSE streaming；官方还会在等待调度期间发送 keep-ali
 
 甚至 Tool Call / reasoning 边界处暂停几百毫秒再继续，都属于正常现象。Anthropic 的官方文档就明确提醒某些 tool streaming 阶段会出现延迟。
 
-这也意味着我们 AgentDock 里的：
+这也意味着我们 PiCloud 里的：
 
 ```text
 provider 原始 delta
         ↓
 最多 50ms coalesce
         ↓
-AgentDock assistant.text.delta
+PiCloud assistant.text.delta
 ```
 
 这个 **50ms 完全是我们自己定义的节流/归一化层**，不是跟着 LLM API 的频率来的。
@@ -10469,7 +10469,7 @@ DeepSeek 同样如此
 
 统一成我们自己的事件节奏。
 
-所以你刚才问 seq 的事情也更清楚了：**不能拿 provider 的每个 chunk 当可靠的业务序号单位**，因为 provider chunk 本身就没有稳定粒度。AgentDock 自己 coalesce 后再产生 `seq=81,82,83...` 是更合理的。
+所以你刚才问 seq 的事情也更清楚了：**不能拿 provider 的每个 chunk 当可靠的业务序号单位**，因为 provider chunk 本身就没有稳定粒度。PiCloud 自己 coalesce 后再产生 `seq=81,82,83...` 是更合理的。
 
 ## 101 · User · 2026-08-12T08:08:27.223Z
 
@@ -10482,7 +10482,7 @@ DeepSeek 同样如此
 ```text
 厂商不稳定的原始 chunk
 → 50ms coalesce 统一粒度
-→ AgentDock 自己编号 seq
+→ PiCloud 自己编号 seq
 → Kafka 持久化
 → Valkey 做实时读副本
 → PG 保存最终完整 transcript
@@ -10500,7 +10500,7 @@ DeepSeek 同样如此
 
 我 review 完以后，结论比刚才更保守一些：
 
-**PG cursor：目前需要保留。**  
+**PG cursor：目前需要保留。**
 **跨 Session group commit：不是正确性必需，但目前还有性能价值，不建议现在直接删。**
 
 原因分别是：
@@ -10525,7 +10525,7 @@ Kafka ACK
 COMMIT
 ```
 
- 
+
 
 这里最关键的是 **锁 lease/fence**。
 
@@ -10601,7 +10601,7 @@ lease/fence 查询
 cursor 更新
 ```
 
-假设极端情况下 1000 个 Run 都在吐文本，50ms 一个 AgentDock event：
+假设极端情况下 1000 个 Run 都在吐文本，50ms 一个 PiCloud event：
 
 ```text
 约 20,000 event/s
@@ -10675,7 +10675,7 @@ LLM 原始 chunk
 ↓
 最多 50ms 合并
 ↓
-形成一个 AgentDock event，seq=81
+形成一个 PiCloud event，seq=81
 ↓
 Worker 最多等 20ms 做 batch
 ↓
@@ -11024,7 +11024,7 @@ PG acknowledged_through_seq 这类重复水位
 
 **etcd 其实比 PostgreSQL 更“专业对口”。**
 
-但针对你的 AgentDock，我反而建议：
+但针对你的 PiCloud，我反而建议：
 
 > **现阶段继续用 PostgreSQL。**
 
@@ -11252,7 +11252,7 @@ Pi 再从完整 JSONL 计算 active context
 
 `restorePiSessionManifest()` 明确会按 manifest 的全部 `segments` 下载，并先 `Buffer.allocUnsafe(manifest.totalSizeBytes)` 重建整个文件。
 
-然后 Worker 把完整 bytes 写成 `session.jsonl`，交给 `SessionManager.open()`。 
+然后 Worker 把完整 bytes 写成 `session.jsonl`，交给 `SessionManager.open()`。
 
 所以假设：
 
@@ -11289,7 +11289,7 @@ MAX_PI_SESSION_SNAPSHOT_BYTES = 512 MiB
 JSONL → 1 GB、2 GB
 ```
 
-当前 AgentDock 实际上撑不到那里。
+当前 PiCloud 实际上撑不到那里。
 
 这个我认为比 Worker affinity 本身更值得解决。
 
@@ -11421,7 +11421,7 @@ branch history
 
 所以现在我对这个问题的判断很明确：
 
-> **几 MB / Run 的 restore 流量对 1000+ active Run 集群不是什么大问题；当前真正需要优化的是“Pi compaction 已经把模型上下文压成几 MB，但 AgentDock restore 仍然下载并解析完整 append-only JSONL”。**
+> **几 MB / Run 的 restore 流量对 1000+ active Run 集群不是什么大问题；当前真正需要优化的是“Pi compaction 已经把模型上下文压成几 MB，但 PiCloud restore 仍然下载并解析完整 append-only JSONL”。**
 
 下一步真正需要研究的是一个很具体的问题：**Pi 的 `SessionManager.open()` 能不能在不破坏 branch/compaction/tool 等语义的情况下，只用“最近 compaction + suffix”恢复。**如果 Pi 原生支持，那这个问题会很好解决；如果不支持，就需要我们设计 runtime checkpoint 和 archive checkpoint 两层。
 
@@ -11433,7 +11433,7 @@ branch history
 
 研究完了，结论挺有意思：**Pi 上游已经在朝我们想要的方向改，而且新 Harness 的设计基本就是“只恢复 compaction 后的活跃状态”。**
 
-你现在 AgentDock 锁的是 `@earendil-works/pi-coding-agent 0.80.10`。 在这个版本里，`SessionManager.open()` 确实会把整个 JSONL 顺序读完并解析进内存；哪怕最终 LLM context 只需要最近 compaction 后几 MB，也还是先读取完整文件。
+你现在 PiCloud 锁的是 `@earendil-works/pi-coding-agent 0.80.10`。 在这个版本里，`SessionManager.open()` 确实会把整个 JSONL 顺序读完并解析进内存；哪怕最终 LLM context 只需要最近 compaction 后几 MB，也还是先读取完整文件。
 
 但是 Pi 从 **0.81.0** 开始已经改了 Harness 的 session 模型：compaction 不再只是：
 
@@ -11514,7 +11514,7 @@ activeToolNames
 
 ---
 
-### 那 AgentDock 现在该怎么办？
+### 那 PiCloud 现在该怎么办？
 
 我不建议我们自己去魔改 `session.jsonl`。
 
@@ -11522,13 +11522,13 @@ activeToolNames
 
 ```text
 现在
-AgentDock
+PiCloud
 → pi-coding-agent 0.80.10
 → legacy SessionManager
 → 整个 JSONL restore
 
 未来
-AgentDock
+PiCloud
 → 新 Pi AgentHarness
 → SessionRepo / SessionStorage
 → query 到最近 compaction 为止
@@ -11554,10 +11554,10 @@ SessionStorage
 
 
 
-所以将来 AgentDock 完全可以实现自己的：
+所以将来 PiCloud 完全可以实现自己的：
 
 ```text
-AgentDockSessionRepo
+PiCloudSessionRepo
         ↓
 PostgreSQL / S3
 ```
@@ -11593,7 +11593,7 @@ writer lease
 
 甚至文档里已经在讨论“tool 执行一半 crash 后怎么恢复”。
 
-这和 AgentDock：
+这和 PiCloud：
 
 ```text
 Temporal
@@ -11663,7 +11663,7 @@ throw new HarnessNotImplemented("create.restore");
 
 
 
-所以**今天还不能把 AgentDock 的 durable execution 删除然后交给 Pi**。
+所以**今天还不能把 PiCloud 的 durable execution 删除然后交给 Pi**。
 
 不过我非常赞成调整我们的开发策略：
 
@@ -11679,7 +11679,7 @@ Pi 最新 Harness spec 明确把：
 
 列为 non-goal：partial stream 只在进程内，**不会持久化**；只有完整 assistant response 才进入 durable session。
 
-而 AgentDock 的要求更强：
+而 PiCloud 的要求更强：
 
 ```text
 LLM delta
@@ -11694,7 +11694,7 @@ Valkey
 所以未来最漂亮的职责边界，我认为是：
 
 ```text
-AgentDock
+PiCloud
 ├─ 多租户 / API
 ├─ Temporal 调度 Worker
 ├─ lease / fencing
@@ -11712,7 +11712,7 @@ AgentDock
 
 这样的话，**我们现在自己写的很多 Run 内部恢复逻辑，未来确实可能整块删除。**
 
-我甚至觉得现在应该采取一个策略：**暂停继续深化 AgentDock 自己的 Agent Harness，把 Pi 当成正在赶来的上游依赖。**等 Pi 的 `prompt → tool → crash → resume` 真正实现并通过测试以后，我们直接迁过去。
+我甚至觉得现在应该采取一个策略：**暂停继续深化 PiCloud 自己的 Agent Harness，把 Pi 当成正在赶来的上游依赖。**等 Pi 的 `prompt → tool → crash → resume` 真正实现并通过测试以后，我们直接迁过去。
 
 这会比我们和 Pi 同时各写一套 durable Agent Loop 划算得多。
 
@@ -11724,14 +11724,14 @@ pi社区大概什么时候能完成durable execution的工作？
 
 我没找到社区给出的正式 ETA。按当前进度，我会估：
 
-**第一版真正能跑的 durable AgentHarness：大概 2～4 周。**  
-**成熟到我愿意让 AgentDock 删除自己那套 Run 内恢复逻辑：大概 1～2 个月。**
+**第一版真正能跑的 durable AgentHarness：大概 2～4 周。**
+**成熟到我愿意让 PiCloud 删除自己那套 Run 内恢复逻辑：大概 1～2 个月。**
 
 原因很简单：现在 `main` 里的 `prompt()`、`resume()`、`executeAction()` 仍然直接返回 `HarnessNotImplemented`，`create.restore` 也还没落地，所以不是“差几个 bug”，而是核心 runtime 还在施工。
 
 但速度确实非常快。之前 Harness v2 已经做到过 recovery reducer、indexed recovery query，甚至有人写出了完整的 suspended-operation restore PR，只是后来因为 Harness 又做了一轮更大的 redesign，这个 PR 被关闭没合并。 而且他们的工程计划已经把剩余工作拆得很细，runtime 主线基本是按一串明确的阶段串行收敛，最终验收条件甚至写了“no active harness operation remains scaffolded”。
 
-所以我倾向于：**AgentDock 现在先不要继续深化自己那套 Agent Loop durable recovery，等 Pi 两三个版本。**你现在锁在 `0.80.10`，而 Pi 最近从 `0.81 → 0.84` 的迭代本来就非常快。到大约 **9 月份**，我觉得很值得重新做一次 migration review；如果那时候 `prompt/tool/resume/crash recovery` 都已经通过正式测试，我们就可以开始大规模删 AgentDock 的重复 harness 代码。
+所以我倾向于：**PiCloud 现在先不要继续深化自己那套 Agent Loop durable recovery，等 Pi 两三个版本。**你现在锁在 `0.80.10`，而 Pi 最近从 `0.81 → 0.84` 的迭代本来就非常快。到大约 **9 月份**，我觉得很值得重新做一次 migration review；如果那时候 `prompt/tool/resume/crash recovery` 都已经通过正式测试，我们就可以开始大规模删 PiCloud 的重复 harness 代码。
 
 ## 123 · User · 2026-08-13T01:41:11.108Z
 
@@ -11741,7 +11741,7 @@ pi社区大概什么时候能完成durable execution的工作？
 
 **不完全是。单纯把依赖从 0.80.10 升到 0.84，不会自动避免下载巨大 JSONL。**
 
-原因是你现在 AgentDock 的流程在 **Pi 启动之前**就已经：
+原因是你现在 PiCloud 的流程在 **Pi 启动之前**就已经：
 
 ```text
 S3 所有 JSONL segments
@@ -11750,7 +11750,7 @@ S3 所有 JSONL segments
 → 再交给 Pi
 ```
 
-所以哪怕 Pi 0.84 自己只需要最近 compaction，AgentDock 已经先把 2GB 搬下来了。
+所以哪怕 Pi 0.84 自己只需要最近 compaction，PiCloud 已经先把 2GB 搬下来了。
 
 0.84 真正提供的是新的能力：
 
@@ -11778,7 +11778,7 @@ S3/存储 → Pi Worker
 
 需要的是：
 
-> **升级到新 Pi Session/Harness API + 把 AgentDock 当前“完整 JSONL checkpoint restore”替换掉。**
+> **升级到新 Pi Session/Harness API + 把 PiCloud 当前“完整 JSONL checkpoint restore”替换掉。**
 
 而不是单纯 `package.json` 改成 `0.84.x`。
 
@@ -11803,7 +11803,7 @@ tool recovery
 
 Pi 当前的新设计已经保证：构造 provider context 时，从 leaf 向前扫描，**遇到最近一次 compaction 就停止**，然后使用 `summary + retainedTail + compact 后 entries`，更老的历史不读。
 
-但它当前规划里的 **JSONL backend 在 open 时仍然会把整个 JSONL replay 到内存**。所以如果 AgentDock 还是：
+但它当前规划里的 **JSONL backend 在 open 时仍然会把整个 JSONL replay 到内存**。所以如果 PiCloud 还是：
 
 ```text
 S3 上 2GB session
@@ -11935,7 +11935,7 @@ Pi 社区现在准备把这个问题直接吃进 Harness。
 
 ---
 
-## 那 AgentDock 的 lease / fencing 能不能删？
+## 那 PiCloud 的 lease / fencing 能不能删？
 
 **能删掉一部分，但不能全删。**
 
@@ -11957,7 +11957,7 @@ expires_at_ms
 
 而且 `open()` 获取 lease，运行期间续租；新 owner 接管时 fence 增长；旧 owner 不能再提交。
 
-所以未来如果 AgentDock 做：
+所以未来如果 PiCloud 做：
 
 ```text
 PostgresPiSessionRepo
@@ -11976,7 +11976,7 @@ tool recovery state
 
 我认为**全部应该交给 Pi Session backend**。
 
-也就是说你现在 AgentDock 里的：
+也就是说你现在 PiCloud 里的：
 
 ```text
 SessionLeaseCoordinator
@@ -12013,7 +12013,7 @@ A 再写 Session 状态
 A 的旧 Tool 继续修改 Workspace
 ```
 
-所以在 AgentDock 这种真正分布式系统里，我仍然会保留：
+所以在 PiCloud 这种真正分布式系统里，我仍然会保留：
 
 ```text
 resource fencing
@@ -12047,9 +12047,9 @@ fence=42
 
 也就是说：
 
-> **让 Pi 成为 Session ownership authority，AgentDock 只把这个 authority 延伸到外部资源。**
+> **让 Pi 成为 Session ownership authority，PiCloud 只把这个 authority 延伸到外部资源。**
 
-我觉得这个比现在“AgentDock 一套 lease/fence + Pi 以后自己又一套 lease/fence”漂亮得多。
+我觉得这个比现在“PiCloud 一套 lease/fence + Pi 以后自己又一套 lease/fence”漂亮得多。
 
 不过这一点目前是我们可以设计的集成方向，**Pi 当前 API 并没有承诺把 writer fence 暴露给外部 Tool Broker 使用。**
 
@@ -12121,7 +12121,7 @@ Durable Agent Runtime
 
 ## 你有没有机会参与？
 
-我觉得有，而且有一个方向**非常贴你的 AgentDock**：
+我觉得有，而且有一个方向**非常贴你的 PiCloud**：
 
 - **Postgres / Remote Session backend**。Pi 当前正式 shipping 目标只有 Memory、JSONL、SQLite，而 spec 已经专门留了一章 `Future: partitioned retention (Postgres)`，甚至讨论了 partition、repair、external finalization、register CAS。它明确说这还只是 future sketch。
 - **Cloud cold restore benchmark / bounded reads**。可以做一个 1GB 历史 Session，最新 compact active context 只有 5MB，要求 Postgres backend 的 Worker restore 只产生几 MB/几十次 point query，而不是搬 1GB。这正是你刚刚独立想到的问题。
@@ -12175,13 +12175,13 @@ Worker affinity
 Worker 本地 Session 状态
 ```
 
-所以如果让我替你选一个“既能帮助 AgentDock，又可能真正贡献给 Pi 社区”的切口，我会选：
+所以如果让我替你选一个“既能帮助 PiCloud，又可能真正贡献给 Pi 社区”的切口，我会选：
 
 > **研究并参与 Pi 的 Postgres-backed SessionRepo / SessionStorage。**
 
-而且这比单独给 AgentDock 自己做一个类似实现更划算——你实现一次，如果能 upstream，AgentDock 以后直接消费 Pi SDK。
+而且这比单独给 PiCloud 自己做一个类似实现更划算——你实现一次，如果能 upstream，PiCloud 以后直接消费 Pi SDK。
 
-我甚至觉得我们下一步可以先不写代码，**把 Pi 这份最新 `harness.md` 里的 Postgres backend 需求和 AgentDock 当前 PG/lease/fence 架构一项一项对齐**，看看你现有的哪些代码其实已经能变成 Pi 的 `PostgresSessionStorage`。这个对你应该很有价值。
+我甚至觉得我们下一步可以先不写代码，**把 Pi 这份最新 `harness.md` 里的 Postgres backend 需求和 PiCloud 当前 PG/lease/fence 架构一项一项对齐**，看看你现有的哪些代码其实已经能变成 Pi 的 `PostgresSessionStorage`。这个对你应该很有价值。
 
 ## 127 · User · 2026-08-13T02:04:28.804Z
 
@@ -12251,7 +12251,7 @@ SessionState
 messages[] = 5 MB
 ```
 
-### 所以对 AgentDock 来说，0.84 本身还没有解决你真正关心的问题
+### 所以对 PiCloud 来说，0.84 本身还没有解决你真正关心的问题
 
 如果继续使用 Pi 的 **JSONL backend**，在我们的 Cloud 环境里仍然要把整个 JSONL 提供给 Worker。
 
@@ -12313,7 +12313,7 @@ Pi Worker
 
 所以接下来最值得研究的不是“怎么让 JSONL 倒着读”，而是：
 
-**能不能让 AgentDock 直接给 Pi 实现一个 remote `SessionStorage/SessionRepo`，让 Pi 从 PostgreSQL 按需读取最新 compaction + suffix。**
+**能不能让 PiCloud 直接给 Pi 实现一个 remote `SessionStorage/SessionRepo`，让 Pi 从 PostgreSQL 按需读取最新 compaction + suffix。**
 
 如果这个能做成，Worker affinity 几乎就更没有保留价值了。
 
@@ -12446,7 +12446,7 @@ Agent runtime working set
 
 分开。
 
-对于 AgentDock 的 Pi Worker，我们真正需要的是后者：
+对于 PiCloud 的 Pi Worker，我们真正需要的是后者：
 
 ```text
 当前 lane config
@@ -12523,11 +12523,11 @@ GB 级长期 Session
 
 设计的。
 
-而且最新 Pi spec 已经明显开始往你这个方向走了：它把 model/thinking/tools 从历史 entry 里拿出来，变成独立 `lane.config`；恢复 operation 也变成几个 register point lookup，而不是扫描历史。换句话说，**社区自己也在逐步把“当前运行状态”和“历史 conversation tree”拆开。** 
+而且最新 Pi spec 已经明显开始往你这个方向走了：它把 model/thinking/tools 从历史 entry 里拿出来，变成独立 `lane.config`；恢复 operation 也变成几个 register point lookup，而不是扫描历史。换句话说，**社区自己也在逐步把“当前运行状态”和“历史 conversation tree”拆开。**
 
 所以我现在觉得真正值得研究的问题已经很具体了：
 
-> **能不能在不等 durable Harness 完工的情况下，单独利用 Pi 新 Session API，做一个“remote/bounded Session backend”，让 AgentDock Worker 从一开始就不碰完整 JSONL？**
+> **能不能在不等 durable Harness 完工的情况下，单独利用 Pi 新 Session API，做一个“remote/bounded Session backend”，让 PiCloud Worker 从一开始就不碰完整 JSONL？**
 
 这个比研究“怎么倒着读 JSONL”更有价值。
 
@@ -12579,7 +12579,7 @@ E101.timestamp = ...
 所以如果换成：
 
 ```text
-AgentDockPostgresSessionStorage
+PiCloudPostgresSessionStorage
 ```
 
 逻辑可以完全一样：
@@ -12588,7 +12588,7 @@ AgentDockPostgresSessionStorage
 Pi：
 message 内容 + entry id
 
-AgentDock backend：
+PiCloud backend：
 查当前 lane leaf
 parentId = leaf
 分配 seq
@@ -12731,7 +12731,7 @@ Pi Worker：
 
 ---
 
-因此对于 AgentDock，我现在反而看到了一条很干净的路线：
+因此对于 PiCloud，我现在反而看到了一条很干净的路线：
 
 ```text
 不要：
@@ -12747,7 +12747,7 @@ SessionManager.open()
 
 Pi
  ↓
-AgentDockSessionStorage
+PiCloudSessionStorage
  ↓
 PostgreSQL
 ```
@@ -12782,9 +12782,9 @@ export / import / backup format
 
 所以现在我认为，我们真正该研究的已经不是“怎么优化 JSONL 下载”，而是：
 
-> **在不等 durable harness 完工的情况下，0.84 的 SessionStorage 抽象是否已经成熟到足够让 AgentDock 实现一个 PostgreSQL backend，并继续使用 Pi 的 Agent Loop。**
+> **在不等 durable harness 完工的情况下，0.84 的 SessionStorage 抽象是否已经成熟到足够让 PiCloud 实现一个 PostgreSQL backend，并继续使用 Pi 的 Agent Loop。**
 
-如果答案是能，这个改动对 AgentDock 的价值可能比 Worker affinity 大很多。
+如果答案是能，这个改动对 PiCloud 的价值可能比 Worker affinity 大很多。
 
 ## 133 · User · 2026-08-13T02:29:28.595Z
 
@@ -12898,7 +12898,7 @@ seq
 并发 writer
 ```
 
-而**暂时不接 AgentDock production Agent Loop**。
+而**暂时不接 PiCloud production Agent Loop**。
 
 这样能先证明一个核心目标：
 
@@ -12912,7 +12912,7 @@ PG read ≈ 5 MB
 而不是 1 GB
 ```
 
-如果这个 spike 成功，等 Pi durable Harness 的 R1/R2/R4/R9 等 runtime slice 落地，我们再把它真正接进 AgentDock。
+如果这个 spike 成功，等 Pi durable Harness 的 R1/R2/R4/R9 等 runtime slice 落地，我们再把它真正接进 PiCloud。
 
 ---
 
@@ -12945,7 +12945,7 @@ PostgreSQL
 
 **Worker affinity、完整 JSONL 下载、512MB Pi checkpoint 上限，这几个问题会一起消失。**
 
-我现在的建议是：可以研究 PG backend，但**先做兼容性/性能 spike，不要现在把 AgentDock production 全迁过去**。因为 Pi `main` 上刚定的新 Harness spec甚至计划把当前 `packages/agent/src/harness/**` 重写，0.84 的 backend API 还有较高概率继续变化。
+我现在的建议是：可以研究 PG backend，但**先做兼容性/性能 spike，不要现在把 PiCloud production 全迁过去**。因为 Pi `main` 上刚定的新 Harness spec甚至计划把当前 `packages/agent/src/harness/**` 重写，0.84 的 backend API 还有较高概率继续变化。
 
 下一步最有价值的就是把 **0.84 `SessionStorage` 的每个方法映射成一版 PostgreSQL schema/query**，看做到“1GB 历史、5MB cold restore”到底需要哪些索引。
 
@@ -12959,12 +12959,12 @@ PostgreSQL
 
 它确实是正式 release：2026-08-07 发布，GitHub 标记 `draft=false`、`prerelease=false`。所以可以把它理解为正式稳定发布版，而不是 nightly/preview。
 
-但“stable”不等于这套 Harness API 已经冻结。`v0.84.1 → main` 现在已经多了 117 个 commit，`SessionStorage`、JSONL backend、conformance 等仍然在改。 所以我建议 **固定死 0.84.1 做一个隔离 spike**，不要马上改 AgentDock 主链。
+但“stable”不等于这套 Harness API 已经冻结。`v0.84.1 → main` 现在已经多了 117 个 commit，`SessionStorage`、JSONL backend、conformance 等仍然在改。 所以我建议 **固定死 0.84.1 做一个隔离 spike**，不要马上改 PiCloud 主链。
 
 我们现在完全可以先实现：
 
 ```text
-@agent-dock/pi-postgres-session
+@pi-cloud/pi-postgres-session
 
 PostgresSessionRepo
         ↓
@@ -13092,7 +13092,7 @@ createSessionBackendConformance(...)
 
 这个非常适合我们。
 
-第一阶段甚至不用碰 AgentDock：
+第一阶段甚至不用碰 PiCloud：
 
 ```text
 PostgresSessionStorage
@@ -13140,7 +13140,7 @@ cold working-set read:
 
 但现在有一个明确限制：
 
-**0.84.1 暂时只能证明 storage 方案，不能直接替 AgentDock 生产 Agent Loop。**
+**0.84.1 暂时只能证明 storage 方案，不能直接替 PiCloud 生产 Agent Loop。**
 
 因为 coding-agent 正式运行路径仍然大量使用旧 `SessionManager`：
 
@@ -13160,7 +13160,7 @@ createCodingAgentHarness()
 
 所以我们现在最合理的目标不是：
 
-> “马上把 AgentDock 切 PG。”
+> “马上把 PiCloud 切 PG。”
 
 而是：
 
@@ -13273,12 +13273,12 @@ scanBranch()
 
 > **Postgres Session Backend Spike**
 
-而不是现在就写成 AgentDock 的长期生产组件。
+而不是现在就写成 PiCloud 的长期生产组件。
 
 代码最好这样隔离：
 
 ```text
-AgentDock
+PiCloud
    ↓
 PiSessionBackendAdapter
    ↓
@@ -13525,7 +13525,7 @@ storage.appendEntry()
 PostgreSQL
 ```
 
-这就是 `SessionStorage` 抽象存在的意义。0.84.1 的 `Session` 代码确实就是这么委托的。 
+这就是 `SessionStorage` 抽象存在的意义。0.84.1 的 `Session` 代码确实就是这么委托的。
 
 所以理想情况下完全不是：
 
@@ -13553,7 +13553,7 @@ SELECT ...
 Pi：构造 messages[]
 ```
 
-这点非常重要，因为这样 **Pi 仍然拥有 Session 语义**，AgentDock 只负责物理存储。
+这点非常重要，因为这样 **Pi 仍然拥有 Session 语义**，PiCloud 只负责物理存储。
 
 ---
 
@@ -13628,7 +13628,7 @@ Session(PostgresSessionStorage)
 
 进去。
 
-但是当前 `AgentHarness.prompt()` 还是 `HarnessNotImplemented`，所以 AgentDock 现在使用的可用 Pi coding-agent loop 仍然走旧 `SessionManager + JSONL`。
+但是当前 `AgentHarness.prompt()` 还是 `HarnessNotImplemented`，所以 PiCloud 现在使用的可用 Pi coding-agent loop 仍然走旧 `SessionManager + JSONL`。
 
 所以可以这么理解：
 
@@ -13637,7 +13637,7 @@ Pi 新架构的目标：
 
 Pi 主动访问 PG backend        ✅
 
-需要 AgentDock 手工加载历史     ❌
+需要 PiCloud 手工加载历史     ❌
 
 
 但 0.84.1 当前生产可用路径：
@@ -13645,7 +13645,7 @@ Pi 主动访问 PG backend        ✅
 legacy SessionManager + JSONL   ← 还没切完
 ```
 
-这也意味着：**一旦新 Harness runtime 完成，PG backend 对 AgentDock 的意义会非常大——不是“帮我们更快下载 JSONL”，而是把 JSONL 从运行链路里彻底拿掉。**
+这也意味着：**一旦新 Harness runtime 完成，PG backend 对 PiCloud 的意义会非常大——不是“帮我们更快下载 JSONL”，而是把 JSONL 从运行链路里彻底拿掉。**
 
 ## 143 · User · 2026-08-13T02:55:40.468Z
 
@@ -13684,7 +13684,7 @@ PostgreSQL
 
 **存什么、什么时候取、取哪段，由 Pi 的 Session/Harness 逻辑决定；怎么落到 PostgreSQL、SQL 怎么写、索引怎么建，由我们这个 backend 决定。**
 
-所以最终 AgentDock 不需要自己：
+所以最终 PiCloud 不需要自己：
 
 ```text
 查 PG → 拼 messages[] → 喂给 Pi
@@ -14326,7 +14326,7 @@ branch B:
 
 你目前只需要抓住一句：
 
-> **PG backend 的核心价值，就是 Pi 自己按需从数据库取“当前需要的那几 MB”，而不是 AgentDock 把完整 Session 下载给 Worker。**
+> **PG backend 的核心价值，就是 Pi 自己按需从数据库取“当前需要的那几 MB”，而不是 PiCloud 把完整 Session 下载给 Worker。**
 
 这个概念先吃透就够了。
 
@@ -14466,7 +14466,7 @@ PostgreSQL
 
 所以你刚才问的这个问题其实挺有价值：**Codex 当前也还存在“完整持久化历史先 materialize”的问题，而且源码已经明确准备消灭它。**
 
-这反而说明你给 AgentDock 做 **remote Session backend + bounded restore** 不是一个很偏门的优化，而是 Coding Agent runtime 正在实际面对的问题。
+这反而说明你给 PiCloud 做 **remote Session backend + bounded restore** 不是一个很偏门的优化，而是 Coding Agent runtime 正在实际面对的问题。
 
 ## 155 · User · 2026-08-13T03:37:32.765Z
 
@@ -14623,13 +14623,13 @@ session = 一个可查询的数据结构
 
 ## 157 · User · 2026-08-13T03:43:06.162Z
 
-哇，感觉要是这个能做成的话，那agent dock架构里的mino S3是不是可以拿掉了
+哇，感觉要是这个能做成的话，那pi cloud架构里的mino S3是不是可以拿掉了
 
 ## 158 · Assistant · 2026-08-13T03:43:09.674Z
 
 **不能整个拿掉，但可以拿掉其中“Pi Session 持久化”这一块。**
 
-你现在 AgentDock 里 S3/MinIO 大概承担两类完全不同的东西：
+你现在 PiCloud 里 S3/MinIO 大概承担两类完全不同的东西：
 
 ```text
 S3 / MinIO
@@ -14667,7 +14667,7 @@ restorePiSessionManifest()
 完整 JSONL 下载/解压/重建
 ```
 
-这会让 AgentDock 架构明显简单一截。
+这会让 PiCloud 架构明显简单一截。
 
 但 **Workspace 不一样**。比如用户让 coding agent：
 
@@ -14712,17 +14712,17 @@ S3 / MinIO
 
 > PG 一部分状态 + S3 一份 Pi Session + S3 又一份 Workspace。
 
-所以如果这条线做成，**MinIO/S3 不会消失，但职责会大幅收窄。**这对 AgentDock 是个挺实质性的架构简化。
+所以如果这条线做成，**MinIO/S3 不会消失，但职责会大幅收窄。**这对 PiCloud 是个挺实质性的架构简化。
 
 ## 159 · User · 2026-08-13T03:47:51.998Z
 
-我记得现在agent dock存储完整对话的时候是不是在pgsql存了一份，在mino s3存了一份。然后pgsql里面还用了内容寻址，如果我们用session storage backend，这一块是不是都重新设计。还有一个问题，workspace，我理解就是存储挂载是吗？cubesandbox难道没提供方案怎么管理这些workspace吗？像我平时在k8s里面起一台虚拟机，挂载存储盘，存储盘也是k8s管理的呀
+我记得现在pi cloud存储完整对话的时候是不是在pgsql存了一份，在mino s3存了一份。然后pgsql里面还用了内容寻址，如果我们用session storage backend，这一块是不是都重新设计。还有一个问题，workspace，我理解就是存储挂载是吗？cubesandbox难道没提供方案怎么管理这些workspace吗？像我平时在k8s里面起一台虚拟机，挂载存储盘，存储盘也是k8s管理的呀
 
 ## 160 · Assistant · 2026-08-13T03:50:37.899Z
 
 对，这两块都应该重新看，而且我发现你对 Workspace 的理解是对的。
 
-先说会话。**当前 AgentDock 确实保存了两份“语义上重叠、用途不同”的完整会话数据。**
+先说会话。**当前 PiCloud 确实保存了两份“语义上重叠、用途不同”的完整会话数据。**
 
 ```text
 PostgreSQL
@@ -14745,7 +14745,7 @@ PG 的 `conversation_turn_projections.transcript` 确实直接保存完整 JSONB
 ```text
 PostgreSQL
 
-AgentDock 业务状态
+PiCloud 业务状态
 ├─ session / turn / run
 │
 Pi Session Backend
@@ -14787,14 +14787,14 @@ conversation_turn_projections = 给前端快速显示的投影
 
 **是。**
 
-而且我刚查你的当前代码，AgentDock **已经这么干了**。
+而且我刚查你的当前代码，PiCloud **已经这么干了**。
 
 你现在已经有：
 
 ```text
 Cube Volume
      ↓
-agentdock-posix Volume Plugin
+picloud-posix Volume Plugin
      ↓
 共享 POSIX filesystem
      ↓
@@ -14803,7 +14803,7 @@ agentdock-posix Volume Plugin
 Cube microVM
 ```
 
-你的 `agentdock-posix` plugin 在 `attach` 时直接返回宿主侧 `workspace_path`，Cube 再把它挂进 microVM。
+你的 `picloud-posix` plugin 在 `attach` 时直接返回宿主侧 `workspace_path`，Cube 再把它挂进 microVM。
 
 而 README 也明确写着：
 
@@ -14852,7 +14852,7 @@ Storage Plugin
 
 ---
 
-那为什么 AgentDock 现在还有 Kopia？
+那为什么 PiCloud 现在还有 Kopia？
 
 关键区别其实只有一句话：
 
@@ -14970,7 +14970,7 @@ fencing
 
 所以我觉得下一步特别值得研究的是：
 
-> **CubeSandbox 0.6 的 Volume + CubeCoW，到底能不能直接满足 AgentDock 的 Workspace durable checkpoint 语义。**
+> **CubeSandbox 0.6 的 Volume + CubeCoW，到底能不能直接满足 PiCloud 的 Workspace durable checkpoint 语义。**
 
 如果也能满足，那这次重构会非常大：
 
@@ -14986,14 +14986,14 @@ Cube Volume
 未来可能：
 
 PG
-├─ AgentDock state
+├─ PiCloud state
 └─ Pi Session
 
 Cube Storage
 └─ Workspace + snapshots
 ```
 
-那 **MinIO/S3 甚至真有可能从 AgentDock 主运行链路里彻底消失**，只作为备份/灾备可选项。这个方向我觉得比单纯优化 Kopia 更值得继续挖。
+那 **MinIO/S3 甚至真有可能从 PiCloud 主运行链路里彻底消失**，只作为备份/灾备可选项。这个方向我觉得比单纯优化 Kopia 更值得继续挖。
 
 ## 161 · User · 2026-08-13T05:11:27.872Z
 
@@ -15216,7 +15216,7 @@ Workspace snapshot 仍然可以用于：
 
 但**不用每个 Turn 都 checkpoint**。
 
-最后还有一个当前 AgentDock 的细节：我确认你现在确实专门有 `pi_interrupted_session_snapshot` artifact 类型， 但这个只是“保存中断 Pi Session”的 artifact，**不能等同于 LLM 一定能看到“刚发生中断”**。这一点我们现有 legacy Pi 路径还应该再检查。
+最后还有一个当前 PiCloud 的细节：我确认你现在确实专门有 `pi_interrupted_session_snapshot` artifact 类型， 但这个只是“保存中断 Pi Session”的 artifact，**不能等同于 LLM 一定能看到“刚发生中断”**。这一点我们现有 legacy Pi 路径还应该再检查。
 
 如果最终采用 Pi 新 Harness，上面那个 `synthetic interrupted tool result` 反而已经给了我们一个很干净的机制。
 
@@ -15230,16 +15230,16 @@ Workspace snapshot 仍然可以用于：
 
 不不，我觉得按这么想的话，workspace snapshot完全可以拿掉呀
 
-1. 用户明确点“回滚” 
-2.  fork 一个历史 Workspace 
-3.  灾备/宿主机磁盘损坏 
+1. 用户明确点“回滚”
+2.  fork 一个历史 Workspace
+3.  灾备/宿主机磁盘损坏
 4.  重要 checkpoint
 
 你提的这4个点，我觉得就灾备/宿主机磁盘损坏需要防备一下，但这个能不能交给k8s来做，而不是我们自己做一个上传mino s3，照这个想法，是不是mino s3可以完全拿掉了
 
 ## 164 · Assistant · 2026-08-13T05:24:57.983Z
 
-对。按照你现在重新定义的恢复目标，**MinIO/S3 很可能可以从 AgentDock 的核心架构里完全拿掉。**
+对。按照你现在重新定义的恢复目标，**MinIO/S3 很可能可以从 PiCloud 的核心架构里完全拿掉。**
 
 关键变化在于，我们不再要求：
 
@@ -15363,7 +15363,7 @@ Node B
 重新挂载
 ```
 
-这已经属于**存储基础设施的职责**，AgentDock 自己没必要再：
+这已经属于**存储基础设施的职责**，PiCloud 自己没必要再：
 
 ```text
 tar/kopia
@@ -15376,7 +15376,7 @@ Cube 官方文档自己也建议多节点场景使用 shared storage，让不同
 
 ---
 
-这样重新看 AgentDock，MinIO 当前最重要的两条理由都会消失：
+这样重新看 PiCloud，MinIO 当前最重要的两条理由都会消失：
 
 ```text
 MinIO
@@ -15388,7 +15388,7 @@ MinIO
 
 ```text
 PostgreSQL
-├─ AgentDock control state
+├─ PiCloud control state
 ├─ Pi Session Backend
 └─ conversation/read models
 
@@ -15446,14 +15446,14 @@ VolumeSnapshot / remote backup
 
 Kubernetes 本身也有标准的 `VolumeSnapshot` API，由 CSI driver 实现。
 
-**这不应该进入 AgentDock 的 Turn execution protocol。**
+**这不应该进入 PiCloud 的 Turn execution protocol。**
 
 也就是说：
 
 ```text
 错误设计：
 
-AgentDock 每 Turn
+PiCloud 每 Turn
 → Kopia
 → MinIO
 → PG workspace version
@@ -15462,7 +15462,7 @@ AgentDock 每 Turn
 可以换成：
 
 ```text
-AgentDock：
+PiCloud：
 “给这个 Session 一个 persistent workspace volume”
           ↑
           就到这里
@@ -15490,7 +15490,7 @@ crash bundle   → observability/storage backend
 
 所以我现在的判断已经变成：
 
-> **从 AgentDock 核心运行架构看，MinIO/S3 很可能可以完全移除；Workspace durability 下沉给 Cube Volume + 底层持久存储，Session durability 下沉给 Pi PostgreSQL backend。**
+> **从 PiCloud 核心运行架构看，MinIO/S3 很可能可以完全移除；Workspace durability 下沉给 Cube Volume + 底层持久存储，Session durability 下沉给 Pi PostgreSQL backend。**
 
 而且这不是“为了简化而简化”，是把两个本来就应该由基础设施负责的职责还回去了。
 
@@ -15568,7 +15568,7 @@ Sandbox Domain
 
 对。按我们现在讨论出来的新前提，我的 review 结论是：
 
-> **Execution Cell 作为 AgentDock 的一等架构概念，已经没有足够理由继续存在了。可以删。**
+> **Execution Cell 作为 PiCloud 的一等架构概念，已经没有足够理由继续存在了。可以删。**
 
 但要区分一件事：**删掉 Cell，不等于只能有一个 Worker Deployment。**以后仍然可以按需把 Worker 分成多个 pool / task queue，只是不再把这种“算力分片”建模成一个 Workspace 永久归属的业务实体。
 
@@ -15600,7 +15600,7 @@ per-cell Temporal task queue
 per-cell Worker deployment
 ```
 
-甚至迁 Cell 时还要检查 Run、Cube activation、Workspace version，然后修改 `workspace.cell_id`。 
+甚至迁 Cell 时还要检查 Run、Cube activation、Workspace version，然后修改 `workspace.cell_id`。
 
 ### 但我们刚才已经把它的基础拆掉了
 
@@ -15673,7 +15673,7 @@ Cell
 
 Temporal 本来就允许**很多 Worker poll 同一个 Task Queue**；一个 Task Queue 可以承载多个 Workflow Execution 的任务。
 
-而且 AgentDock 当前 `TemporalPiWorker` 已经用了：
+而且 PiCloud 当前 `TemporalPiWorker` 已经用了：
 
 ```ts
 workerDeploymentOptions
@@ -15811,7 +15811,7 @@ agent-run  ← 一个 Task Queue
    └── Pi Worker Pod 100
 ```
 
-Temporal 官方架构本来就是：**多个 Worker process 持续 poll Task Queue；一个 Task Queue 里可以放很多 Workflow Execution 的任务。** 
+Temporal 官方架构本来就是：**多个 Worker process 持续 poll Task Queue；一个 Task Queue 里可以放很多 Workflow Execution 的任务。**
 
 所以你想象中的扩容方式完全成立。严格说在 K8s 里通常不是“增加一个节点”，而是增加 `Pi Worker Deployment` 的 **Pod replica**：
 
@@ -15837,7 +15837,7 @@ replicas: 20
 仍然都 poll "agent-run"
 ```
 
-甚至不需要你手改 YAML，KEDA/HPA 可以根据 backlog 自动把 replica 从 10 扩到 20、50、100。AgentDock 当前文档其实已经写了 KEDA 根据 Temporal backlog 扩 Pi Worker。 Temporal 自己现在甚至也有专门根据 Task Queue workload 自动扩 Worker 的项目。
+甚至不需要你手改 YAML，KEDA/HPA 可以根据 backlog 自动把 replica 从 10 扩到 20、50、100。PiCloud 当前文档其实已经写了 KEDA 根据 Temporal backlog 扩 Pi Worker。 Temporal 自己现在甚至也有专门根据 Task Queue workload 自动扩 Worker 的项目。
 
 ---
 
@@ -15874,9 +15874,9 @@ eu-worker queue
 
 因为数据合规要求美国任务只能跑美国。
 
-Temporal 官方 samples 里的“worker-specific task queue”也是这种思路：**只有当某些任务必须落到特定 Worker/机器时，才单独建 queue。** 
+Temporal 官方 samples 里的“worker-specific task queue”也是这种思路：**只有当某些任务必须落到特定 Worker/机器时，才单独建 queue。**
 
-而我们现在讨论的新 AgentDock：
+而我们现在讨论的新 PiCloud：
 
 ```text
 Pi Session → PG
@@ -15921,7 +15921,7 @@ if (input.cellId !== this.#cellId ||
 
 一旦 Cell 删除，这层路由也就没有什么必要了。
 
-我现在会建议 AgentDock 直接收敛成：
+我现在会建议 PiCloud 直接收敛成：
 
 ```text
 K8s Deployment: pi-worker
@@ -15957,7 +15957,7 @@ Cell3 → Queue3 → Worker Pool3
 
 > **按我们刚刚重新设计后的方向，Temporal 很可能也可以拿掉。**
 
-原因不是 Temporal 没用，而是 **AgentDock 已经不再需要它最有价值的那部分能力了**。
+原因不是 Temporal 没用，而是 **PiCloud 已经不再需要它最有价值的那部分能力了**。
 
 你看现在的 Temporal Workflow，实际上已经薄成这样：
 
@@ -16116,7 +16116,7 @@ lease expired
 
 ### 以前
 
-AgentDock 自己必须解决：
+PiCloud 自己必须解决：
 
 ```text
 Agent Loop 跑到一半崩了怎么办？
@@ -16138,7 +16138,7 @@ PG：
 Persistent Volume：
 我保留 Workspace 现场。
 
-AgentDock：
+PiCloud：
 只需要找一个 Worker 继续跑。
 ```
 
@@ -16170,7 +16170,7 @@ Outbox → Temporal handoff
 
 ---
 
-我现在会把未来 AgentDock 想成：
+我现在会把未来 PiCloud 想成：
 
 ```text
              PostgreSQL
@@ -16206,7 +16206,7 @@ Pi JSONL checkpoint → PG backend 替代
 Temporal          → 现在也开始没有必要
 ```
 
-最后 AgentDock 反而越来越像一个很干净的 Cloud Agent runtime。
+最后 PiCloud 反而越来越像一个很干净的 Cloud Agent runtime。
 
 不过这里有一个我暂时不会跨过去的点：
 
@@ -16220,7 +16220,7 @@ Temporal          → 现在也开始没有必要
 
 ## 174 · Assistant · 2026-08-13T06:29:16.633Z
 
-你确实**没有想得太简单**。研究下来，我反而更确信：如果我们把边界守住，AgentDock 自己的任务分发层可以很小，**没必要重新造 Temporal**。
+你确实**没有想得太简单**。研究下来，我反而更确信：如果我们把边界守住，PiCloud 自己的任务分发层可以很小，**没必要重新造 Temporal**。
 
 PostgreSQL 官方甚至明确写了：`FOR UPDATE SKIP LOCKED` 虽然不适合普通一致性查询，但很适合“多个 consumer 访问 queue-like table”这种场景。成熟的 pg-boss、Graphile Worker、River 也都是直接拿 PostgreSQL 做可靠任务队列。
 
@@ -16272,7 +16272,7 @@ LIMIT 1;
 4. **空队列别狂刷 PG**：低频 polling + `LISTEN/NOTIFY` 做 wake-up；任务本体仍然以 PG 表为准。PostgreSQL 官方也把 `NOTIFY` 定位成进程间通知，并建议真正的数据放表里。
 5. **same-session FIFO / tenant quota**：claim 时只拿当前真正 eligible 的 Run。
 
-而且这里特别关键的是：**第 1、2 项 AgentDock 其实已经写了相当一部分。**
+而且这里特别关键的是：**第 1、2 项 PiCloud 其实已经写了相当一部分。**
 
 你现在已有：
 
@@ -16288,7 +16288,7 @@ last_heartbeat_at
 fencing_token
 ```
 
-当前 `SessionLeaseCoordinator` 已经在做续租、过期检查、fence 递增和 stale Worker 防护。 
+当前 `SessionLeaseCoordinator` 已经在做续租、过期检查、fence 递增和 stale Worker 防护。
 
 所以我们并不是从：
 
@@ -16338,7 +16338,7 @@ Pi Harness durable state
 
 因为这才是 Temporal 真正擅长的 durable workflow orchestration；Temporal 官方自己定位也是让长时间业务流程在 crash 后继续执行。
 
-但 AgentDock 当前 Workflow 根本没有这些东西。它实际上就是：
+但 PiCloud 当前 Workflow 根本没有这些东西。它实际上就是：
 
 ```text
 executeRunCommand()
@@ -16353,9 +16353,9 @@ executeRunCommand()
 
 > **“自己实现队列”并不危险；危险的是不知不觉让这个队列承担 workflow engine 的职责。**
 
-而 AgentDock 有 Pi Harness 之后，Agent Loop durable execution 已经有人负责了。我们只需要一个 **Run ownership / dispatch layer**。
+而 PiCloud 有 Pi Harness 之后，Agent Loop durable execution 已经有人负责了。我们只需要一个 **Run ownership / dispatch layer**。
 
-下一步我觉得可以直接画一个非常小的 **“无 Temporal AgentDock Run Queue”状态机**，看看是不是真的只需要 `queued → leased → terminal` 这么几步。如果画出来仍然很简单，那删 Temporal 就基本可以定了。
+下一步我觉得可以直接画一个非常小的 **“无 Temporal PiCloud Run Queue”状态机**，看看是不是真的只需要 `queued → leased → terminal` 这么几步。如果画出来仍然很简单，那删 Temporal 就基本可以定了。
 
 ## 175 · User · 2026-08-13T06:42:42.543Z
 
@@ -16587,7 +16587,7 @@ pgsql是任务队列的最佳实践吗？我从来没写过任务队列相关的
 
 > **任务是消费品，不等于任务不能持久化。**
 
-例如 SQS 的消息被 consumer 取走后并不会马上消失，而是进入一段 visibility timeout；处理成功后 consumer 再显式删除。如果 consumer 挂了，没有删除，消息重新变得可见。  
+例如 SQS 的消息被 consumer 取走后并不会马上消失，而是进入一段 visibility timeout；处理成功后 consumer 再显式删除。如果 consumer 挂了，没有删除，消息重新变得可见。
 RabbitMQ 也是类似的：consumer 没 ack 就挂了，消息会重新入队；重要任务通常还会使用 durable queue + persistent message。
 
 所以：
@@ -16610,7 +16610,7 @@ deleted
 
 **不一定需要额外建一张 `tasks` 表。**
 
-AgentDock 本身就存在一个业务事实：
+PiCloud 本身就存在一个业务事实：
 
 ```text
 Run 123
@@ -16766,7 +16766,7 @@ Pi Worker
 
 > **如果任务本身对应数据库里一个需要永久保存的业务实体，直接把这个实体的 `queued` 状态作为任务队列，是一个非常合理的模式。**
 
-AgentDock 恰好特别符合这个条件，因为：
+PiCloud 恰好特别符合这个条件，因为：
 
 ```text
 Run 本来就必须保存
@@ -16811,7 +16811,7 @@ RabbitMQ、SQS 或其他专门的 broker 会自然得多。RabbitMQ 本身就会
 
 性质完全不同。
 
-所以我觉得 **PG queue 在 AgentDock 这里并不“怪”**。真正需要决定的是下面这两个模型哪个更合适：
+所以我觉得 **PG queue 在 PiCloud 这里并不“怪”**。真正需要决定的是下面这两个模型哪个更合适：
 
 ```text
 A. PG 本身就是 Run queue
@@ -16822,7 +16822,7 @@ B. PG 是 authority
    queue 语义更专业，但多一个 broker + outbox
 ```
 
-我目前偏 **A**，不是因为 PG 是专业 MQ，而是因为 **AgentDock 的 Run 本来就是 durable business state，拿它直接做调度源可以少掉一整个一致性问题。**
+我目前偏 **A**，不是因为 PG 是专业 MQ，而是因为 **PiCloud 的 Run 本来就是 durable business state，拿它直接做调度源可以少掉一整个一致性问题。**
 
 ## 179 · User · 2026-08-13T07:11:54.594Z
 
@@ -16944,7 +16944,7 @@ O(worker_processes)
 
 到最后这个量级，我仍然**不一定马上引入 Kafka/RabbitMQ/Temporal**。
 
-我会先把 AgentDock 设计成：
+我会先把 PiCloud 设计成：
 
 ```text
 PostgreSQL
@@ -16963,7 +16963,7 @@ Pi Worker process
 
 这样即使未来朝 100 万 active Run 设计，PG 承担的也不是“100 万个不断 heartbeat 的消息”，而是**100 万条相对稳定的业务状态 + 数量远少于 Run 的 Worker liveness**。
 
-而且说实话，真到 **100 万同时 active Agent Loop**，我怀疑 PostgreSQL queue 已经不是 AgentDock 最先爆的地方了——Pi Worker 内存、模型并发、provider rate limit、Cube 数量和 Workspace storage 都会先进入非常夸张的规模。
+而且说实话，真到 **100 万同时 active Agent Loop**，我怀疑 PostgreSQL queue 已经不是 PiCloud 最先爆的地方了——Pi Worker 内存、模型并发、provider rate limit、Cube 数量和 Workspace storage 都会先进入非常夸张的规模。
 
 所以目前没有必要因为“未来可能 100 万 active”就否掉 PG queue；但我们应该从一开始就避免 **per-Run 高频 heartbeat** 这个设计。
 
@@ -16975,7 +16975,7 @@ Pi Worker process
 
 **不一致，而且 PG 宕机的影响会更大。**
 
-先说一个容易忽略的现状：AgentDock 当前 self-hosted Temporal 的 `temporal` / `temporal_visibility` schema 本来就在现有 PostgreSQL 服务里。 所以**今天如果是整个 PostgreSQL 实例挂了，Temporal 实际上也跟着挂**。
+先说一个容易忽略的现状：PiCloud 当前 self-hosted Temporal 的 `temporal` / `temporal_visibility` schema 本来就在现有 PostgreSQL 服务里。 所以**今天如果是整个 PostgreSQL 实例挂了，Temporal 实际上也跟着挂**。
 
 但为了讨论架构，我们假设它们是两个独立故障：
 
@@ -17070,7 +17070,7 @@ Temporal down
 
 不过这并不意味着“所以必须留 Temporal”。
 
-因为 PostgreSQL 本来就已经是 AgentDock 的**核心 authority**。即使保留 Temporal：
+因为 PostgreSQL 本来就已经是 PiCloud 的**核心 authority**。即使保留 Temporal：
 
 ```text
 Temporal 正常
@@ -17087,13 +17087,13 @@ Worker 拿到 Activity 以后照样执行不了，因为它需要 PG 读取 Run�
 有 Temporal：
 
 PG down
-→ AgentDock 基本不可用
+→ PiCloud 基本不可用
 
 
 没 Temporal：
 
 PG down
-→ AgentDock 基本不可用
+→ PiCloud 基本不可用
 ```
 
 因此从这个角度看，**删掉 Temporal 并没有明显扩大 PG 故障的 blast radius——PG 原本就是必须在线的核心依赖。**
@@ -17159,7 +17159,7 @@ Temporal救不了。
 
 真正应该问的是：
 
-> **PostgreSQL 作为整个 AgentDock 的核心单点，我们要做到什么级别的 HA？**
+> **PostgreSQL 作为整个 PiCloud 的核心单点，我们要做到什么级别的 HA？**
 
 比如：
 
@@ -17197,7 +17197,7 @@ Temporal Worker
 
 所以这一轮我会给一个比较明确的判断：
 
-> **Temporal outage 和 PG outage 的表现不完全一致；PG outage 更严重。但由于 PG 无论如何已经是 AgentDock 的不可缺核心 authority，Temporal 并没有消除这个风险。删掉 Temporal 后，真正应该加强的是 PostgreSQL HA，而不是再维护第二套 durable orchestration 系统。**
+> **Temporal outage 和 PG outage 的表现不完全一致；PG outage 更严重。但由于 PG 无论如何已经是 PiCloud 的不可缺核心 authority，Temporal 并没有消除这个风险。删掉 Temporal 后，真正应该加强的是 PostgreSQL HA，而不是再维护第二套 durable orchestration 系统。**
 
 ## 183 · User · 2026-08-13T07:42:50.470Z
 
@@ -17245,9 +17245,9 @@ monotonic fencing token
 
 旧 Worker拿着 `fence=7`，新 Worker取得 `fence=8` 后，旧 Worker后续提交全部拒绝。
 
-所以我觉得甚至可以把它写成 AgentDock 一个很核心的 invariant：
+所以我觉得甚至可以把它写成 PiCloud 一个很核心的 invariant：
 
-> **Persistence unavailable means execution unavailable. AgentDock never advances observable Agent state beyond its durable authority.**
+> **Persistence unavailable means execution unavailable. PiCloud never advances observable Agent state beyond its durable authority.**
 
 这和我们的另一个原则完全一致：
 
@@ -17328,7 +17328,7 @@ lease 失效
 
 我会保留一个非常明确的“重新引入 Temporal”条件：
 
-> **只有未来 AgentDock 出现真正的 durable workflow orchestration 需求时，才重新考虑 Temporal。**
+> **只有未来 PiCloud 出现真正的 durable workflow orchestration 需求时，才重新考虑 Temporal。**
 
 比如：
 
@@ -17356,7 +17356,7 @@ durable job
 
 所以到这里，我会把结论定成：
 
-> **AgentDock 当前目标架构可以删除 Temporal，并用 PostgreSQL Run Queue + lease/fence 替代其调度职责。**
+> **PiCloud 当前目标架构可以删除 Temporal，并用 PostgreSQL Run Queue + lease/fence 替代其调度职责。**
 
 而且这不是降级，而是把 durable execution 的责任放回真正拥有 Agent 状态的 Pi Harness，把调度降回它本来应该有的复杂度。
 
@@ -17545,7 +17545,7 @@ workflow_signals
 
 ---
 
-而我们现在的 AgentDock **不是这种情况**。
+而我们现在的 PiCloud **不是这种情况**。
 
 我们的逻辑更像：
 
@@ -17578,7 +17578,7 @@ Pi AgentHarness
 
 接管了。
 
-所以 AgentDock 外面不需要再次保存：
+所以 PiCloud 外面不需要再次保存：
 
 ```text
 现在执行到第几个 tool
@@ -17608,7 +17608,7 @@ Pi Harness 自己就是 Agent Loop 的 durable execution engine。
 
 > **Queue 保存“谁还没被处理”；Temporal 保存“一个长期程序已经执行到了哪里”。**
 
-所以对于 AgentDock，现在我们有：
+所以对于 PiCloud，现在我们有：
 
 ```text
 PostgreSQL Run Queue
@@ -17821,7 +17821,7 @@ Cube
 
 就成立了。
 
-但如果 Cube 本身不理解 AgentDock 的 lease/fence，而 Pi Worker 又持有一个长期的 Cube 管理凭据，那么我不会删除 Broker。
+但如果 Cube 本身不理解 PiCloud 的 lease/fence，而 Pi Worker 又持有一个长期的 Cube 管理凭据，那么我不会删除 Broker。
 
 因为你不能只在 Worker 自己做：
 
@@ -17896,14 +17896,14 @@ Worker A:
 
 > **我们完全可以自己把这套 distributed ownership 内化进 Pi Harness。**
 
-而且我觉得这可能是 AgentDock 很漂亮的一步。
+而且我觉得这可能是 PiCloud 很漂亮的一步。
 
 ### “内化”不是把 lease/fence 消灭
 
 而是从现在这种：
 
 ```text
-AgentDock Run
+PiCloud Run
    fence
      ↓
 Pi Worker
@@ -18069,7 +18069,7 @@ Cube execution endpoint
 第一阶段可以利用 Pi 现在已有的 extensibility：
 
 ```text
-AgentDock
+PiCloud
 ├─ PostgresSessionStorage
 ├─ PostgresExecutionAuthorityProvider
 └─ FencedCubeExecutionEnv
@@ -18101,7 +18101,7 @@ Pi 自己完全不需要知道 PostgreSQL、K8s、Cube。
 
 ---
 
-如果这个方向做彻底，我希望 AgentDock 最后只有**一套 ownership**：
+如果这个方向做彻底，我希望 PiCloud 最后只有**一套 ownership**：
 
 ```text
 PostgreSQL
@@ -18140,7 +18140,7 @@ SessionStorage       ExecutionEnv
 
 我觉得这里有一个很有意思的判断：
 
-> **我们现在不应该继续完善 AgentDock 自己那套 lease/fence plumbing，而应该尝试把 distributed execution ownership 做成 Pi Harness 的一等 capability。**
+> **我们现在不应该继续完善 PiCloud 自己那套 lease/fence plumbing，而应该尝试把 distributed execution ownership 做成 Pi Harness 的一等 capability。**
 
 而且 Pi 当前正在大改 AgentHarness、durability、Session、ExecutionEnv，这个时间点其实非常适合做这件事。当前 durability 部分仍被官方标为 planned/spike 阶段。
 
@@ -18517,7 +18517,7 @@ Cube
 
 Tool Broker 就真可以删掉。
 
-但 Cube 如果完全不知道 AgentDock authority：
+但 Cube 如果完全不知道 PiCloud authority：
 
 ```text
 Pi Worker
@@ -18540,7 +18540,7 @@ Cube
 我们完全可以先做：
 
 ```text
-AgentDockAuthority
+PiCloudAuthority
         │
         ├─ PostgresSessionStorage
         │
@@ -18589,13 +18589,13 @@ new AgentHarness({
 
 但目标不是：
 
-> 把 AgentDock 的 lease/fence 代码原封不动搬进 Pi。
+> 把 PiCloud 的 lease/fence 代码原封不动搬进 Pi。
 
 而应该是：
 
 > **让 Pi Harness 原生拥有“本次 execution 当前是否仍有权继续”的概念，把 lease/fence 彻底隐藏到 provider 后面。**
 
-那最后 AgentDock 外面可能只剩：
+那最后 PiCloud 外面可能只剩：
 
 ```text
 PG Run Queue
@@ -18611,11 +18611,11 @@ Pi AgentHarness
 
 ## 195 · User · 2026-08-13T08:52:58.742Z
 
-哇，那简洁很多了，感觉想当不错，少了很多部件。我们讨论了这么多，砍掉了这么多东西，你能总结一下现在agent dock的架构长什么样子吗（我们讨论的终极版架构）
+哇，那简洁很多了，感觉想当不错，少了很多部件。我们讨论了这么多，砍掉了这么多东西，你能总结一下现在pi cloud的架构长什么样子吗（我们讨论的终极版架构）
 
 ## 196 · Assistant · 2026-08-13T08:53:03.789Z
 
-可以。按我们这几轮讨论出来的**目标态**来看，AgentDock 已经从原来一个偏“企业级 durable orchestration 平台”，收敛成了一个很干净的 **Cloud Coding Agent Runtime**。
+可以。按我们这几轮讨论出来的**目标态**来看，PiCloud 已经从原来一个偏“企业级 durable orchestration 平台”，收敛成了一个很干净的 **Cloud Coding Agent Runtime**。
 
 先强调一下：下面是我们讨论出的**终极目标架构，不是现在 main 已经实现的状态**。
 
@@ -18716,7 +18716,7 @@ PostgreSQL
 
 也就是说：
 
-> **AgentDock 只有一个真正的 durable truth：PostgreSQL。**
+> **PiCloud 只有一个真正的 durable truth：PostgreSQL。**
 
 PG 挂：
 
@@ -18792,7 +18792,7 @@ replicas: 100
 
 这是为什么 Temporal 可以删除。
 
-原来 AgentDock 自己试图知道：
+原来 PiCloud 自己试图知道：
 
 ```text
 LLM 执行到哪了？
@@ -18813,9 +18813,9 @@ Pi AgentHarness
        └─ Session persistence
 ```
 
-AgentDock 不再自己实现第二套 Agent state machine。
+PiCloud 不再自己实现第二套 Agent state machine。
 
-AgentDock 只管：
+PiCloud 只管：
 
 ```text
 这个 Run 需要执行
@@ -18913,7 +18913,7 @@ Workspace CAS
 
 ## 5. CubeSandbox 只干它真正应该干的事
 
-Cube 不再被 AgentDock 外面再套一个复杂 Sandbox Manager。
+Cube 不再被 PiCloud 外面再套一个复杂 Sandbox Manager。
 
 Cube 负责：
 
@@ -19130,7 +19130,7 @@ Browser ← SSE ← Valkey ← Kafka ← Pi Worker
 
 ---
 
-如果把我们目前已经确定的设计压成一句话，我觉得现在的 AgentDock 是：
+如果把我们目前已经确定的设计压成一句话，我觉得现在的 PiCloud 是：
 
 > **PostgreSQL 保存 Agent 的持久状态与待执行 Run；无状态 Pi Worker 从 PG 领取 Run，由具有分布式 ExecutionAuthority 的 Pi AgentHarness 负责 durable Agent Loop，并通过 CubeSandbox 在持久 Workspace 上执行工具。**
 
@@ -19200,7 +19200,7 @@ PostgresPiWorker 3 ─┤
 PostgresPiWorker N ─┘
 ```
 
-`PostgresPiWorker` 已经真实实现：默认每秒 fallback poll 一次，同时 `LISTEN agent_dock_run_queue`；通知只是降低延迟，丢通知不会丢任务。Worker 按自己的空闲 slot 数量扫描任务。
+`PostgresPiWorker` 已经真实实现：默认每秒 fallback poll 一次，同时 `LISTEN pi_cloud_run_queue`；通知只是降低延迟，丢通知不会丢任务。Worker 按自己的空闲 slot 数量扫描任务。
 
 这里还有个细节：现在所谓“Run queue”实际是：
 
@@ -19259,7 +19259,7 @@ Workspace ≈ 一块持久云盘
 现在已经有正式 package：
 
 ```text
-@agent-dock/pi-session-postgres
+@pi-cloud/pi-session-postgres
 ```
 
 Pi 官方 `SessionStorage` 已经实现到 PostgreSQL，存：
@@ -19814,7 +19814,7 @@ sampling identity
 
 不过这里有一个很重要的好消息：
 
-**AgentDock 根本没必要实现 Pi 通用 Harness 的 100% 功能。**
+**PiCloud 根本没必要实现 Pi 通用 Harness 的 100% 功能。**
 
 Pi upstream 想支持的是：
 
@@ -19836,7 +19836,7 @@ different Session backends
 
 它要做一个通用 framework，所以难度非常高。Pi 的新 v2 甚至设计了多 lane、durable queue、navigation、subagent 等完整语义。
 
-AgentDock 现在需要的其实窄得多：
+PiCloud 现在需要的其实窄得多：
 
 ```text
 一个 Session
@@ -19880,7 +19880,7 @@ Pi public primitives
 
           ↓
 
-AgentDock DurableAgentHarness
+PiCloud DurableAgentHarness
 ├─ prompt
 ├─ resume
 ├─ compact
@@ -19925,7 +19925,7 @@ AgentDock DurableAgentHarness
 
 而你现在 Codex 写出来的 `DurableAgentHarness`，其实已经把这个方向证明了一半：multi-round PG restore、compaction boundary restore、authority revoke 阻止 Tool、terminal authority close 都已经有 automated evidence。
 
-所以我现在反而倾向于：**可以继续自己做，不需要因为 upstream `AgentHarness` 尚未完成就卡住整个 AgentDock。**只要保持在 Pi public primitives 上实现，不魔改 `agent-loop.ts`，以后 upstream Harness 真正成熟时，再把这层 adapter 替换掉就行。
+所以我现在反而倾向于：**可以继续自己做，不需要因为 upstream `AgentHarness` 尚未完成就卡住整个 PiCloud。**只要保持在 Pi public primitives 上实现，不魔改 `agent-loop.ts`，以后 upstream Harness 真正成熟时，再把这层 adapter 替换掉就行。
 
 ## 201 · User · 2026-08-14T00:58:10.077Z
 
@@ -19946,7 +19946,7 @@ B. Durable AgentHarness / mid-turn crash recovery
 
 而 A 已经基本做成了。
 
-当前仓库里的 `@agent-dock/pi-session-postgres` 已经可以：
+当前仓库里的 `@pi-cloud/pi-session-postgres` 已经可以：
 
 ```text
 PostgreSQL
@@ -20007,7 +20007,7 @@ SessionStorage
 
 但**还没有把原来 coding-agent 那整套运行入口完全改成从这个接口启动**。
 
-所以现在 AgentDock 才尴尬地处于：
+所以现在 PiCloud 才尴尬地处于：
 
 ```text
 已经有：
@@ -20545,7 +20545,7 @@ DurableAgentHarness
 
 你仓库里的研究文档其实直接写明了它的目标：
 
-> “Can AgentDock stop restoring a complete `session.jsonl` for every Run, **and can the Run lease/fence become an internal Harness concern instead of application plumbing?**” 
+> “Can PiCloud stop restoring a complete `session.jsonl` for every Run, **and can the Run lease/fence become an internal Harness concern instead of application plumbing?**”
 
 所以你的猜测基本命中。
 
@@ -20590,7 +20590,7 @@ operation records
 compaction boundaries
 ```
 
-但旧 production coding-agent 仍然从 JSONL/session-file 那套入口跑。当前 AgentDock 文档也明确写着：
+但旧 production coding-agent 仍然从 JSONL/session-file 那套入口跑。当前 PiCloud 文档也明确写着：
 
 > PostgreSQL `SessionStorage` 已经实现，但 production coding adapter 暂时仍使用旧 Pi SDK/session-file entrypoint。
 
@@ -20675,7 +20675,7 @@ steer
 
 对，你抓到关键点了。
 
-**把 lease/fencing 内化进 Pi Harness，并不能让“执行权限”凭空消失。**  
+**把 lease/fencing 内化进 Pi Harness，并不能让“执行权限”凭空消失。**
 因为 Agent Loop 和 Tool execution environment 是两个独立故障域：
 
 ```text
@@ -21448,7 +21448,7 @@ PostgreSQL
 
 目前仍然是 **staged adapter**。
 
-这次 commit 说得比昨天更明确：**Pi runtime surface 本身已经补齐了**，现在阻止 production cutover 的主要已经不是 `prompt/resume/compact`，而是 AgentDock 外面的产品语义：
+这次 commit 说得比昨天更明确：**Pi runtime surface 本身已经补齐了**，现在阻止 production cutover 的主要已经不是 `prompt/resume/compact`，而是 PiCloud 外面的产品语义：
 
 ```text
 1. Workspace terminal settlement
@@ -21521,7 +21521,7 @@ Session.appendEntry()
 PostgreSQL
 ```
 
-Session 写入和 execution authority 检查也放进了同一个数据库事务，不是先检查 fence、再隔着一个竞态窗口写数据。这个边界是正确的。 
+Session 写入和 execution authority 检查也放进了同一个数据库事务，不是先检查 fence、再隔着一个竞态窗口写数据。这个边界是正确的。
 
 ### 2. Tool 恢复策略总体合理
 
@@ -21715,7 +21715,7 @@ Pi 新 durable Harness 设计之所以强调完整 `op.state` 和事务提交，
 
 ---
 
-## P0-3：Pi operation 完成，还不等于 AgentDock 的 Run 完成
+## P0-3：Pi operation 完成，还不等于 PiCloud 的 Run 完成
 
 这是我认为最重要的产品级阻塞项。
 
@@ -21740,7 +21740,7 @@ Pi Agent Loop settled
   lease release
 ```
 
-现有 `RemoteToolSandboxTurnRunner` 和 `RunCommandExecutor` 正在承担这段收口。 
+现有 `RemoteToolSandboxTurnRunner` 和 `RunCommandExecutor` 正在承担这段收口。
 
 而新的 Harness 当前只知道：
 
@@ -21748,7 +21748,7 @@ Pi Agent Loop settled
 operation_finished
 ```
 
-它不知道 AgentDock 的：
+它不知道 PiCloud 的：
 
 ```text
 Workspace revision 已捕获了吗？
@@ -21765,7 +21765,7 @@ operation_finished ✓
 
 Worker crash
 
-AgentDock terminal transaction ✕
+PiCloud terminal transaction ✕
 ```
 
 恢复后：
@@ -21796,7 +21796,7 @@ running
     ↓
 awaiting_external_finalization
     ↓
-AgentDock terminal transaction
+PiCloud terminal transaction
     ↓
 completed
 ```
@@ -21844,14 +21844,14 @@ compaction
 steer
 ```
 
-但还没有接成 AgentDock 当前正式协议。
+但还没有接成 PiCloud 当前正式协议。
 
 尤其是 Kafka/Valkey/SSE：
 
 ```text
 Pi AgentEvent
     ↓
-AgentDock semantic event
+PiCloud semantic event
     ↓
 Kafka durable batch
     ↓
@@ -21860,7 +21860,7 @@ Valkey projection
 SSE
 ```
 
-当前有专门的 `PiAgentEventAdapter` 和 settlement gate。新 Harness 的 raw event 还没有证明能够完全产生相同的 sequence、terminal event、usage 和 Tool lifecycle。 
+当前有专门的 `PiAgentEventAdapter` 和 settlement gate。新 Harness 的 raw event 还没有证明能够完全产生相同的 sequence、terminal event、usage 和 Tool lifecycle。
 
 这次 commit 自己也承认，production event mapping、Workspace/conversation terminal commit 和真实 Cube/model 验收仍未完成。
 
@@ -21954,7 +21954,7 @@ PostgresHarnessTurnRunner
 旧 Pi session-file Agent Loop
 ```
 
-而不是同时重写整个 AgentDock 产品结算协议。
+而不是同时重写整个 PiCloud 产品结算协议。
 
 ## 第三阶段：故障注入
 
@@ -22019,7 +22019,7 @@ Pi SDK 0.84.1 JSONL compatibility path
 ```text
 bounded restore
 operation crash idempotence
-AgentDock terminal finalization
+PiCloud terminal finalization
 ```
 
 这三个完成，再通过一次新 Harness 专属的真实模型 + Cube + 跨 Worker 故障验收，我会支持正式切换。
@@ -22032,7 +22032,7 @@ AgentDock terminal finalization
 
 可以把它们拆成两个完全不同的问题：
 
-> **Lease 解决“什么时候可以换人”。**  
+> **Lease 解决“什么时候可以换人”。**
 > **Fence 解决“换人以后，旧的人还能不能继续动手”。**
 
 在你的 Cloud Coding Agent 场景里，这两个概念非常关键，但它们解决的并不是“恢复到最新 Tool”本身。
@@ -22284,7 +22284,7 @@ WHERE session_id = ?
 
 ---
 
-## 6. 对你的 AgentDock 来说，Fence 应该挡在哪里
+## 6. 对你的 PiCloud 来说，Fence 应该挡在哪里
 
 你的结构是：
 
@@ -22841,7 +22841,7 @@ recovery_blocked
 
 ---
 
-## 对 AgentDock 最合理的 invariant
+## 对 PiCloud 最合理的 invariant
 
 我不建议把正确性定义为：
 
@@ -23279,7 +23279,7 @@ Workspace Storage
 
 ### 成熟系统一般不是靠一个 Lease 解决，而是“分层 fencing”
 
-我查下来，最接近我们 AgentDock 场景的成熟方案其实是这套：
+我查下来，最接近我们 PiCloud 场景的成熟方案其实是这套：
 
 ```text
             control-plane lease
@@ -23358,7 +23358,7 @@ node fencing / power off
 storage fencing
 ```
 
-这正是我们 AgentDock 应该借鉴的，而不是自己发明一个全新的理论。
+这正是我们 PiCloud 应该借鉴的，而不是自己发明一个全新的理论。
 
 ---
 
@@ -23460,7 +23460,7 @@ Kubernetes 官方的 **Non-Graceful Node Shutdown** 文档明确说明，它默�
 
 ---
 
-## 那么 AgentDock 可以直接采用什么模式？
+## 那么 PiCloud 可以直接采用什么模式？
 
 我现在认为可以把我们的设计正式叫成：
 
@@ -23559,16 +23559,16 @@ Operation ledger + idempotency
 处理已经启动但结果未知的 Tool
 ```
 
-这套东西和我们前面一路推出来的 AgentDock 架构非常吻合。
+这套东西和我们前面一路推出来的 PiCloud 架构非常吻合。
 
-而且这次调研让我对一个方向更确定了：**不要试图让 AgentDock 自己负责判断 Cube/Node/Volume 是否真正死亡。**AgentDock 最多负责：
+而且这次调研让我对一个方向更确定了：**不要试图让 PiCloud 自己负责判断 Cube/Node/Volume 是否真正死亡。**PiCloud 最多负责：
 
 ```text
 PG execution authority
 → Run = REVOKING
 ```
 
-然后把“旧 Sandbox/Volume writer 是否已经被安全 fence”交给 **CubeSandbox + Kubernetes + CSI/底层存储**。只有它们返回 `quiesced/fenced`，AgentDock 才把 Run 重新设为 `claimable`。
+然后把“旧 Sandbox/Volume writer 是否已经被安全 fence”交给 **CubeSandbox + Kubernetes + CSI/底层存储**。只有它们返回 `quiesced/fenced`，PiCloud 才把 Run 重新设为 `claimable`。
 
 这样你的应用层不会重新造一套 HA 集群系统。
 
@@ -23580,7 +23580,7 @@ PG execution authority
 
 你的理解**已经非常接近了**，但我会修正一个小地方：
 
-> **Lease 是 Agent Worker 和 PostgreSQL 之间关于“谁现在拥有执行权”的契约。**  
+> **Lease 是 Agent Worker 和 PostgreSQL 之间关于“谁现在拥有执行权”的契约。**
 > **Fence 是这份执行权在“真正产生副作用的边界”上的证明。**
 
 所以 Fence 不只是 `Agent Loop ↔ Cube`。
@@ -23842,7 +23842,7 @@ tool(A)       ← 污染历史
 
 对，我现在也更倾向这个结论。
 
-**如果你的目标是把 AgentDock 生产链路从 JSONL 切到 PostgreSQL SessionStorage，那么没必要先完整复刻 Pi 0.84.1 的整个 `AgentHarness`。**
+**如果你的目标是把 PiCloud 生产链路从 JSONL 切到 PostgreSQL SessionStorage，那么没必要先完整复刻 Pi 0.84.1 的整个 `AgentHarness`。**
 
 真正必须做的其实只有这一条：
 
@@ -23858,7 +23858,7 @@ Pi runAgentLoop()
 PostgreSQL SessionStorage
 ```
 
-然后 lease / fencing 仍然由 AgentDock 自己负责。
+然后 lease / fencing 仍然由 PiCloud 自己负责。
 
 但这里有两个小修正。
 
@@ -23881,10 +23881,10 @@ fenced write fenced effect
 
 ```text
 Lease：
-AgentDock PG Run runtime 自己管
+PiCloud PG Run runtime 自己管
 
 Fence：
-AgentDock SessionStorage adapter + Tool execution adapter 自己 enforce
+PiCloud SessionStorage adapter + Tool execution adapter 自己 enforce
 ```
 
 Pi 本身完全不需要理解：
@@ -23939,7 +23939,7 @@ queue API
 可能就长这样：
 
 ```text
-AgentDockRunRuntime
+PiCloudRunRuntime
 │
 ├─ Postgres SessionStorage
 │    └─ fenced writes
@@ -23964,11 +23964,11 @@ AgentDockRunRuntime
 
 它解决的是：
 
-> “我要在 AgentDock 里重新提供 Pi 0.84.1 完整的 Harness API。”
+> “我要在 PiCloud 里重新提供 Pi 0.84.1 完整的 Harness API。”
 
 但我们真正的问题其实只是：
 
-> “Pi 的 conversation authority 不要再是 JSONL，而是 PG；然后 Cloud 环境下的 execution ownership 由 AgentDock 保证。”
+> “Pi 的 conversation authority 不要再是 JSONL，而是 PG；然后 Cloud 环境下的 execution ownership 由 PiCloud 保证。”
 
 这两个需求并不要求完整重写 Harness。
 
@@ -23985,7 +23985,7 @@ JSONL
 
 ```text
 新：
-AgentDock thin runtime
+PiCloud thin runtime
     ↓
 Pi runAgentLoop
     ↓
@@ -23995,7 +23995,7 @@ PG SessionStorage
 而不是：
 
 ```text
-AgentDock
+PiCloud
     ↓
 自己重新实现完整 Pi AgentHarness
     ↓

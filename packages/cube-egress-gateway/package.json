@@ -1,5 +1,5 @@
 {
-  "name": "@agent-dock/cube-egress-gateway",
+  "name": "@pi-cloud/cube-egress-gateway",
   "version": "0.1.0",
   "private": true,
   "type": "module",

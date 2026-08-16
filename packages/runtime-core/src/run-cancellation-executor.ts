@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   transitionCommand,
   transitionSession,
@@ -6,13 +6,13 @@ import {
   type CommandState,
   type SessionState,
   type TurnState,
-} from "@agent-dock/domain";
+} from "@pi-cloud/domain";
 import {
   TURN_CANCELLATION_OUTBOX_TOPIC,
   parseEnvironmentRuntimeSnapshot,
   parseTurnCancellationOutboxPayload,
   type CancelTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
 import type { EventProjectionBarrier } from "./event-projection-barrier.ts";
@@ -143,8 +143,8 @@ type CancellationLifecycleRows = {
   sessionState: SessionState;
   outboxAttempts: number;
   outboxPublishedAt: Date | string | null;
-  runState: import("@agent-dock/domain").RunState;
-  runAttemptState: import("@agent-dock/domain").RunAttemptState;
+  runState: import("@pi-cloud/domain").RunState;
+  runAttemptState: import("@pi-cloud/domain").RunAttemptState;
   currentAttemptId: string | null;
 };
 

@@ -6,7 +6,7 @@
 
 ## Context
 
-AgentDock has two non-negotiable streaming invariants:
+PiCloud has two non-negotiable streaming invariants:
 
 1. the browser may display an Agent event only after PostgreSQL has committed
    it; and
@@ -64,7 +64,7 @@ The implementation survey found three useful mature patterns:
    An exact redelivery prefix is checked in bulk and does not create duplicates.
 7. Batching remains per Run assignment so one tenant cannot reorder another
    Session's causal stream. PostgreSQL's native group commit shares WAL flushes
-   among concurrent Session transactions; AgentDock does not add a process-local
+   among concurrent Session transactions; PiCloud does not add a process-local
    cross-tenant durability coordinator.
 8. `synchronous_commit` stays enabled for this path. `NOTIFY` carries only a
    high-water hint after commit; the event table is the source of truth.
@@ -96,7 +96,7 @@ The implementation survey found three useful mature patterns:
   one event insert and one cursor/Session advance.
 - A real Worker-process `SIGKILL` test proves that a locally fsynced, unacknowledged
   event is replayable. Browser visibility still begins only after PostgreSQL ACK.
-- AgentDock does not maintain a parallel `messages[]`; it opens Pi's PostgreSQL
+- PiCloud does not maintain a parallel `messages[]`; it opens Pi's PostgreSQL
   Session branch and lets Pi construct the effective model messages, including
   the one-time durable recovery bridge.
 - Kafka/NATS remain unnecessary until measured PostgreSQL saturation, independent

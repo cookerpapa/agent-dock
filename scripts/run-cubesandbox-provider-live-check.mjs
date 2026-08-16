@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const runtimeDirectory =
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ??
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ??
   fileURLToPath(new URL("../deploy/production/runtime", import.meta.url));
 
 function assertEndpoint(value, label) {
@@ -86,7 +86,7 @@ const child = spawn(
   [
     "test",
     "--workspace",
-    "@agent-dock/tool-broker",
+    "@pi-cloud/tool-broker",
     "--",
     "cubesandbox-live-provider.integration.test.ts",
   ],
@@ -94,17 +94,17 @@ const child = spawn(
     cwd: repositoryRoot,
     env: {
       ...process.env,
-      AGENT_DOCK_CUBESANDBOX_TEST: "1",
-      AGENT_DOCK_CUBESANDBOX_API_URL: `http://${api.host}:${String(api.port)}`,
-      AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: `${runtimeDirectory}/secrets/cubesandbox-api-key`,
-      AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: proxy.host,
-      AGENT_DOCK_CUBESANDBOX_PROXY_PORT: String(proxy.port),
-      AGENT_DOCK_CUBESANDBOX_DOMAIN: cluster.sandboxDomain,
-      AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: template.templateId,
-      AGENT_DOCK_IMAGE_REVISION: template.imageRevision,
-      AGENT_DOCK_CUBESANDBOX_FORBIDDEN_ENDPOINTS: `${master.host}:${String(master.port)},${registry.host}:${String(registry.port)}`,
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL: `http://${gatewayAddress}:4500`,
-      AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: `${runtimeDirectory}/secrets/workspace-volume-gateway-token`,
+      PI_CLOUD_CUBESANDBOX_TEST: "1",
+      PI_CLOUD_CUBESANDBOX_API_URL: `http://${api.host}:${String(api.port)}`,
+      PI_CLOUD_CUBESANDBOX_API_KEY_FILE: `${runtimeDirectory}/secrets/cubesandbox-api-key`,
+      PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP: proxy.host,
+      PI_CLOUD_CUBESANDBOX_PROXY_PORT: String(proxy.port),
+      PI_CLOUD_CUBESANDBOX_DOMAIN: cluster.sandboxDomain,
+      PI_CLOUD_CUBESANDBOX_TEMPLATE_ID: template.templateId,
+      PI_CLOUD_IMAGE_REVISION: template.imageRevision,
+      PI_CLOUD_CUBESANDBOX_FORBIDDEN_ENDPOINTS: `${master.host}:${String(master.port)},${registry.host}:${String(registry.port)}`,
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_URL: `http://${gatewayAddress}:4500`,
+      PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE: `${runtimeDirectory}/secrets/workspace-volume-gateway-token`,
     },
     stdio: "inherit",
   },

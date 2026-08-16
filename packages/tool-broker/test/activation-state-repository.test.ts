@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations } from "@agent-dock/database";
+import { createDatabase, runMigrations } from "@pi-cloud/database";
 import { afterEach, describe, expect, it } from "vitest";
 import { PostgresSandboxActivationStateRepository } from "../src/index.ts";
 

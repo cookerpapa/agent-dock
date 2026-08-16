@@ -1,6 +1,0 @@
-dependencies:
-- name: agent-dock-pi-worker-pool
-  repository: file://../agent-dock-pi-worker-pool
-  version: 0.1.0
-digest: sha256:82796a58c04e63039519789bf83341928074dbbe604777f24c9160f3e405f7d8
-generated: "2026-08-09T17:24:35.434669212+08:00"

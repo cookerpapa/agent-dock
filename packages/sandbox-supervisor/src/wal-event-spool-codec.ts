@@ -3,7 +3,7 @@ import {
   parseSupervisorToControlMessage,
   type EventAckMessage,
   type EventPublishMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, rename, rm } from "node:fs/promises";
@@ -58,7 +58,7 @@ export type RejectionRecord = {
 export type WalRecord = AssignmentRecord | EventRecord | AckRecord | RejectionRecord;
 
 export type WalEnvelope = {
-  format: "agent-dock.event-spool-wal.v1";
+  format: "pi-cloud.event-spool-wal.v1";
   sha256: string;
   record: WalRecord;
 };
@@ -136,7 +136,7 @@ export function positiveSafeInteger(value: unknown, maximum: number, description
 
 export function assignmentName(sessionId: string, leaseId: string, fencingToken: number): string {
   return sha256(
-    `agent-dock.event-spool-assignment.v1\0${sessionId}\0${leaseId}\0${String(fencingToken)}`,
+    `pi-cloud.event-spool-assignment.v1\0${sessionId}\0${leaseId}\0${String(fencingToken)}`,
   );
 }
 
@@ -149,7 +149,7 @@ export function recordBytes(record: WalRecord): Buffer {
     throw new EventSpoolError("Event publication exceeds the durable spool message limit");
   }
   const envelope: WalEnvelope = {
-    format: "agent-dock.event-spool-wal.v1",
+    format: "pi-cloud.event-spool-wal.v1",
     sha256: sha256(recordJson),
     record,
   };
@@ -192,7 +192,7 @@ function parseWalRecord(line: string): WalRecord {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ["format", "sha256", "record"]) ||
-    value.format !== "agent-dock.event-spool-wal.v1" ||
+    value.format !== "pi-cloud.event-spool-wal.v1" ||
     typeof value.sha256 !== "string" ||
     !/^[0-9a-f]{64}$/.test(value.sha256) ||
     !isRecord(value.record)

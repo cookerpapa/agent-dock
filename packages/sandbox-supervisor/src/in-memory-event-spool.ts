@@ -4,7 +4,7 @@ import {
   type EventAckMessage,
   type EventPublishMessage,
   type EventRejectedMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { isDeepStrictEqual } from "node:util";
 
 export type InMemoryEventSpoolOptions = {
@@ -96,7 +96,7 @@ function requirePositiveSafeInteger(value: number, field: string): void {
 }
 
 /**
- * Executable reference for AgentDock's cumulative event ACK semantics.
+ * Executable reference for PiCloud's cumulative event ACK semantics.
  *
  * This implementation is deliberately in-memory and therefore not the final
  * crash-safe spool. It proves ordering, fencing, duplicate delivery, bounded

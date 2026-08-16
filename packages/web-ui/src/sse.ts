@@ -1,4 +1,4 @@
-import { parseAgentDockEvent, type AgentDockEvent } from "@agent-dock/protocol";
+import { parsePiCloudEvent, type PiCloudEvent } from "@pi-cloud/protocol";
 
 const MAX_PENDING_FRAME_BYTES = 1 * 1_024 * 1_024;
 const DEFAULT_RETRY_DELAY_MS = 300;
@@ -93,7 +93,7 @@ export type StreamSessionEventsOptions = {
   sessionId: string;
   afterSequence: number;
   signal: AbortSignal;
-  onEvent(event: AgentDockEvent): void;
+  onEvent(event: PiCloudEvent): void;
   onStatus(status: SessionStreamStatus): void;
   onCursorExpired?(): Promise<number>;
   fetchImplementation?: FetchImplementation;
@@ -131,7 +131,7 @@ async function consumeResponse(
   sessionId: string,
   initialSequence: number,
   signal: AbortSignal,
-  onEvent: (event: AgentDockEvent) => void,
+  onEvent: (event: PiCloudEvent) => void,
 ): Promise<{ lastSequence: number; retryMs?: number }> {
   if (response.body === null) {
     throw new SessionStreamError("SSE response did not include a body", true);
@@ -153,11 +153,11 @@ async function consumeResponse(
         } catch {
           throw new SessionStreamError("SSE event contained malformed JSON", false);
         }
-        let event: AgentDockEvent;
+        let event: PiCloudEvent;
         try {
-          event = parseAgentDockEvent(value);
+          event = parsePiCloudEvent(value);
         } catch {
-          throw new SessionStreamError("SSE event violated the AgentDock contract", false);
+          throw new SessionStreamError("SSE event violated the PiCloud contract", false);
         }
         if (event.sessionId !== sessionId) {
           throw new SessionStreamError("SSE event belongs to a different session", false);

@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   MAX_WORKSPACE_TERMINAL_FRAME_BYTES,
   TOOL_BROKER_TERMINAL_PATH,
@@ -7,11 +7,8 @@ import {
   parseWorkspaceTerminalClientFrame,
   parseWorkspaceTerminalServerFrame,
   type WorkspaceTerminalOpenRequest,
-} from "@agent-dock/protocol";
-import {
-  createWorkspaceSnapshot,
-  encodeWorkspaceSnapshotBlob,
-} from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/protocol";
+import { createWorkspaceSnapshot, encodeWorkspaceSnapshotBlob } from "@pi-cloud/workspace-runtime";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Kysely } from "kysely";
 import { randomUUID } from "node:crypto";

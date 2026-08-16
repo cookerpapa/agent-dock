@@ -1,4 +1,4 @@
-import type { SupervisorRegisteredMessage } from "@agent-dock/protocol";
+import type { SupervisorRegisteredMessage } from "@pi-cloud/protocol";
 import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";
 import {
   SupervisorWebSocketClient,

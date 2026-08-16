@@ -59,14 +59,14 @@ describe("product authentication and empty Workspace migration", () => {
       await postgres.query(
         `insert into credential_bindings
           (id, tenant_id, provider, kind, secret_ref, version, status)
-         values ($1, $2, 'agent-dock-fake', 'brokered', 'fixture', 1, 'active')`,
+         values ($1, $2, 'pi-cloud-fake', 'brokered', 'fixture', 1, 'active')`,
         [binding, tenant],
       );
       await postgres.query(
         `insert into model_profiles
           (id, tenant_id, name, provider, model_id, default_thinking_level,
            allowed_thinking_levels, credential_binding_id, credential_binding_version)
-         values ($1, $2, 'default', 'agent-dock-fake', 'agent-dock-fake', 'off',
+         values ($1, $2, 'default', 'pi-cloud-fake', 'pi-cloud-fake', 'off',
                  array['off'], $3, 1)`,
         [profile, tenant, binding],
       );

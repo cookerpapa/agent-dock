@@ -30,7 +30,7 @@ by putting those values in JSON.
    requires an exact match between that authority, the wire payload, and the
    pre-provisioned row. The payload never creates an arbitrary sandbox or grants
    tenant authority.
-2. Registration enforces protocol version 1, the configured AgentDock
+2. Registration enforces protocol version 1, the configured PiCloud
    supervisor version, the pinned Pi package/version, required capabilities,
    and the pre-provisioned capacity. Only a `provisioning` sandbox can become
    `ready`; reconnect may preserve an existing `ready` or `leased` sandbox.
@@ -90,7 +90,7 @@ by putting those values in JSON.
 - Registration and heartbeat add small bounded writes per live supervisor, not
   per cold session.
 - Retirement can be retried safely, but an acknowledged in-flight turn still
-  becomes ambiguous `assignment_lost`; AgentDock does not claim exactly-once
+  becomes ambiguous `assignment_lost`; PiCloud does not claim exactly-once
   tool side effects.
 - A remote WebSocket transport, authenticated provisioner, and concrete
   Docker/Kubernetes owner-boundary adapter remain separate deployment slices.

@@ -1,4 +1,4 @@
-import { createDatabase, type TenantApiCredentialRole } from "@agent-dock/database";
+import { createDatabase, type TenantApiCredentialRole } from "@pi-cloud/database";
 import { pathToFileURL } from "node:url";
 import {
   createPrivateTenant,
@@ -185,7 +185,7 @@ export async function runTenantAdministration(
 const entrypoint = process.argv[1];
 if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
   runTenantAdministration(process.argv.slice(2)).catch(() => {
-    process.stderr.write("AgentDock tenant administration failed\n");
+    process.stderr.write("PiCloud tenant administration failed\n");
     process.exitCode = 1;
   });
 }

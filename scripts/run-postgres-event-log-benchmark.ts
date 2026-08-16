@@ -1,7 +1,7 @@
-import { createDatabase, runMigrations } from "@agent-dock/database";
-import type { EventPublishBatchMessage } from "@agent-dock/protocol";
-import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
-import { GroupedDurableEventIngestor } from "@agent-dock/runtime-core/grouped-durable-event-ingestor";
+import { createDatabase, runMigrations } from "@pi-cloud/database";
+import type { EventPublishBatchMessage } from "@pi-cloud/protocol";
+import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
+import { GroupedDurableEventIngestor } from "@pi-cloud/runtime-core/grouped-durable-event-ingestor";
 import { spawnSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -129,7 +129,7 @@ const outputJson = resolve(
   ),
 );
 const outputMarkdown = outputJson.replace(/\.json$/u, ".md");
-const containerName = `agent-dock-event-benchmark-${randomUUID()}`;
+const containerName = `pi-cloud-event-benchmark-${randomUUID()}`;
 const password = randomBytes(24).toString("base64url");
 let containerStarted = false;
 
@@ -146,7 +146,7 @@ try {
       "--env",
       `POSTGRES_PASSWORD=${password}`,
       "--env",
-      "POSTGRES_DB=agent_dock_event_benchmark",
+      "POSTGRES_DB=pi_cloud_event_benchmark",
       POSTGRES_IMAGE,
     ],
     "Starting isolated PostgreSQL",
@@ -155,7 +155,7 @@ try {
   const published = docker(["port", containerName, "5432/tcp"], "Resolving PostgreSQL port");
   const port = Number(/:([0-9]+)$/u.exec(published)?.[1]);
   if (!Number.isSafeInteger(port) || port < 1) throw new Error("Docker published port is invalid");
-  const connectionString = `postgresql://postgres:${password}@127.0.0.1:${String(port)}/agent_dock_event_benchmark`;
+  const connectionString = `postgresql://postgres:${password}@127.0.0.1:${String(port)}/pi_cloud_event_benchmark`;
   await waitForPostgres(connectionString);
   const database = createDatabase({ connectionString, maxConnections: 64 });
   try {
@@ -177,7 +177,7 @@ try {
       .values({
         id: credentialId,
         tenant_id: tenantId,
-        provider: "agent-dock-fake",
+        provider: "pi-cloud-fake",
         kind: "brokered",
         secret_ref: "broker://benchmark/fake",
         version: 1,
@@ -190,8 +190,8 @@ try {
         id: profileId,
         tenant_id: tenantId,
         name: "event-benchmark",
-        provider: "agent-dock-fake",
-        model_id: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        model_id: "pi-cloud-fake",
         default_thinking_level: "off",
         allowed_thinking_levels: ["off"],
         credential_binding_id: credentialId,
@@ -248,8 +248,8 @@ try {
       input_kind: "prompt" as const,
       input_text: "event-log capacity benchmark",
       model_profile_id: profileId,
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       thinking_level: "off" as const,
       credential_binding_id: credentialId,
       credential_binding_version: 1,
@@ -354,7 +354,7 @@ try {
       ackP95Ms <= maximumAckP95Ms &&
       eventsPerSecond >= minimumEventsPerSecond;
     const report = {
-      format: "agent-dock.postgres-event-log-capacity.v1",
+      format: "pi-cloud.postgres-event-log-capacity.v1",
       generatedAt: new Date().toISOString(),
       gitRevision: gitRevision(),
       database: { image: POSTGRES_IMAGE, partitions: 32, maxConnections: 64 },
@@ -397,7 +397,7 @@ try {
     const markdown =
       `# PostgreSQL durable event-log capacity\n\n` +
       `Generated: ${report.generatedAt}\n\n` +
-      `This test writes ${totalEvents.toLocaleString("en-US")} durable events for ${sessions.toLocaleString("en-US")} active Sessions through the real AgentDock DurableEventStore.\n\n` +
+      `This test writes ${totalEvents.toLocaleString("en-US")} durable events for ${sessions.toLocaleString("en-US")} active Sessions through the real PiCloud DurableEventStore.\n\n` +
       `- Result: ${passed ? "PASS" : "FAIL"}\n` +
       `- Throughput: ${report.result.eventsPerSecond.toLocaleString("en-US")} events/s\n` +
       `- Batch ACK p50/p95/p99: ${report.result.ackLatencyMs.p50} / ${report.result.ackLatencyMs.p95} / ${report.result.ackLatencyMs.p99} ms\n` +

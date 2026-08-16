@@ -6,7 +6,7 @@ import ChatApp from "../src/ChatApp.tsx";
 import { ConversationOutline } from "../src/ConversationOutline.tsx";
 import { ConversationTreeNavigator } from "../src/ConversationTreeNavigator.tsx";
 import { ConversationTurn, ToolActivity } from "../src/ConversationTurn.tsx";
-import { AgentDockApi } from "../src/api.ts";
+import { PiCloudApi } from "../src/api.ts";
 import type { TurnView } from "../src/session-view.ts";
 import { WorkspaceInspector } from "../src/WorkspaceInspector.tsx";
 
@@ -32,7 +32,7 @@ function turn(turnId: string, prompt: string): TurnView {
 describe("product chat experience", () => {
   it("restores a durable login without rendering the old operator console", () => {
     const markup = renderToStaticMarkup(<ChatApp />);
-    expect(markup).toContain("AgentDock");
+    expect(markup).toContain("PiCloud");
     expect(markup).toContain("正在恢复登录状态");
     expect(markup).not.toContain("PostgreSQL outbox");
     expect(markup).not.toContain("Configure tenant model credential");
@@ -41,7 +41,7 @@ describe("product chat experience", () => {
   it("renders familiar username/password login and registration without API-token fields", () => {
     const markup = renderToStaticMarkup(
       <AuthScreen
-        api={new AgentDockApi(async () => new Response(null, { status: 500 }))}
+        api={new PiCloudApi(async () => new Response(null, { status: 500 }))}
         onAuthenticated={() => undefined}
       />,
     );
@@ -56,7 +56,7 @@ describe("product chat experience", () => {
   it("renders platform configuration in a dedicated administrator page", () => {
     const markup = renderToStaticMarkup(
       <AdminPage
-        api={new AgentDockApi(async () => new Response(null, { status: 500 }))}
+        api={new PiCloudApi(async () => new Response(null, { status: 500 }))}
         identity={{
           tenantId: "10000000-0000-4000-8000-000000000001",
           tenantSlug: "platform",
@@ -68,7 +68,7 @@ describe("product chat experience", () => {
         onLogout={() => undefined}
       />,
     );
-    expect(markup).toContain("AgentDock 管理后台");
+    expect(markup).toContain("PiCloud 管理后台");
     expect(markup).toContain("Pi Worker 模型");
     expect(markup).toContain("CubeSandbox 公网代理");
     expect(markup).not.toContain("最近对话");
@@ -77,7 +77,7 @@ describe("product chat experience", () => {
   it("renders the Workspace as a directory without executing browser effects", () => {
     const markup = renderToStaticMarkup(
       <WorkspaceInspector
-        api={new AgentDockApi(async () => new Response(null, { status: 500 }))}
+        api={new PiCloudApi(async () => new Response(null, { status: 500 }))}
         onClose={() => undefined}
         onError={() => undefined}
         refreshSignal={0}

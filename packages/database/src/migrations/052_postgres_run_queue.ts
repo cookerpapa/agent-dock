@@ -52,12 +52,12 @@ export async function up(db: Kysely<Database>): Promise<void> {
     .execute();
 
   await sql`
-    create or replace function agent_dock_notify_run_queue()
+    create or replace function pi_cloud_notify_run_queue()
     returns trigger
     language plpgsql
     as $$
     begin
-      perform pg_notify('agent_dock_run_queue', new.id::text);
+      perform pg_notify('pi_cloud_run_queue', new.id::text);
       return new;
     end;
     $$
@@ -67,8 +67,8 @@ export async function up(db: Kysely<Database>): Promise<void> {
     create trigger outbox_notify_run_queue
     after insert on outbox
     for each row
-    when (new.topic in ('agent-dock.turn.command.v1', 'agent-dock.turn.cancellation.v1'))
-    execute function agent_dock_notify_run_queue()
+    when (new.topic in ('pi-cloud.turn.command.v1', 'pi-cloud.turn.cancellation.v1'))
+    execute function pi_cloud_notify_run_queue()
   `.execute(db);
 }
 

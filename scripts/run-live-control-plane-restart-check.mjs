@@ -6,13 +6,13 @@ import { mkdir, open, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
-import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
+import { PiCloudApi, PiCloudApiError, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-if (process.env.AGENT_DOCK_LIVE_CONTROL_PLANE_RESTART_CHECK !== "1") {
+if (process.env.PI_CLOUD_LIVE_CONTROL_PLANE_RESTART_CHECK !== "1") {
   throw new Error(
-    "Set AGENT_DOCK_LIVE_CONTROL_PLANE_RESTART_CHECK=1 to acknowledge a real model call and controlled Control Plane SIGKILL",
+    "Set PI_CLOUD_LIVE_CONTROL_PLANE_RESTART_CHECK=1 to acknowledge a real model call and controlled Control Plane SIGKILL",
   );
 }
 
@@ -31,7 +31,7 @@ async function readPrivate(path, maximumBytes, label) {
 
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 const environment = Object.fromEntries(
   (await readPrivate(resolve(runtimeDirectory, ".env"), 64 * 1_024, "Production environment"))
@@ -43,8 +43,8 @@ const environment = Object.fromEntries(
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
 );
-const bindAddress = environment.AGENT_DOCK_HTTP_BIND_ADDRESS;
-const port = environment.AGENT_DOCK_HTTP_PORT;
+const bindAddress = environment.PI_CLOUD_HTTP_BIND_ADDRESS;
+const port = environment.PI_CLOUD_HTTP_PORT;
 if (bindAddress === undefined || port === undefined) {
   throw new Error("Production HTTP endpoint configuration is missing");
 }
@@ -94,7 +94,7 @@ async function waitForCompletedRun(api, runId) {
         throw new Error(`Run ended as ${run.state}: ${JSON.stringify(run.failure ?? {})}`);
       }
     } catch (error) {
-      if (!(error instanceof AgentDockApiError) || error.status !== 0) throw error;
+      if (!(error instanceof PiCloudApiError) || error.status !== 0) throw error;
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
   }
@@ -120,7 +120,7 @@ if (
   throw new Error(`Registration failed with HTTP ${String(registrationResponse.status)}`);
 }
 
-const api = new AgentDockApi(fetchFromProduction, registration.apiToken);
+const api = new PiCloudApi(fetchFromProduction, registration.apiToken);
 const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production restart check requires a real model");
 const project = await api.createProject(`Control Plane restart ${suffix}`);

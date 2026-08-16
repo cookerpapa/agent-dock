@@ -62,9 +62,9 @@ beforeAll(async () => {
   await server.start();
   model = {
     id: FAKE_MODEL_ID,
-    name: "AgentDock deterministic fake",
+    name: "PiCloud deterministic fake",
     api: "openai-completions",
-    provider: "agent-dock-fake",
+    provider: "pi-cloud-fake",
     baseUrl: server.baseUrl,
     reasoning: false,
     input: ["text"],
@@ -93,7 +93,7 @@ function optionsFor(
   return {
     apiKey: FAKE_MODEL_API_KEY,
     cacheRetention: "none",
-    headers: { "x-agent-dock-scenario": scenario },
+    headers: { "x-pi-cloud-scenario": scenario },
     maxRetries: 0,
     timeoutMs: 1_000,
     ...overrides,
@@ -126,8 +126,8 @@ describe("pinned Pi OpenAI adapter contract", () => {
       "done",
     ]);
     expect(result.stopReason).toBe("stop");
-    expect(result.responseId).toMatch(/^chatcmpl-agentdock-/);
-    expect(result.content).toEqual([{ type: "text", text: "AgentDock fake stream OK." }]);
+    expect(result.responseId).toMatch(/^chatcmpl-picloud-/);
+    expect(result.content).toEqual([{ type: "text", text: "PiCloud fake stream OK." }]);
     expect(result.usage).toMatchObject({
       input: 10,
       output: 5,
@@ -147,7 +147,7 @@ describe("pinned Pi OpenAI adapter contract", () => {
     expect(first.content).toEqual([
       {
         type: "toolCall",
-        id: "call_agentdock_001",
+        id: "call_picloud_001",
         name: "inspect_workspace",
         arguments: { path: "src" },
       },
@@ -218,7 +218,7 @@ describe("pinned Pi OpenAI adapter contract", () => {
     expect(assistant.content).toEqual([
       {
         type: "toolCall",
-        id: "call_agentdock_cancellation_hold",
+        id: "call_picloud_cancellation_hold",
         name: "bash",
         arguments: { command: "exec sleep 300", timeout: 300 },
       },
@@ -229,7 +229,7 @@ describe("pinned Pi OpenAI adapter contract", () => {
     const messages: Context["messages"] = [
       {
         role: "user",
-        content: "agent-dock-eval://factorial\nRepair factorial and run its focused test.",
+        content: "pi-cloud-eval://factorial\nRepair factorial and run its focused test.",
         timestamp: 1_700_000_000_000,
       },
     ];

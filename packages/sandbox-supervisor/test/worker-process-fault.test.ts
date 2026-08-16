@@ -1,4 +1,4 @@
-import type { EventPublishMessage } from "@agent-dock/protocol";
+import type { EventPublishMessage } from "@pi-cloud/protocol";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -42,7 +42,7 @@ function waitForDurableAppend(child: ChildProcessWithoutNullStreams): Promise<vo
 
 describe("Worker process fault boundary", () => {
   it("recovers a browser-visible event whose producing Worker was SIGKILLed after WAL fsync", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "agent-dock-worker-process-fault-"));
+    const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-worker-process-fault-"));
     roots.push(root);
     const child = spawn(
       process.execPath,

@@ -10,7 +10,7 @@ import {
   type SteerTurnCommandMessage,
   type SupervisorHeartbeatAckMessage,
   type SupervisorHeartbeatMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { isDeepStrictEqual } from "node:util";
 import {
   EventSpoolError,
@@ -807,7 +807,7 @@ export class LocalSandboxSupervisor {
       return;
     }
     const cancellationSignal: PiCancellationSignal = {
-      kind: "agent-dock.turn-cancellation",
+      kind: "pi-cloud.turn-cancellation",
       reason: "lease_revoked",
       gracePeriodMs: 0,
     };
@@ -835,7 +835,7 @@ export class LocalSandboxSupervisor {
     cancellation.state = "running";
     assignment.state = "cancelling";
     const cancellationSignal: PiCancellationSignal = {
-      kind: "agent-dock.turn-cancellation",
+      kind: "pi-cloud.turn-cancellation",
       reason: cancellation.command.payload.reason,
       gracePeriodMs: cancellation.command.payload.gracePeriodMs ?? 1_000,
     };

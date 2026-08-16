@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type { Session } from "@earendil-works/pi-agent-core";
 import type { Kysely } from "kysely";
 import { PostgresRunExecutionAuthority } from "./postgres-execution-authority.ts";

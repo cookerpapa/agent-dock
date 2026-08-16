@@ -41,14 +41,14 @@ async function fixture(): Promise<PGlite> {
   await postgres.query(
     `insert into credential_bindings
        (id, tenant_id, provider, kind, secret_ref, version, status)
-     values ($1, $2, 'agent-dock-fake', 'brokered', 'fixture', 1, 'active')`,
+     values ($1, $2, 'pi-cloud-fake', 'brokered', 'fixture', 1, 'active')`,
     [IDS.credential, IDS.tenant],
   );
   await postgres.query(
     `insert into model_profiles
        (id, tenant_id, name, provider, model_id, default_thinking_level,
         allowed_thinking_levels, credential_binding_id, credential_binding_version)
-     values ($1, $2, 'default', 'agent-dock-fake', 'agent-dock-fake', 'off',
+     values ($1, $2, 'default', 'pi-cloud-fake', 'pi-cloud-fake', 'off',
              array['off'], $3, 1)`,
     [IDS.profile, IDS.tenant, IDS.credential],
   );
@@ -64,7 +64,7 @@ async function fixture(): Promise<PGlite> {
         provider, model_id, thinking_level, credential_binding_id,
         credential_binding_version, stop_reason, started_at, settled_at)
      values ($1, $2, $3, 'completed', 'prompt', 'repair', $4,
-             'agent-dock-fake', 'agent-dock-fake', 'off', $5, 1,
+             'pi-cloud-fake', 'pi-cloud-fake', 'off', $5, 1,
              'stop', now() - interval '1 second', now())`,
     [IDS.turn, IDS.tenant, IDS.session, IDS.profile, IDS.credential],
   );
@@ -130,7 +130,7 @@ describe("durable runs and attempts migration", () => {
            (id, tenant_id, session_id, state, input_kind, input_text, model_profile_id,
             provider, model_id, thinking_level, credential_binding_id, credential_binding_version)
          values ($1, $2, $3, 'queued', 'prompt', 'second', $4,
-                 'agent-dock-fake', 'agent-dock-fake', 'off', $5, 1)`,
+                 'pi-cloud-fake', 'pi-cloud-fake', 'off', $5, 1)`,
         [IDS.turn2, IDS.tenant, IDS.session, IDS.profile, IDS.credential],
       );
       await postgres.query(

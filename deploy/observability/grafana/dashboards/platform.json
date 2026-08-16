@@ -11,14 +11,14 @@
       "title": "Active runs",
       "id": 1,
       "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
-      "targets": [{ "expr": "sum(agent_dock_active_runs)", "refId": "A" }]
+      "targets": [{ "expr": "sum(pi_cloud_active_runs)", "refId": "A" }]
     },
     {
       "type": "stat",
       "title": "Queued runs",
       "id": 2,
       "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
-      "targets": [{ "expr": "max(agent_dock_queued_runs)", "refId": "A" }]
+      "targets": [{ "expr": "max(pi_cloud_queued_runs)", "refId": "A" }]
     },
     {
       "type": "stat",
@@ -28,7 +28,7 @@
       "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
       "targets": [
         {
-          "expr": "sum(increase(agent_dock_runs_total{outcome=\"completed\"}[1h])) / clamp_min(sum(increase(agent_dock_runs_total[1h])), 1)",
+          "expr": "sum(increase(pi_cloud_runs_total{outcome=\"completed\"}[1h])) / clamp_min(sum(increase(pi_cloud_runs_total[1h])), 1)",
           "refId": "A"
         }
       ]
@@ -41,7 +41,7 @@
       "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 6 }, "overrides": [] },
       "targets": [
         {
-          "expr": "sum(increase(agent_dock_model_cost_microusd_total[24h])) / 1000000",
+          "expr": "sum(increase(pi_cloud_model_cost_microusd_total[24h])) / 1000000",
           "refId": "A"
         }
       ]
@@ -53,7 +53,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(agent_dock_runs_total[5m]))",
+          "expr": "sum by (outcome) (rate(pi_cloud_runs_total[5m]))",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -67,12 +67,12 @@
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_dock_queue_wait_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pi_cloud_queue_wait_seconds_bucket[5m])))",
           "legendFormat": "queue p95",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(agent_dock_run_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(pi_cloud_run_duration_seconds_bucket[5m])))",
           "legendFormat": "run p95",
           "refId": "B"
         }
@@ -86,7 +86,7 @@
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(agent_dock_model_request_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(pi_cloud_model_request_seconds_bucket[5m])))",
           "legendFormat": "{{model}}",
           "refId": "A"
         }
@@ -100,7 +100,7 @@
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(agent_dock_sandbox_operation_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(pi_cloud_sandbox_operation_seconds_bucket[5m])))",
           "legendFormat": "{{operation}}",
           "refId": "A"
         }
@@ -113,7 +113,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
       "targets": [
         {
-          "expr": "sum by (kind, model) (rate(agent_dock_model_tokens_total[5m]))",
+          "expr": "sum by (kind, model) (rate(pi_cloud_model_tokens_total[5m]))",
           "legendFormat": "{{model}} {{kind}}",
           "refId": "A"
         }
@@ -126,7 +126,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
       "targets": [
         {
-          "expr": "sum by (tool) (rate(agent_dock_tool_duration_seconds_count{outcome=\"failed\"}[5m]))",
+          "expr": "sum by (tool) (rate(pi_cloud_tool_duration_seconds_count{outcome=\"failed\"}[5m]))",
           "legendFormat": "{{tool}}",
           "refId": "A"
         }
@@ -139,7 +139,7 @@
       "gridPos": { "h": 5, "w": 12, "x": 0, "y": 29 },
       "targets": [
         {
-          "expr": "sum(agent_dock_sandbox_active{provider=\"cubesandbox\"})",
+          "expr": "sum(pi_cloud_sandbox_active{provider=\"cubesandbox\"})",
           "refId": "A"
         }
       ]
@@ -151,7 +151,7 @@
       "gridPos": { "h": 5, "w": 12, "x": 12, "y": 29 },
       "targets": [
         {
-          "expr": "sum(agent_dock_sandbox_prewarm{provider=\"cubesandbox\"})",
+          "expr": "sum(pi_cloud_sandbox_prewarm{provider=\"cubesandbox\"})",
           "refId": "A"
         }
       ]
@@ -163,12 +163,12 @@
       "gridPos": { "h": 5, "w": 8, "x": 0, "y": 34 },
       "targets": [
         {
-          "expr": "sum(agent_dock_workspace_volume_gateway_active)",
+          "expr": "sum(pi_cloud_workspace_volume_gateway_active)",
           "legendFormat": "active",
           "refId": "A"
         },
         {
-          "expr": "sum(agent_dock_workspace_volume_gateway_limit)",
+          "expr": "sum(pi_cloud_workspace_volume_gateway_limit)",
           "legendFormat": "limit",
           "refId": "B"
         }
@@ -181,7 +181,7 @@
       "gridPos": { "h": 5, "w": 8, "x": 8, "y": 34 },
       "targets": [
         {
-          "expr": "sum(agent_dock_workspace_volume_gateway_waiting)",
+          "expr": "sum(pi_cloud_workspace_volume_gateway_waiting)",
           "refId": "A"
         }
       ]
@@ -193,12 +193,12 @@
       "gridPos": { "h": 5, "w": 8, "x": 16, "y": 34 },
       "targets": [
         {
-          "expr": "sum by (reason) (rate(agent_dock_sandbox_admission_rejected_total[5m]))",
+          "expr": "sum by (reason) (rate(pi_cloud_sandbox_admission_rejected_total[5m]))",
           "legendFormat": "Sandbox {{reason}}",
           "refId": "A"
         },
         {
-          "expr": "sum by (reason) (rate(agent_dock_workspace_volume_gateway_rejected_total[5m]))",
+          "expr": "sum by (reason) (rate(pi_cloud_workspace_volume_gateway_rejected_total[5m]))",
           "legendFormat": "Volume Gateway {{reason}}",
           "refId": "B"
         }
@@ -212,12 +212,12 @@
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(agent_dock_workspace_volume_gateway_queue_wait_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(pi_cloud_workspace_volume_gateway_queue_wait_seconds_bucket[5m])))",
           "legendFormat": "{{operation}} queue",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(agent_dock_workspace_volume_gateway_operation_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(pi_cloud_workspace_volume_gateway_operation_seconds_bucket[5m])))",
           "legendFormat": "{{operation}} execution",
           "refId": "B"
         }
@@ -226,11 +226,11 @@
   ],
   "refresh": "10s",
   "schemaVersion": 41,
-  "tags": ["agent-dock", "coding-agent"],
+  "tags": ["pi-cloud", "coding-agent"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "timezone": "browser",
-  "title": "AgentDock Platform",
-  "uid": "agent-dock-platform",
+  "title": "PiCloud Platform",
+  "uid": "pi-cloud-platform",
   "version": 1
 }

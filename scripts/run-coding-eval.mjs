@@ -25,7 +25,7 @@ if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 32) {
 }
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 const tokenFile = resolve(argument("--token-file", resolve(runtimeDirectory, "secrets/api-token")));
 const outputJson = resolve(
@@ -43,7 +43,7 @@ if (usePublicRegistration) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       tenantSlug: registeredTenantSlug,
-      displayName: "AgentDock Coding Evaluation",
+      displayName: "PiCloud Coding Evaluation",
     }),
   });
   const body = await response.json();
@@ -60,7 +60,7 @@ if (token.length < 32 || token.length > 512 || /[\x00-\x20\x7f]/.test(token)) {
 const manifest = JSON.parse(
   await readFile(resolve(repositoryRoot, "eval/coding-tasks.json"), "utf8"),
 );
-assert.equal(manifest.format, "agent-dock.coding-eval.v1");
+assert.equal(manifest.format, "pi-cloud.coding-eval.v1");
 assert.equal(manifest.tasks.length, 10);
 
 async function request(path, options = {}, expectedStatus = 200) {
@@ -186,7 +186,7 @@ const successful = results.filter((result) => result.success).length;
 const durations = results.map((result) => result.durationMs).sort((left, right) => left - right);
 const percentile = (fraction) => durations[Math.max(0, Math.ceil(durations.length * fraction) - 1)];
 const report = {
-  format: "agent-dock.coding-eval-report.v1",
+  format: "pi-cloud.coding-eval-report.v1",
   generatedAt: new Date().toISOString(),
   evaluationId,
   ...(registeredTenantSlug === undefined ? {} : { tenantSlug: registeredTenantSlug }),
@@ -201,7 +201,7 @@ const report = {
   results,
 };
 const markdown =
-  `# AgentDock deterministic coding evaluation\n\n` +
+  `# PiCloud deterministic coding evaluation\n\n` +
   `Generated: ${report.generatedAt}\n\n` +
   `This measures the full durable Agent Loop and isolated tool execution with a scripted fake model. It does **not** claim model-intelligence quality.\n\n` +
   `- Tasks: ${report.taskCount}\n` +

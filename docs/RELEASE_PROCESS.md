@@ -1,6 +1,6 @@
 # Release evidence process
 
-AgentDock's supported release process binds a clean Git revision to six
+PiCloud's supported release process binds a clean Git revision to six
 application images and the three images owned by its CubeSandbox execution
 plane, plus machine-readable dependency/security evidence. It does not
 currently push, sign, or publish images; registry policy and signing need a
@@ -26,18 +26,18 @@ Build all production images with the version. The Compose wrapper derives the
 full lowercase Git revision and passes both values as OCI labels:
 
 ```bash
-AGENT_DOCK_IMAGE_VERSION=0.1.0 npm run production:build
+PI_CLOUD_IMAGE_VERSION=0.1.0 npm run production:build
 ```
 
 Generate evidence into an absent or empty path:
 
 ```bash
-AGENT_DOCK_IMAGE_VERSION=0.1.0 npm run release:evidence -- \
+PI_CLOUD_IMAGE_VERSION=0.1.0 npm run release:evidence -- \
   --output-dir dist/release-evidence-0.1.0
 ```
 
 The first Trivy invocation may download a large vulnerability database. Its
-cache defaults to `.cache/agent-dock-trivy` and is not release evidence. An
+cache defaults to `.cache/pi-cloud-trivy` and is not release evidence. An
 operator may select another private cache with `--cache-dir`.
 
 ## Evidence layout
@@ -46,7 +46,7 @@ operator may select another private cache with `--cache-dir`.
 manifest.json
 SHA256SUMS
 .trivyignore.yaml
-agent-dock-root.cdx.json
+pi-cloud-root.cdx.json
 images/control-plane.cdx.json
 images/control-plane.vulnerabilities.json
 images/control-plane.policy-vulnerabilities.json

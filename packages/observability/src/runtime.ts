@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { AgentDockMetrics } from "./metrics.ts";
+import { PiCloudMetrics } from "./metrics.ts";
 import { startMetricsEndpoint, type MetricsEndpoint } from "./metrics-server.ts";
 import { initializeTelemetry, type TelemetryRuntime } from "./trace.ts";
 
 export type ServiceObservability = Readonly<{
-  metrics: AgentDockMetrics;
+  metrics: PiCloudMetrics;
   tracesExported: boolean;
   metricsPort?: number;
   close(): Promise<void>;
@@ -21,13 +21,13 @@ function port(value: string | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 65_535) {
-    throw new TypeError("AGENT_DOCK_METRICS_PORT is invalid");
+    throw new TypeError("PI_CLOUD_METRICS_PORT is invalid");
   }
   return parsed;
 }
 
 async function metricsToken(environment: NodeJS.ProcessEnv): Promise<string | undefined> {
-  const path = optionalEnvironment(environment, "AGENT_DOCK_METRICS_TOKEN_FILE");
+  const path = optionalEnvironment(environment, "PI_CLOUD_METRICS_TOKEN_FILE");
   if (path === undefined) return undefined;
   const token = (await readFile(path, "utf8")).trim();
   if (token.length < 32 || token.length > 512 || /[\x00-\x1f\x7f]/.test(token)) {
@@ -42,8 +42,8 @@ export async function startServiceObservability(options: {
   environment?: NodeJS.ProcessEnv;
 }): Promise<ServiceObservability> {
   const environment = options.environment ?? process.env;
-  const metrics = new AgentDockMetrics(options.serviceName, true);
-  const traceEndpoint = optionalEnvironment(environment, "AGENT_DOCK_OTLP_TRACES_ENDPOINT");
+  const metrics = new PiCloudMetrics(options.serviceName, true);
+  const traceEndpoint = optionalEnvironment(environment, "PI_CLOUD_OTLP_TRACES_ENDPOINT");
   const telemetry: TelemetryRuntime = await initializeTelemetry({
     serviceName: options.serviceName,
     ...(traceEndpoint === undefined ? {} : { endpoint: traceEndpoint }),
@@ -53,9 +53,9 @@ export async function startServiceObservability(options: {
     const token = await metricsToken(environment);
     if (token !== undefined) {
       endpoint = await startMetricsEndpoint({
-        host: optionalEnvironment(environment, "AGENT_DOCK_METRICS_HOST") ?? "0.0.0.0",
+        host: optionalEnvironment(environment, "PI_CLOUD_METRICS_HOST") ?? "0.0.0.0",
         port: port(
-          optionalEnvironment(environment, "AGENT_DOCK_METRICS_PORT"),
+          optionalEnvironment(environment, "PI_CLOUD_METRICS_PORT"),
           options.defaultMetricsPort,
         ),
         token,

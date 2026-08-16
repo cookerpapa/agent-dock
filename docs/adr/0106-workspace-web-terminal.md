@@ -6,7 +6,7 @@ Accepted on 2026-08-15.
 
 ## Context
 
-AgentDock Workspaces are durable POSIX directories mounted into disposable
+PiCloud Workspaces are durable POSIX directories mounted into disposable
 CubeSandbox KVM guests. Users can inspect committed files in the Web UI, but
 cannot interactively inspect or operate the live Workspace without asking the
 Agent to run a Tool. Exposing SSH or Cube's native data endpoint directly would
@@ -14,10 +14,10 @@ leak runtime identity and ingress credentials into the browser, bypass tenant
 authorization, and allow a human shell to race an Agent Tool execution against
 the same writable Workspace.
 
-CubeSandbox v0.6.0 exposes an envd PTY API on port 49983, but AgentDock
+CubeSandbox v0.6.0 exposes an envd PTY API on port 49983, but PiCloud
 intentionally removes envd from its Tool image. Re-enabling it would add a
-second mutable command channel that does not enforce AgentDock's handoff secret
-and fencing token. AgentDock's root-owned Cube Tool Service already owns the
+second mutable command channel that does not enforce PiCloud's handoff secret
+and fencing token. PiCloud's root-owned Cube Tool Service already owns the
 authenticated private data-plane boundary and can allocate a guest PTY for an
 unprivileged process.
 
@@ -71,5 +71,5 @@ unprivileged process.
 The Tool Service uses `script(1)` from the immutable Cube image to allocate the
 guest PTY and runs the login shell as UID/GID 1000. Every control request must
 present the current activation handoff authority. Cube's upstream PTY API was
-reviewed for behavior, but envd is deliberately not part of AgentDock's
+reviewed for behavior, but envd is deliberately not part of PiCloud's
 production runtime boundary.

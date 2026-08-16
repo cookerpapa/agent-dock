@@ -1,4 +1,4 @@
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import type {
@@ -12,7 +12,7 @@ import type {
   TenantRegistrationResource,
   WorkspaceListResource,
   WorkspaceDeletionResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
 import type { Kysely } from "kysely";

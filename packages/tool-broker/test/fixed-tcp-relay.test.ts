@@ -60,8 +60,8 @@ describe("fixed TCP relay", () => {
   it("rejects unbounded or ambiguous environment configuration", () => {
     expect(
       loadFixedTcpRelayOptions({
-        AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST: "cube-control.internal",
-        AGENT_DOCK_FIXED_RELAY_UPSTREAM_PORT: "3000",
+        PI_CLOUD_FIXED_RELAY_UPSTREAM_HOST: "cube-control.internal",
+        PI_CLOUD_FIXED_RELAY_UPSTREAM_PORT: "3000",
       }),
     ).toMatchObject({
       upstreamHost: "cube-control.internal",
@@ -69,13 +69,13 @@ describe("fixed TCP relay", () => {
     });
     expect(() =>
       loadFixedTcpRelayOptions({
-        AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST: "https://cube.invalid",
+        PI_CLOUD_FIXED_RELAY_UPSTREAM_HOST: "https://cube.invalid",
       }),
     ).toThrow(/UPSTREAM_HOST/);
     expect(() =>
       loadFixedTcpRelayOptions({
-        AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST: "cube.internal",
-        AGENT_DOCK_FIXED_RELAY_MAXIMUM_CONNECTIONS: "1000",
+        PI_CLOUD_FIXED_RELAY_UPSTREAM_HOST: "cube.internal",
+        PI_CLOUD_FIXED_RELAY_MAXIMUM_CONNECTIONS: "1000",
       }),
     ).toThrow(/numeric/);
   });

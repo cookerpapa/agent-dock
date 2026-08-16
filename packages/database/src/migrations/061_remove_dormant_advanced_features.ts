@@ -13,11 +13,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     drop trigger if exists orchestration_acceptance_results_immutable
     on orchestration_acceptance_results
   `.execute(db);
-  await sql`drop function if exists agent_dock_reject_orchestration_acceptance_mutation()`.execute(
+  await sql`drop function if exists pi_cloud_reject_orchestration_acceptance_mutation()`.execute(
     db,
   );
   await sql`drop trigger if exists review_bundles_immutable on review_bundles`.execute(db);
-  await sql`drop function if exists agent_dock_reject_review_bundle_mutation()`.execute(db);
+  await sql`drop function if exists pi_cloud_reject_review_bundle_mutation()`.execute(db);
 
   await db.schema.dropTable("candidate_promotions").ifExists().execute();
   await db.schema.dropTable("orchestration_decision_gates").ifExists().execute();

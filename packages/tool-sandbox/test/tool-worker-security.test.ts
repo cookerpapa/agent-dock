@@ -5,7 +5,7 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   type EnvironmentRecipe,
   type EnvironmentRuntimeSnapshot,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -37,7 +37,7 @@ function recipeEnvironment(recipe: EnvironmentRecipe): EnvironmentRuntimeSnapsho
   return {
     environmentVersionId: "10000000-0000-4000-8000-000000000001",
     versionNumber: 2,
-    profileKey: "agent-dock-fullstack",
+    profileKey: "pi-cloud-fullstack",
     profileVersion: "1",
     imageRevision: "expected-revision",
     specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -82,14 +82,14 @@ describe("credential-free Tool Sandbox worker", () => {
   });
 
   it("constructs a fixed subprocess environment without inheriting trusted credentials", () => {
-    process.env.AGENT_DOCK_RUNTIME_API_KEY = "admg_should-never-cross";
-    process.env.AGENT_DOCK_TOOL_BROKER_TOKEN = "manager-should-never-cross";
+    process.env.PI_CLOUD_RUNTIME_API_KEY = "admg_should-never-cross";
+    process.env.PI_CLOUD_TOOL_BROKER_TOKEN = "manager-should-never-cross";
     process.env.DATABASE_URL = "postgresql://should-never-cross";
     try {
       const environment = safeToolEnvironment();
       expect(environment).toEqual({
         PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        HOME: "/tmp/agent-dock-tool-home",
+        HOME: "/tmp/pi-cloud-tool-home",
         LANG: "C.UTF-8",
         LC_ALL: "C.UTF-8",
         GIT_CONFIG_NOSYSTEM: "1",
@@ -102,8 +102,8 @@ describe("credential-free Tool Sandbox worker", () => {
       });
       expect(JSON.stringify(environment)).not.toMatch(/admg_|manager-should|postgresql:/);
     } finally {
-      delete process.env.AGENT_DOCK_RUNTIME_API_KEY;
-      delete process.env.AGENT_DOCK_TOOL_BROKER_TOKEN;
+      delete process.env.PI_CLOUD_RUNTIME_API_KEY;
+      delete process.env.PI_CLOUD_TOOL_BROKER_TOKEN;
       delete process.env.DATABASE_URL;
     }
   });
@@ -138,13 +138,13 @@ describe("credential-free Tool Sandbox worker", () => {
     for (const path of ["../etc/passwd", "/etc/passwd", "src\\escape", "bad\0path"]) {
       expect(() => resolveToolWorkspacePath(path)).toThrow(ToolWorkerError);
     }
-    expect(resolveToolWorkspacePath(".agent-dock-runtime/user-file")).toBe(
-      "/workspace/.agent-dock-runtime/user-file",
+    expect(resolveToolWorkspacePath(".pi-cloud-runtime/user-file")).toBe(
+      "/workspace/.pi-cloud-runtime/user-file",
     );
   });
 
   it("reads bounded line ranges without loading a large source file into Tool RPC", async () => {
-    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-ranged-read-"));
+    const workspace = await mkdtemp(resolve(tmpdir(), "pi-cloud-ranged-read-"));
     try {
       await writeFile(
         resolve(workspace, "large.txt"),
@@ -172,7 +172,7 @@ describe("credential-free Tool Sandbox worker", () => {
   });
 
   it("atomically replaces an expected file revision and rejects stale edits", async () => {
-    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-atomic-edit-"));
+    const workspace = await mkdtemp(resolve(tmpdir(), "pi-cloud-atomic-edit-"));
     try {
       await writeFile(resolve(workspace, "source.ts"), "export const value = 1;\n");
       const original = await readWorkspaceFile("source.ts", workspace);
@@ -202,7 +202,7 @@ describe("credential-free Tool Sandbox worker", () => {
   });
 
   it("accepts a restored non-Git workspace root and rejects a linked mount root", async () => {
-    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-attached-workspace-"));
+    const workspace = await mkdtemp(resolve(tmpdir(), "pi-cloud-attached-workspace-"));
     const linkedWorkspace = `${workspace}-link`;
     try {
       await mkdir(resolve(workspace, "nested-repository"));
@@ -228,7 +228,7 @@ describe("credential-free Tool Sandbox worker", () => {
         {
           environmentVersionId: "10000000-0000-4000-8000-000000000001",
           versionNumber: 1,
-          profileKey: "agent-dock-fullstack",
+          profileKey: "pi-cloud-fullstack",
           profileVersion: "1",
           imageRevision: "expected-revision",
           specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -241,7 +241,7 @@ describe("credential-free Tool Sandbox worker", () => {
   });
 
   it("runs a bounded setup and verification recipe without persisting raw command output", async () => {
-    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-environment-recipe-"));
+    const workspace = await mkdtemp(resolve(tmpdir(), "pi-cloud-environment-recipe-"));
     const recipe: EnvironmentRecipe = {
       schemaVersion: 1,
       setupCommands: [
@@ -278,7 +278,7 @@ describe("credential-free Tool Sandbox worker", () => {
   });
 
   it("fails closed when a recipe asks for dependency network before an egress policy exists", async () => {
-    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-environment-network-"));
+    const workspace = await mkdtemp(resolve(tmpdir(), "pi-cloud-environment-network-"));
     const recipe: EnvironmentRecipe = {
       schemaVersion: 1,
       dependencyHosts: ["registry.npmjs.org"],
@@ -314,7 +314,7 @@ describe("credential-free Tool Sandbox worker", () => {
   });
 
   it("injects an ephemeral proxy only into dependency recipe commands", async () => {
-    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-environment-proxy-"));
+    const workspace = await mkdtemp(resolve(tmpdir(), "pi-cloud-environment-proxy-"));
     const recipe: EnvironmentRecipe = {
       schemaVersion: 1,
       dependencyHosts: ["registry.npmjs.org"],
@@ -370,7 +370,7 @@ describe("credential-free Tool Sandbox worker", () => {
   });
 
   it("kills detached recipe descendants before the temporary network authority can outlive setup", async () => {
-    const workspace = await mkdtemp(resolve(tmpdir(), "agent-dock-environment-descendant-"));
+    const workspace = await mkdtemp(resolve(tmpdir(), "pi-cloud-environment-descendant-"));
     const recipe: EnvironmentRecipe = {
       schemaVersion: 1,
       setupCommands: [

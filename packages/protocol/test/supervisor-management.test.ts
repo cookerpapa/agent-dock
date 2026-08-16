@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  AgentDockInternalProtocolError,
+  PiCloudInternalProtocolError,
   parseSupervisorBootProvisionRequest,
   parseSupervisorManagementRequest,
   parseSupervisorManagementResponse,
@@ -47,13 +47,13 @@ describe("Supervisor internal management protocol", () => {
         managementBaseUrl: "http://supervisor-host-1:4100",
         ownerUrl: "http://attacker.invalid",
       }),
-    ).toThrow(AgentDockInternalProtocolError);
+    ).toThrow(PiCloudInternalProtocolError);
   });
 
   it("round-trips exact assignment management identity", () => {
     const assignment = {
       containerId: "66666666-6666-4666-8666-666666666666",
-      containerName: "agent-dock-test",
+      containerName: "pi-cloud-test",
       supervisorId: "supervisor-host-1",
       bootId: IDS.boot,
       sandboxId: IDS.sandbox,

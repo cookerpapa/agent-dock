@@ -47,7 +47,7 @@ export class CubeEgressConfigurationPoller {
   async #refresh(): Promise<void> {
     const response = await fetch(this.#controlPlaneUrl, {
       method: "GET",
-      headers: { "x-agent-dock-internal-token": this.#serviceToken },
+      headers: { "x-pi-cloud-internal-token": this.#serviceToken },
       signal: AbortSignal.any([this.#abort.signal, AbortSignal.timeout(5_000)]),
     });
     if (!response.ok) {

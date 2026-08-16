@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  AgentDockWireProtocolError,
-  createAgentDockEventFactory,
+  PiCloudWireProtocolError,
+  createPiCloudEventFactory,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
@@ -57,8 +57,8 @@ function commandIdentity() {
 function modelSnapshot() {
   return {
     profileId: "profile-1",
-    provider: "agent-dock-fake",
-    modelId: "agent-dock-fake",
+    provider: "pi-cloud-fake",
+    modelId: "pi-cloud-fake",
     thinkingLevel: "off",
     credentialBindingId: "credential-binding-1",
     credentialBindingVersion: 3,
@@ -140,7 +140,7 @@ describe("supervisor/control-plane wire protocol", () => {
     const message = registration();
 
     expect(parseSupervisorToControlMessage(message)).toEqual(message);
-    expect(() => parseControlToSupervisorMessage(message)).toThrow(AgentDockWireProtocolError);
+    expect(() => parseControlToSupervisorMessage(message)).toThrow(PiCloudWireProtocolError);
   });
 
   it("requires registration to advertise the envelope protocol version", () => {
@@ -161,7 +161,7 @@ describe("supervisor/control-plane wire protocol", () => {
         ...message,
         payload,
       }),
-    ).toThrow(AgentDockWireProtocolError);
+    ).toThrow(PiCloudWireProtocolError);
   });
 
   it("parses each control-plane command and rejects unreviewed fields", () => {
@@ -235,13 +235,13 @@ describe("supervisor/control-plane wire protocol", () => {
           },
         },
       }),
-    ).toThrow(AgentDockWireProtocolError);
+    ).toThrow(PiCloudWireProtocolError);
     expect(() =>
       parseControlToSupervisorMessage({
         ...execute,
         payload: { ...execute.payload, rawPiCommand: { type: "prompt" } },
       }),
-    ).toThrow(AgentDockWireProtocolError);
+    ).toThrow(PiCloudWireProtocolError);
     expect(() =>
       parseControlToSupervisorMessage({
         ...execute,
@@ -250,11 +250,11 @@ describe("supervisor/control-plane wire protocol", () => {
           model: { ...execute.payload.model, apiKey: "must-not-cross-the-wire" },
         },
       }),
-    ).toThrow(AgentDockWireProtocolError);
+    ).toThrow(PiCloudWireProtocolError);
   });
 
-  it("wraps only validated AgentDock events and keeps publication direction explicit", () => {
-    const eventFactory = createAgentDockEventFactory(
+  it("wraps only validated PiCloud events and keeps publication direction explicit", () => {
+    const eventFactory = createPiCloudEventFactory(
       { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
       {
         clock: () => new Date(SENT_AT),
@@ -277,7 +277,7 @@ describe("supervisor/control-plane wire protocol", () => {
     } as const;
 
     expect(parseSupervisorToControlMessage(publish)).toEqual(publish);
-    expect(() => parseControlToSupervisorMessage(publish)).toThrow(AgentDockWireProtocolError);
+    expect(() => parseControlToSupervisorMessage(publish)).toThrow(PiCloudWireProtocolError);
     expect(() =>
       parseSupervisorToControlMessage({
         ...publish,
@@ -286,7 +286,7 @@ describe("supervisor/control-plane wire protocol", () => {
           event: { ...event, rawPiEvent: { type: "message_update" } },
         },
       }),
-    ).toThrow(AgentDockWireProtocolError);
+    ).toThrow(PiCloudWireProtocolError);
   });
 
   it("returns a closed permanent rejection without pretending the event was acknowledged", () => {
@@ -304,13 +304,13 @@ describe("supervisor/control-plane wire protocol", () => {
     } as const;
 
     expect(parseControlToSupervisorMessage(rejected)).toEqual(rejected);
-    expect(() => parseSupervisorToControlMessage(rejected)).toThrow(AgentDockWireProtocolError);
+    expect(() => parseSupervisorToControlMessage(rejected)).toThrow(PiCloudWireProtocolError);
     expect(() =>
       parseControlToSupervisorMessage({
         ...rejected,
         payload: { ...rejected.payload, retryable: true },
       }),
-    ).toThrow(AgentDockWireProtocolError);
+    ).toThrow(PiCloudWireProtocolError);
   });
 
   it("validates command acknowledgements in the return direction", () => {
@@ -328,7 +328,7 @@ describe("supervisor/control-plane wire protocol", () => {
     } as const;
 
     expect(parseSupervisorToControlMessage(accepted)).toEqual(accepted);
-    expect(() => parseControlToSupervisorMessage(accepted)).toThrow(AgentDockWireProtocolError);
+    expect(() => parseControlToSupervisorMessage(accepted)).toThrow(PiCloudWireProtocolError);
   });
 
   it("requires an exact ACK reference before commit and correlates command results", () => {
@@ -392,14 +392,14 @@ describe("supervisor/control-plane wire protocol", () => {
         (message) => parseSupervisorToControlMessage(message).type,
       ),
     ).toEqual(["command.result", "command.result", "command.result"]);
-    expect(() => parseSupervisorToControlMessage(commit)).toThrow(AgentDockWireProtocolError);
-    expect(() => parseControlToSupervisorMessage(completed)).toThrow(AgentDockWireProtocolError);
+    expect(() => parseSupervisorToControlMessage(commit)).toThrow(PiCloudWireProtocolError);
+    expect(() => parseControlToSupervisorMessage(completed)).toThrow(PiCloudWireProtocolError);
     expect(() =>
       parseSupervisorToControlMessage({
         ...completed,
         payload: { ...completed.payload, apiKey: "must-not-cross-the-wire" },
       }),
-    ).toThrow(AgentDockWireProtocolError);
+    ).toThrow(PiCloudWireProtocolError);
   });
 
   it("checks heartbeat capacity, uniqueness, and sequence observations", () => {
@@ -434,7 +434,7 @@ describe("supervisor/control-plane wire protocol", () => {
         ...message,
         payload: { ...message.payload, maxConcurrentSessions: 0 },
       }),
-    ).toThrow(AgentDockWireProtocolError);
+    ).toThrow(PiCloudWireProtocolError);
   });
 
   it("validates registration and heartbeat acknowledgements from the control plane", () => {
@@ -503,6 +503,6 @@ describe("supervisor/control-plane wire protocol", () => {
     } as const;
 
     expect(parseControlToSupervisorMessage(ack)).toEqual(ack);
-    expect(() => parseSupervisorToControlMessage(ack)).toThrow(AgentDockWireProtocolError);
+    expect(() => parseSupervisorToControlMessage(ack)).toThrow(PiCloudWireProtocolError);
   });
 });

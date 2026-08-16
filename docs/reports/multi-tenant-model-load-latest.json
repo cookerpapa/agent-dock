@@ -43,10 +43,10 @@
     }
   },
   "workers": {
-    "distinct": ["agent-dock-pi-worker-local-v1-1", "agent-dock-pi-worker-local-v1-0"],
+    "distinct": ["pi-cloud-pi-worker-local-v1-1", "pi-cloud-pi-worker-local-v1-0"],
     "assignments": {
-      "agent-dock-pi-worker-local-v1-1": 6,
-      "agent-dock-pi-worker-local-v1-0": 6
+      "pi-cloud-pi-worker-local-v1-1": 6,
+      "pi-cloud-pi-worker-local-v1-0": 6
     }
   },
   "streaming": {

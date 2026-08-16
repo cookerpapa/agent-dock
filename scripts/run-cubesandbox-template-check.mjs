@@ -3,9 +3,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const image =
-  process.env.AGENT_DOCK_CUBESANDBOX_TOOL_IMAGE ?? "agent-dock/cubesandbox-tool:experiment";
-const containerName = `agent-dock-cubesandbox-template-check-${String(process.pid)}`;
+const image = process.env.PI_CLOUD_CUBESANDBOX_TOOL_IMAGE ?? "pi-cloud/cubesandbox-tool:experiment";
+const containerName = `pi-cloud-cubesandbox-template-check-${String(process.pid)}`;
 
 function capture(command, args, timeout = 30_000) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -66,9 +65,9 @@ async function jsonRequest(baseUrl, path, body, authority = currentAuthority) {
       ...(authority === undefined
         ? {}
         : {
-            "x-agent-dock-handoff-secret": authority.handoffSecret,
-            "x-agent-dock-fencing-token": String(authority.fencingToken),
-            "x-agent-dock-binding-sha256": authority.bindingSha256,
+            "x-pi-cloud-handoff-secret": authority.handoffSecret,
+            "x-pi-cloud-fencing-token": String(authority.fencingToken),
+            "x-pi-cloud-binding-sha256": authority.bindingSha256,
           }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -86,9 +85,9 @@ async function requestStatus(baseUrl, path, body, authority) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-agent-dock-handoff-secret": authority.handoffSecret,
-      "x-agent-dock-fencing-token": String(authority.fencingToken),
-      "x-agent-dock-binding-sha256": authority.bindingSha256,
+      "x-pi-cloud-handoff-secret": authority.handoffSecret,
+      "x-pi-cloud-fencing-token": String(authority.fencingToken),
+      "x-pi-cloud-binding-sha256": authority.bindingSha256,
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
@@ -115,7 +114,7 @@ async function waitUntilReady(baseUrl) {
 }
 
 function templateContextSha256(name) {
-  return createHash("sha256").update(`agent-dock-template-check-${name}`, "utf8").digest("hex");
+  return createHash("sha256").update(`pi-cloud-template-check-${name}`, "utf8").digest("hex");
 }
 
 const templateTurnContextSha256 = templateContextSha256("turn-context");
@@ -152,7 +151,7 @@ try {
   // Docker/runc counts RLIMIT_NPROC against every host process with uid 1000.
   // A real Cube microVM has its own guest uid namespace, so the image's normal
   // entrypoint uses the stricter 128-process limit. This local template check
-  // substitutes only that limit and still starts the exact AgentDock service.
+  // substitutes only that limit and still starts the exact PiCloud service.
   await run("docker", [
     "run",
     "--detach",
@@ -228,7 +227,7 @@ try {
     environment: {
       environmentVersionId: randomUUID(),
       versionNumber: 1,
-      profileKey: "agent-dock-fullstack",
+      profileKey: "pi-cloud-fullstack",
       profileVersion: "1",
       imageRevision: evidence.imageRevision,
       specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -338,9 +337,9 @@ try {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-agent-dock-handoff-secret": currentAuthority.handoffSecret,
-      "x-agent-dock-fencing-token": String(currentAuthority.fencingToken),
-      "x-agent-dock-binding-sha256": currentAuthority.bindingSha256,
+      "x-pi-cloud-handoff-secret": currentAuthority.handoffSecret,
+      "x-pi-cloud-fencing-token": String(currentAuthority.fencingToken),
+      "x-pi-cloud-binding-sha256": currentAuthority.bindingSha256,
     },
     body: JSON.stringify({ rows: 24, cols: 100 }),
     signal: AbortSignal.timeout(15_000),
@@ -369,10 +368,10 @@ try {
   void terminalOutput.catch(() => undefined);
   await jsonRequest(baseUrl, "/v1/terminal/resize", { rows: 40, cols: 120 });
   await jsonRequest(baseUrl, "/v1/terminal/input", {
-    data: Buffer.from("printf '__agentdock_terminal_ok__\\n'; exit\n", "utf8").toString("base64"),
+    data: Buffer.from("printf '__picloud_terminal_ok__\\n'; exit\n", "utf8").toString("base64"),
   });
   assert(
-    (await terminalOutput).includes("__agentdock_terminal_ok__"),
+    (await terminalOutput).includes("__picloud_terminal_ok__"),
     "Fenced Workspace terminal output was missing",
   );
 

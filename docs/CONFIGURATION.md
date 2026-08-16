@@ -1,6 +1,6 @@
 # Configuration
 
-AgentDock separates hot administrator configuration, restart-bound operator
+PiCloud separates hot administrator configuration, restart-bound operator
 configuration and generated secrets.
 
 ## Administrator settings

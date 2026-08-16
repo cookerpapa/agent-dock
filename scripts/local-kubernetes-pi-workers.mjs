@@ -8,24 +8,24 @@ import { stringify } from "yaml";
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 const runtimeEnvironmentPath = join(runtimeDirectory, ".env");
 const runtimeKubeconfigPath = join(runtimeDirectory, "kubernetes", "pi-worker-local.kubeconfig");
 const switchStatePath = join(runtimeDirectory, "kubernetes", "pi-worker-local-switch.json");
-const chartPath = join(repositoryRoot, "deploy/helm/agent-dock-pi-worker-pool");
+const chartPath = join(repositoryRoot, "deploy/helm/pi-cloud-pi-worker-pool");
 const k3d =
-  process.env.AGENT_DOCK_K3D_BIN ?? join(repositoryRoot, ".cache", "tools", "k3d-v5.9.0", "k3d");
+  process.env.PI_CLOUD_K3D_BIN ?? join(repositoryRoot, ".cache", "tools", "k3d-v5.9.0", "k3d");
 const kubectl =
-  process.env.AGENT_DOCK_KUBECTL_BIN ??
+  process.env.PI_CLOUD_KUBECTL_BIN ??
   (await executable("/usr/local/bin/kubectl").catch(() => "kubectl"));
 const helm =
-  process.env.AGENT_DOCK_HELM_BIN ??
+  process.env.PI_CLOUD_HELM_BIN ??
   (await executable("helm").catch(() =>
     executable(join(repositoryRoot, ".cache", "tools", "helm-v3.18.6", "helm")),
   ));
 
-const clusterName = "agent-dock-workers";
+const clusterName = "pi-cloud-workers";
 const k3sImage = "rancher/k3s:v1.35.5-k3s1";
 const k3sSystemImages = [
   "rancher/mirrored-pause:3.6",
@@ -38,13 +38,13 @@ const k3sSystemImages = [
 ];
 const serverContainer = `k3d-${clusterName}-server-0`;
 const loadBalancerContainer = `k3d-${clusterName}-serverlb`;
-const workerNamespace = "agent-dock-workers";
-const systemNamespace = "agent-dock-system";
+const workerNamespace = "pi-cloud-workers";
+const systemNamespace = "pi-cloud-system";
 const releaseName = "pi-workers-local";
 const poolName = "local-v1";
-const workerStatefulSetName = `agent-dock-pi-worker-${poolName}`;
-const workerPrefix = `agent-dock-pi-worker-${poolName}-`;
-const managementHostSuffix = "workers.agent-dock.local";
+const workerStatefulSetName = `pi-cloud-pi-worker-${poolName}`;
+const workerPrefix = `pi-cloud-pi-worker-${poolName}-`;
+const managementHostSuffix = "workers.pi-cloud.local";
 const workerReplicas = 2;
 const workerIds = Array.from(
   { length: workerReplicas },
@@ -56,13 +56,13 @@ const workerMetricsHosts = workerIds.map(
 );
 
 const composeNetworks = {
-  api: "agent-dock-production_api",
-  management: "agent-dock-production_management",
-  database: "agent-dock-production_database",
-  sandboxControl: "agent-dock-production_sandbox-control",
-  modelEgress: "agent-dock-production_model-egress",
-  githubControl: "agent-dock-production_github-control",
-  observability: "agent-dock-production_observability",
+  api: "pi-cloud-production_api",
+  management: "pi-cloud-production_management",
+  database: "pi-cloud-production_database",
+  sandboxControl: "pi-cloud-production_sandbox-control",
+  modelEgress: "pi-cloud-production_model-egress",
+  githubControl: "pi-cloud-production_github-control",
+  observability: "pi-cloud-production_observability",
 };
 
 const bridgeTargets = [
@@ -242,7 +242,7 @@ async function ensureK3d() {
   try {
     await executable(k3d);
   } catch {
-    if (process.env.AGENT_DOCK_K3D_BIN !== undefined) {
+    if (process.env.PI_CLOUD_K3D_BIN !== undefined) {
       throw new Error("Configured k3d is unavailable");
     }
     await run(process.execPath, [join(repositoryRoot, "scripts", "ensure-k3d.mjs")]);
@@ -344,7 +344,7 @@ async function importDockerImageIntoK3d(image, pull) {
   }
   const imageKey = image.replaceAll(/[^a-zA-Z0-9_.-]/gu, "-");
   const archive = join(importDirectory, `${String(process.pid)}-${imageKey}.tar`);
-  const remoteArchive = `/var/lib/rancher/k3s/agent/images/agent-dock-${String(process.pid)}-${imageKey}.tar`;
+  const remoteArchive = `/var/lib/rancher/k3s/agent/images/pi-cloud-${String(process.pid)}-${imageKey}.tar`;
   try {
     await run("docker", ["save", "--output", archive, image]);
     await run("docker", [
@@ -460,7 +460,7 @@ async function composeContainer(service) {
     await capture("docker", [
       "ps",
       "--filter",
-      "label=com.docker.compose.project=agent-dock-production",
+      "label=com.docker.compose.project=pi-cloud-production",
       "--filter",
       `label=com.docker.compose.service=${service}`,
       "--format",
@@ -480,7 +480,7 @@ async function optionalComposeContainer(service) {
     await capture("docker", [
       "ps",
       "--filter",
-      "label=com.docker.compose.project=agent-dock-production",
+      "label=com.docker.compose.project=pi-cloud-production",
       "--filter",
       `label=com.docker.compose.service=${service}`,
       "--format",
@@ -524,7 +524,7 @@ async function applyManifest(resources) {
       "apply",
       "--server-side",
       "--force-conflicts",
-      "--field-manager=agent-dock-local-workers",
+      "--field-manager=pi-cloud-local-workers",
       "-f",
       "-",
     ],
@@ -553,7 +553,7 @@ async function bridgeComposeServices() {
       kind: "Namespace",
       metadata: {
         name: systemNamespace,
-        labels: { "agent-dock.io/trusted-plane": "true" },
+        labels: { "pi-cloud.io/trusted-plane": "true" },
       },
     },
     {
@@ -561,7 +561,7 @@ async function bridgeComposeServices() {
       kind: "Namespace",
       metadata: {
         name: workerNamespace,
-        labels: { "agent-dock.io/trusted-plane": "true" },
+        labels: { "pi-cloud.io/trusted-plane": "true" },
       },
     },
   ]);
@@ -569,7 +569,7 @@ async function bridgeComposeServices() {
     "label",
     "namespace",
     "kube-system",
-    "agent-dock.io/trusted-plane=true",
+    "pi-cloud.io/trusted-plane=true",
     "--overwrite",
   ]);
 
@@ -608,7 +608,7 @@ async function bridgeComposeServices() {
         metadata: {
           name: target.name,
           namespace: systemNamespace,
-          labels: { "agent-dock.io/bridge": "compose" },
+          labels: { "pi-cloud.io/bridge": "compose" },
         },
         spec: {
           ports: [
@@ -629,7 +629,7 @@ async function bridgeComposeServices() {
           namespace: systemNamespace,
           labels: {
             "kubernetes.io/service-name": target.name,
-            "endpointslice.kubernetes.io/managed-by": "agent-dock-local-workers",
+            "endpointslice.kubernetes.io/managed-by": "pi-cloud-local-workers",
           },
         },
         addressType: "IPv4",
@@ -645,7 +645,7 @@ async function bridgeComposeServices() {
       metadata: {
         name: "tool-broker",
         namespace: workerNamespace,
-        labels: { "agent-dock.io/bridge": "compose-owner-alias" },
+        labels: { "pi-cloud.io/bridge": "compose-owner-alias" },
       },
       spec: {
         type: "ExternalName",
@@ -682,7 +682,7 @@ async function applyWorkerSecret(githubGatewayEnabled) {
       apiVersion: "v1",
       kind: "Secret",
       metadata: {
-        name: "agent-dock-pi-worker-secrets",
+        name: "pi-cloud-pi-worker-secrets",
         namespace: workerNamespace,
       },
       type: "Opaque",
@@ -701,9 +701,9 @@ async function activeRunCount() {
     "--tuples-only",
     "--no-align",
     "--username",
-    "agent_dock",
+    "pi_cloud",
     "--dbname",
-    "agent_dock",
+    "pi_cloud",
     "--command",
     "select count(*) from runs where state not in ('completed','failed','cancelled','timed_out','superseded')",
   ]);
@@ -719,7 +719,7 @@ async function composeWorkerContainers() {
     "ps",
     "--all",
     "--filter",
-    "label=com.docker.compose.project=agent-dock-production",
+    "label=com.docker.compose.project=pi-cloud-production",
     "--format",
     '{{.ID}}\t{{.Label "com.docker.compose.service"}}\t{{.State}}',
   ]);
@@ -759,7 +759,7 @@ async function productionCompose(args, imageRevision) {
     [join(repositoryRoot, "scripts", "production-compose.mjs"), ...args],
     {
       environment: childEnvironment({
-        AGENT_DOCK_IMAGE_REVISION: imageRevision,
+        PI_CLOUD_IMAGE_REVISION: imageRevision,
       }),
     },
   );
@@ -781,24 +781,24 @@ async function waitForComposeHealthy(service, timeoutMs = 120_000) {
 async function switchControlPlaneToKubernetes(runtimeEnvironment, revision) {
   const controlPlaneImageRevision = await runningServiceEnvironmentValue(
     "control-plane",
-    "AGENT_DOCK_IMAGE_REVISION",
+    "PI_CLOUD_IMAGE_REVISION",
   );
   const previous = {
     formatVersion: 1,
     switchedAt: new Date().toISOString(),
     revision,
     controlPlaneImageRevision,
-    piWorkerDeployment: runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT ?? "compose",
-    supervisorIdPrefix: runtimeEnvironment.AGENT_DOCK_SUPERVISOR_ID_PREFIX ?? "agent-dock-worker-",
+    piWorkerDeployment: runtimeEnvironment.PI_CLOUD_PI_WORKER_DEPLOYMENT ?? "compose",
+    supervisorIdPrefix: runtimeEnvironment.PI_CLOUD_SUPERVISOR_ID_PREFIX ?? "pi-cloud-worker-",
     supervisorManagementUrlTemplate:
-      runtimeEnvironment.AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES ??
+      runtimeEnvironment.PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES ??
       "http://{supervisorId}:4100",
   };
   await writePrivate(switchStatePath, `${JSON.stringify(previous, null, 2)}\n`);
   await replaceRuntimeEnvironment({
-    AGENT_DOCK_PI_WORKER_DEPLOYMENT: "kubernetes",
-    AGENT_DOCK_SUPERVISOR_ID_PREFIX: workerPrefix,
-    AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: `http://{supervisorId}.${managementHostSuffix}`,
+    PI_CLOUD_PI_WORKER_DEPLOYMENT: "kubernetes",
+    PI_CLOUD_SUPERVISOR_ID_PREFIX: workerPrefix,
+    PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: `http://{supervisorId}.${managementHostSuffix}`,
   });
   await stopAndRemoveComposeWorkers();
   await productionCompose(
@@ -811,9 +811,9 @@ async function switchControlPlaneToKubernetes(runtimeEnvironment, revision) {
 
 async function restoreComposeWorkers(previous) {
   await replaceRuntimeEnvironment({
-    AGENT_DOCK_PI_WORKER_DEPLOYMENT: previous.piWorkerDeployment,
-    AGENT_DOCK_SUPERVISOR_ID_PREFIX: previous.supervisorIdPrefix,
-    AGENT_DOCK_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: previous.supervisorManagementUrlTemplate,
+    PI_CLOUD_PI_WORKER_DEPLOYMENT: previous.piWorkerDeployment,
+    PI_CLOUD_SUPERVISOR_ID_PREFIX: previous.supervisorIdPrefix,
+    PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: previous.supervisorManagementUrlTemplate,
   });
   await productionCompose(
     ["up", "--detach", "--no-deps", "control-plane"],
@@ -828,7 +828,7 @@ async function restoreComposeWorkers(previous) {
 
 async function buildAndImportWorkerImage(revision) {
   const tag = `kubernetes-${revision.slice(0, 12)}`;
-  const image = `agent-dock/supervisor-host:${tag}`;
+  const image = `pi-cloud/supervisor-host:${tag}`;
   const proxyBuildArguments = [
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -849,9 +849,9 @@ async function buildAndImportWorkerImage(revision) {
     "--file",
     "packages/supervisor-host/Dockerfile",
     "--build-arg",
-    `AGENT_DOCK_VERSION=${tag}`,
+    `PI_CLOUD_VERSION=${tag}`,
     "--build-arg",
-    `AGENT_DOCK_REVISION=${revision}`,
+    `PI_CLOUD_REVISION=${revision}`,
     "--tag",
     image,
     ".",
@@ -870,7 +870,7 @@ async function waitForWorkerPodInventory(timeoutMs = 120_000) {
       "get",
       "pods",
       "--selector",
-      `agent-dock.io/worker-pool=${poolName}`,
+      `pi-cloud.io/worker-pool=${poolName}`,
       "--output",
       "json",
     ])
@@ -890,11 +890,9 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
   const externalCidrs = [...new Set(resolvedTargets.map((target) => `${target.address}/32`))];
   const localJaegerAvailable = resolvedTargets.some((target) => target.name === "jaeger");
   const otlpTracesEndpoint =
-    process.env.AGENT_DOCK_OTLP_TRACES_ENDPOINT ??
-    runtimeEnvironment.AGENT_DOCK_OTLP_TRACES_ENDPOINT ??
-    (localJaegerAvailable
-      ? "http://jaeger.agent-dock-system.svc.cluster.local:4318/v1/traces"
-      : "");
+    process.env.PI_CLOUD_OTLP_TRACES_ENDPOINT ??
+    runtimeEnvironment.PI_CLOUD_OTLP_TRACES_ENDPOINT ??
+    (localJaegerAvailable ? "http://jaeger.pi-cloud-system.svc.cluster.local:4318/v1/traces" : "");
   const arguments_ = [
     "upgrade",
     "--install",
@@ -917,7 +915,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--set",
     "management.ingress.scheme=http",
     "--set",
-    "image.repository=agent-dock/supervisor-host",
+    "image.repository=pi-cloud/supervisor-host",
     "--set",
     `image.tag=${imageTag}`,
     "--set",
@@ -925,19 +923,19 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--set",
     "runtime.externalWorkerEventLog=true",
     "--set",
-    "services.controlPlaneUrl=http://control-plane.agent-dock-system.svc.cluster.local:3000",
+    "services.controlPlaneUrl=http://control-plane.pi-cloud-system.svc.cluster.local:3000",
     "--set",
-    "services.eventGatewayUrl=http://event-gateway.agent-dock-system.svc.cluster.local:4600",
+    "services.eventGatewayUrl=http://event-gateway.pi-cloud-system.svc.cluster.local:4600",
     "--set",
-    "services.toolBrokerUrls[0]=http://tool-broker.agent-dock-system.svc.cluster.local:4300",
+    "services.toolBrokerUrls[0]=http://tool-broker.pi-cloud-system.svc.cluster.local:4300",
     "--set",
     `services.githubGateway.enabled=${String(githubGatewayEnabled)}`,
     "--set",
-    "services.providerProxyUrl=http://provider-egress-relay.agent-dock-system.svc.cluster.local:3129",
+    "services.providerProxyUrl=http://provider-egress-relay.pi-cloud-system.svc.cluster.local:3129",
     "--set-string",
     `services.otlpTracesEndpoint=${otlpTracesEndpoint}`,
     "--set",
-    "database.existingSecret=agent-dock-pi-worker-secrets",
+    "database.existingSecret=pi-cloud-pi-worker-secrets",
     "--set",
     "state.storageClassName=local-path",
     "--set",
@@ -952,7 +950,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "delete",
     "pod",
     "--selector",
-    `agent-dock.io/worker-pool=${poolName}`,
+    `pi-cloud.io/worker-pool=${poolName}`,
     "--wait=true",
     "--timeout=2m",
   ]);
@@ -964,7 +962,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--for=condition=Ready",
     "pod",
     "--selector",
-    `agent-dock.io/worker-pool=${poolName}`,
+    `pi-cloud.io/worker-pool=${poolName}`,
     "--timeout=7m",
   ]);
 }
@@ -995,7 +993,7 @@ async function rollbackKubernetesWorkerPool(revision) {
     "delete",
     "pod",
     "--selector",
-    `agent-dock.io/worker-pool=${poolName}`,
+    `pi-cloud.io/worker-pool=${poolName}`,
     "--wait=true",
     "--timeout=2m",
   ]);
@@ -1007,7 +1005,7 @@ async function rollbackKubernetesWorkerPool(revision) {
     "--for=condition=Ready",
     "pod",
     "--selector",
-    `agent-dock.io/worker-pool=${poolName}`,
+    `pi-cloud.io/worker-pool=${poolName}`,
     "--timeout=7m",
   ]);
 }
@@ -1046,9 +1044,9 @@ async function waitForWorkerEnrollment(postgres, timeoutMs = 120_000) {
         "--tuples-only",
         "--no-align",
         "--username",
-        "agent_dock",
+        "pi_cloud",
         "--dbname",
-        "agent_dock",
+        "pi_cloud",
         "--command",
         `select count(*) from supervisor_hosts where supervisor_id like '${workerPrefix}%'`,
       ]),
@@ -1062,7 +1060,7 @@ async function waitForWorkerEnrollment(postgres, timeoutMs = 120_000) {
 async function checkDeployment(expectedRevision, { emit = true } = {}) {
   await ensureK3d();
   const runtimeEnvironment = await readRuntimeEnvironment();
-  if (runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT !== "kubernetes") {
+  if (runtimeEnvironment.PI_CLOUD_PI_WORKER_DEPLOYMENT !== "kubernetes") {
     throw new Error("Production is not configured for Kubernetes Pi Workers");
   }
   const pods = JSON.parse(
@@ -1072,7 +1070,7 @@ async function checkDeployment(expectedRevision, { emit = true } = {}) {
       "get",
       "pods",
       "--selector",
-      `agent-dock.io/worker-pool=${poolName}`,
+      `pi-cloud.io/worker-pool=${poolName}`,
       "--output",
       "json",
     ]),
@@ -1087,17 +1085,17 @@ async function checkDeployment(expectedRevision, { emit = true } = {}) {
     if (!ready) throw new Error(`Worker Pod ${pod.metadata?.name} is not Ready`);
     const worker = pod.spec?.containers?.find((container) => container.name === "pi-worker");
     const environment = new Map((worker?.env ?? []).map((entry) => [entry.name, entry]));
-    if (environment.get("AGENT_DOCK_EXTERNAL_WORKER_EVENT_LOG")?.value !== "true") {
+    if (environment.get("PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG")?.value !== "true") {
       throw new Error(`Worker Pod ${pod.metadata?.name} bypasses the durable Event Gateway`);
     }
     if (
-      environment.get("AGENT_DOCK_WORKER_EVENT_INGEST_URL")?.value !==
+      environment.get("PI_CLOUD_WORKER_EVENT_INGEST_URL")?.value !==
       `http://event-gateway.${systemNamespace}.svc.cluster.local:4600`
     ) {
       throw new Error(`Worker Pod ${pod.metadata?.name} has an invalid Event Gateway route`);
     }
-    const eventToken = environment.get("AGENT_DOCK_WORKER_EVENT_INGEST_TOKEN_FILE");
-    if (eventToken?.value !== "/run/agent-dock-secrets/worker-event-ingest-token") {
+    const eventToken = environment.get("PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE");
+    if (eventToken?.value !== "/run/pi-cloud-secrets/worker-event-ingest-token") {
       throw new Error(`Worker Pod ${pod.metadata?.name} has no Event Gateway credential file`);
     }
   }
@@ -1113,7 +1111,7 @@ async function checkDeployment(expectedRevision, { emit = true } = {}) {
       "--eval",
       [
         "const response=await fetch(",
-        "'http://event-gateway.agent-dock-system.svc.cluster.local:4600/internal/v1/worker-events',",
+        "'http://event-gateway.pi-cloud-system.svc.cluster.local:4600/internal/v1/worker-events',",
         "{method:'POST',headers:{'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(5000)});",
         "console.log(response.status);",
       ].join(""),
@@ -1157,7 +1155,7 @@ async function up() {
   await ensureCluster();
   const resolvedTargets = await bridgeComposeServices();
   const { tag } = await buildAndImportWorkerImage(revision);
-  const upgradingKubernetes = runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT === "kubernetes";
+  const upgradingKubernetes = runtimeEnvironment.PI_CLOUD_PI_WORKER_DEPLOYMENT === "kubernetes";
   const previousHelmRevision = upgradingKubernetes ? await currentHelmRevision() : undefined;
   let previous;
   try {
@@ -1217,7 +1215,7 @@ async function status() {
       "get",
       "pods",
       "--selector",
-      `agent-dock.io/worker-pool=${poolName}`,
+      `pi-cloud.io/worker-pool=${poolName}`,
       "--output",
       "json",
     ]).catch(() => undefined);
@@ -1235,7 +1233,7 @@ async function status() {
   process.stdout.write(
     `${JSON.stringify(
       {
-        configuredDeployment: runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT ?? "compose",
+        configuredDeployment: runtimeEnvironment.PI_CLOUD_PI_WORKER_DEPLOYMENT ?? "compose",
         clusterExists,
         kubernetesWorkers,
         composeWorkers: workers.map(({ service, state }) => ({ service, state })),

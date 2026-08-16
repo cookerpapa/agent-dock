@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { parseDocument } from "yaml";
 
 import {
-  AGENT_DOCK_CUBE_TEMPLATE_IMAGE_PREFIX,
+  PI_CLOUD_CUBE_TEMPLATE_IMAGE_PREFIX,
   parseCubeTemplateRetention,
   selectCubeTemplatesForDeletion,
 } from "./cubesandbox-template-retention.mjs";
@@ -13,7 +13,7 @@ const template = (
   suffix,
   status,
   createdAt,
-  imagePrefix = AGENT_DOCK_CUBE_TEMPLATE_IMAGE_PREFIX,
+  imagePrefix = PI_CLOUD_CUBE_TEMPLATE_IMAGE_PREFIX,
 ) => ({
   template_id: id(suffix),
   status,
@@ -44,7 +44,7 @@ const selected = selectCubeTemplatesForDeletion({
 assert.deepEqual(
   selected.map((value) => value.template_id),
   [id("1"), id("2")],
-  "only superseded terminal AgentDock templates should be selected",
+  "only superseded terminal PiCloud templates should be selected",
 );
 assert.ok(
   !selected.some((value) => value.template_id === id("3")),
@@ -56,7 +56,7 @@ assert.ok(
 );
 
 const cubeValuesDocument = parseDocument(
-  readFileSync("deploy/cubesandbox/values-agent-dock-single-node.yaml", "utf8"),
+  readFileSync("deploy/cubesandbox/values-pi-cloud-single-node.yaml", "utf8"),
 );
 assert.equal(cubeValuesDocument.errors.length, 0, "Cube values must be valid YAML");
 assert.equal(
@@ -67,7 +67,7 @@ assert.equal(
 const installer = readFileSync("scripts/install-cubesandbox-k3s.mjs", "utf8");
 assert.match(installer, /ensureCubeletLoopbackCapacity\(\)/u);
 assert.match(installer, /xfs_growfs/u);
-assert.match(installer, /AGENT_DOCK_KUBECTL_BIN/u);
+assert.match(installer, /PI_CLOUD_KUBECTL_BIN/u);
 assert.match(installer, /\$\{authorizerImageRepository\}:\$\{agentDockRevision\}/u);
 assert.match(installer, /\$\{cubeEgressGatewayImageRepository\}:\$\{agentDockRevision\}/u);
 assert.match(installer, /set[\s\S]+image[\s\S]+authorizer=/u);
@@ -80,7 +80,7 @@ assert.equal(
 );
 assert.match(
   installer,
-  /agent-dock\.io\/posix-shared-root-identity/u,
+  /pi-cloud\.io\/posix-shared-root-identity/u,
   "the installer must roll Cube Pods when the hostPath inode changes",
 );
 assert.ok(

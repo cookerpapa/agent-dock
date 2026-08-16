@@ -2,17 +2,17 @@ import { performance } from "node:perf_hooks";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { createAgentDockEventFactory } from "../packages/protocol/src/index.ts";
+import { createPiCloudEventFactory } from "../packages/protocol/src/index.ts";
 import { WalEventSpoolStore } from "../packages/sandbox-supervisor/src/index.ts";
 
 const eventCount = 500;
-const root = await mkdtemp(resolve(tmpdir(), "agent-dock-event-spool-benchmark-"));
+const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-event-spool-benchmark-"));
 const leaseId = "11111111-1111-4111-8111-111111111111";
 const commandId = "22222222-2222-4222-8222-222222222222";
 const sentAt = "2026-07-30T00:00:00.000Z";
 let eventNumber = 0;
 let messageNumber = 0;
-const events = createAgentDockEventFactory(
+const events = createPiCloudEventFactory(
   { sessionId: "benchmark-session", turnId: "benchmark-turn", agentId: "root" },
   {
     clock: () => new Date(sentAt),

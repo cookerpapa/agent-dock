@@ -7,8 +7,8 @@ import {
   type ToolSandboxOperationResponse,
   type ToolWorkerInput,
   type ToolWorkerOutput,
-} from "@agent-dock/protocol";
-import { captureWorkspaceIndex } from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/protocol";
+import { captureWorkspaceIndex } from "@pi-cloud/workspace-runtime";
 import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createInterface } from "node:readline";
@@ -123,9 +123,9 @@ function singleHeader(request: IncomingMessage, name: string): string | undefine
 }
 
 function parseAuthority(request: IncomingMessage): HandoffAuthority {
-  const secret = singleHeader(request, "x-agent-dock-handoff-secret");
-  const rawFence = singleHeader(request, "x-agent-dock-fencing-token");
-  const bindingSha256 = singleHeader(request, "x-agent-dock-binding-sha256");
+  const secret = singleHeader(request, "x-pi-cloud-handoff-secret");
+  const rawFence = singleHeader(request, "x-pi-cloud-fencing-token");
+  const bindingSha256 = singleHeader(request, "x-pi-cloud-binding-sha256");
   const fencingToken = rawFence === undefined ? Number.NaN : Number(rawFence);
   if (
     secret === undefined ||
@@ -332,7 +332,7 @@ class CubeTerminalSession {
       cwd: "/workspace",
       detached: true,
       env: {
-        HOME: "/tmp/agent-dock-tool-home",
+        HOME: "/tmp/pi-cloud-tool-home",
         LANG: "C.UTF-8",
         LC_ALL: "C.UTF-8",
         PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -466,7 +466,7 @@ async function runtimeEvidence(workerPid: number | undefined): Promise<CubeRunti
     throw new CubeToolServiceError(503, "Cube Tool Worker was not running");
   }
   const [imageRevision, kernel, cpuInfo, memory, processStatus, mountInfo] = await Promise.all([
-    exec("/bin/cat", ["/opt/agent-dock/image-revision"]),
+    exec("/bin/cat", ["/opt/pi-cloud/image-revision"]),
     exec("/bin/uname", ["-r"]),
     exec("/bin/sh", ["-c", "cat /proc/cpuinfo"]),
     exec("/bin/sh", ["-c", "cat /proc/meminfo"]),
@@ -1160,7 +1160,7 @@ function readyBridgeForInitialization(): ToolWorkerBridge {
 }
 
 server.listen(SERVICE_PORT, "0.0.0.0", () => {
-  process.stdout.write(`AgentDock Cube Tool service ready on ${SERVICE_PORT}\n`);
+  process.stdout.write(`PiCloud Cube Tool service ready on ${SERVICE_PORT}\n`);
 });
 
 let closing: Promise<void> | undefined;

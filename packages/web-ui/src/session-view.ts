@@ -1,6 +1,6 @@
 import type {
   AcceptedTurnResource,
-  AgentDockEvent,
+  PiCloudEvent,
   ConversationDetailResource,
   ConversationSessionResource,
   LiveTurnSnapshotResource,
@@ -10,10 +10,10 @@ import type {
   SessionState,
   SessionResource,
   WorkspacePatch,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { SessionStreamStatus } from "./sse.ts";
 
-type ApprovalPayload = Extract<AgentDockEvent, { type: "approval.requested" }>["payload"];
+type ApprovalPayload = Extract<PiCloudEvent, { type: "approval.requested" }>["payload"];
 
 export type TurnViewStatus =
   "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
@@ -111,7 +111,7 @@ export type SessionViewAction =
       run: Pick<RunResource, "runId" | "state" | "stopReason" | "failure">;
     }
   | { type: "stream.status"; status: SessionStreamStatus }
-  | { type: "stream.event"; event: AgentDockEvent }
+  | { type: "stream.event"; event: PiCloudEvent }
   | { type: "api.error"; message: string }
   | { type: "api.error.cleared" };
 
@@ -193,7 +193,7 @@ function transcriptItem(
   return { ...item, key: `notification:${String(item.sequence)}` };
 }
 
-function applyEvent(state: SessionViewState, event: AgentDockEvent): SessionViewState {
+function applyEvent(state: SessionViewState, event: PiCloudEvent): SessionViewState {
   if (state.session !== null && event.sessionId !== state.session.sessionId) return state;
   if (event.seq <= state.lastSequence) return state;
   if (event.seq !== state.lastSequence + 1) {

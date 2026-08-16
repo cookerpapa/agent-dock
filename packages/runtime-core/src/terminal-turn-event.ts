@@ -1,9 +1,5 @@
-import type { Database } from "@agent-dock/database";
-import {
-  parseAgentDockEvent,
-  type AgentDockEvent,
-  type AgentDockEventBody,
-} from "@agent-dock/protocol";
+import type { Database } from "@pi-cloud/database";
+import { parsePiCloudEvent, type PiCloudEvent, type PiCloudEventBody } from "@pi-cloud/protocol";
 import { sql, type Transaction } from "kysely";
 import {
   materializeConversationTurnProjection,
@@ -14,7 +10,7 @@ import type { SessionEventNotificationPublisher } from "./session-event-notifica
 import type { PreparedTerminalTurnProjection } from "./terminal-turn-projection.ts";
 
 type TerminalEventBody = Extract<
-  AgentDockEventBody,
+  PiCloudEventBody,
   { type: "turn.completed" | "turn.failed" | "turn.cancelled" }
 >;
 
@@ -54,7 +50,7 @@ function expectOne(value: bigint, description: string): void {
 export async function commitTerminalTurnEvent(
   transaction: Transaction<Database>,
   input: CommitTerminalTurnEventInput,
-): Promise<AgentDockEvent> {
+): Promise<PiCloudEvent> {
   const session = await transaction
     .selectFrom("sessions")
     .select("next_event_seq")
@@ -84,7 +80,7 @@ export async function commitTerminalTurnEvent(
     throw new Error("Terminal event stream is not contiguous");
   }
 
-  const event = parseAgentDockEvent({
+  const event = parsePiCloudEvent({
     schemaVersion: 1,
     eventId: input.eventId,
     sessionId: input.sessionId,

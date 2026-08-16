@@ -1,9 +1,9 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   parseSupervisorBootProvisionRequest,
   type SupervisorBootProvisionRequest,
   type SupervisorBootProvisionResponse,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Kysely, Transaction } from "kysely";

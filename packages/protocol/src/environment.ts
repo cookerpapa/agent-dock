@@ -7,7 +7,7 @@ import {
   UuidSchema,
 } from "./protocol-primitives.ts";
 
-export const DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY = "agent-dock-fullstack" as const;
+export const DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY = "pi-cloud-fullstack" as const;
 export const DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION = "1" as const;
 export const DEFAULT_PROJECT_ENVIRONMENT_SPEC_SHA256 =
   "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630" as const;

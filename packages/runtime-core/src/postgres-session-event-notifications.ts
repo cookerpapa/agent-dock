@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import { sql, type Transaction } from "kysely";
 import { Client, type Notification } from "pg";
 import type {
@@ -7,7 +7,7 @@ import type {
   SessionEventNotificationTransport,
 } from "./session-event-notifications.ts";
 
-export const SESSION_EVENT_NOTIFICATION_CHANNEL = "agent_dock_session_events_v1";
+export const SESSION_EVENT_NOTIFICATION_CHANNEL = "pi_cloud_session_events_v1";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
 const DEFAULT_INITIAL_RECONNECT_DELAY_MS = 250;
@@ -130,7 +130,7 @@ export class PostgresSessionEventNotifications implements SessionEventNotificati
       throw new TypeError("connectionString must not be empty");
     }
     this.#connectionString = options.connectionString;
-    const applicationName = options.applicationName ?? "agent-dock-session-event-listener";
+    const applicationName = options.applicationName ?? "pi-cloud-session-event-listener";
     if (
       Buffer.byteLength(applicationName, "utf8") < 1 ||
       Buffer.byteLength(applicationName, "utf8") > 63 ||

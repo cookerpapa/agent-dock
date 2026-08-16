@@ -1,9 +1,9 @@
 import type {
-  AgentDockEvent,
-  AgentDockEventFactory,
+  PiCloudEvent,
+  PiCloudEventFactory,
   CancelTurnCommandMessage,
   ModelSamplingIdentity,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash } from "node:crypto";
 
 type JsonRecord = Record<string, unknown>;
@@ -12,7 +12,7 @@ type AssistantStopReason = "stop" | "length" | "toolUse" | "error" | "aborted";
 type TurnCancellationReason = CancelTurnCommandMessage["payload"]["reason"];
 
 export type PiAgentEventAdapterOutcome =
-  | { kind: "mapped"; event: AgentDockEvent; terminal: false }
+  | { kind: "mapped"; event: PiCloudEvent; terminal: false }
   | {
       kind: "settled";
       terminal: true;
@@ -40,7 +40,7 @@ const REVIEWED_IGNORED_EVENT_TYPES = new Set([
   // Pi 0.84 emits these around retryable compaction/branch-summary requests.
   // The governed model-request ledger already records every attempt; these
   // transient UI lifecycle events carry no additional canonical conversation
-  // state and therefore stay out of the public AgentDock event stream.
+  // state and therefore stay out of the public PiCloud event stream.
   "summarization_retry_scheduled",
   "summarization_retry_attempt_start",
   "summarization_retry_finished",
@@ -65,7 +65,7 @@ function boundedToolOutput(value: unknown, maximumBytes: number): unknown {
     return { truncated: true, preview: "[unserializable tool output]" };
   }
   if (Buffer.byteLength(serialized, "utf8") <= maximumBytes) return value;
-  const marker = "\n[AgentDock truncated tool output]";
+  const marker = "\n[PiCloud truncated tool output]";
   const previewBytes = Math.max(0, maximumBytes - Buffer.byteLength(marker, "utf8"));
   return {
     truncated: true,
@@ -129,11 +129,11 @@ function streamedToolCallIdentity(streamEvent: JsonRecord): StreamedToolCallIden
 }
 
 /**
- * Converts the reviewed, public subset of Pi agent events into AgentDock v1
+ * Converts the reviewed, public subset of Pi agent events into PiCloud v1
  * events. Pi event objects never leave this adapter.
  */
 export class PiAgentEventAdapter {
-  readonly #eventFactory: AgentDockEventFactory;
+  readonly #eventFactory: PiCloudEventFactory;
   readonly #inputKind: "prompt" | "continue";
   #agentStarted = false;
   #piTurnActive = false;
@@ -148,7 +148,7 @@ export class PiAgentEventAdapter {
   readonly #requireSamplingIdentity: boolean;
 
   constructor(
-    eventFactory: AgentDockEventFactory,
+    eventFactory: PiCloudEventFactory,
     options: {
       inputKind: "prompt" | "continue";
       maximumToolOutputBytes?: number;
@@ -181,7 +181,7 @@ export class PiAgentEventAdapter {
     return this.#cancelled(reason, true);
   }
 
-  samplingStarted(identity: ModelSamplingIdentity): AgentDockEvent {
+  samplingStarted(identity: ModelSamplingIdentity): PiCloudEvent {
     if (this.#settled || !this.#agentStarted || this.#activeSampling !== undefined) {
       throw new Error("Model sampling started outside an idle active Run boundary");
     }
@@ -628,7 +628,7 @@ export class PiAgentEventAdapter {
     return {
       kind: "invalid",
       sourceType: value.type,
-      reason: `No reviewed AgentDock v1 mapping exists for Pi event type: ${value.type.slice(0, 128)}`,
+      reason: `No reviewed PiCloud v1 mapping exists for Pi event type: ${value.type.slice(0, 128)}`,
     };
   }
 

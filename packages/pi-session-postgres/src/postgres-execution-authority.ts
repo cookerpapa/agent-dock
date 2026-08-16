@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import { SessionError } from "@earendil-works/pi-agent-core";
 import type { Kysely, Transaction } from "kysely";
 import type { ActiveExecutionAuthority } from "./execution-authority.ts";

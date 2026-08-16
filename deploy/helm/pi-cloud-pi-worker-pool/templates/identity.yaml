@@ -1,0 +1,9 @@
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "pi-cloud-pi-worker-pool.serviceAccountName" . }}
+  labels:
+    {{- include "pi-cloud-pi-worker-pool.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+{{- end }}

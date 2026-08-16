@@ -1,11 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
-import { parseSupervisorToControlMessage } from "@agent-dock/protocol";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
+import { parseSupervisorToControlMessage } from "@pi-cloud/protocol";
 import type {
   SandboxAssignmentInventory,
   SandboxRuntimeAssignment,
-} from "@agent-dock/sandbox-supervisor";
+} from "@pi-cloud/sandbox-supervisor";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Kysely, sql } from "kysely";
 import {
@@ -208,7 +208,7 @@ async function createAcceptedTurn(): Promise<{
     .values({
       id: credentialId,
       tenant_id: tenantId,
-      provider: "agent-dock-fake",
+      provider: "pi-cloud-fake",
       kind: "brokered",
       secret_ref: `broker://${tenantId}/fake`,
       version: 1,
@@ -221,8 +221,8 @@ async function createAcceptedTurn(): Promise<{
       id: profileId,
       tenant_id: tenantId,
       name: "default",
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       default_thinking_level: "off",
       allowed_thinking_levels: ["off"],
       credential_binding_id: credentialId,
@@ -338,8 +338,8 @@ async function createAcceptedTurn(): Promise<{
       sandboxRetention: "ephemeral",
       model: {
         profileId,
-        provider: "agent-dock-fake",
-        modelId: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        modelId: "pi-cloud-fake",
         thinkingLevel: "off",
         credentialBindingId: credentialId,
         credentialBindingVersion: "1",

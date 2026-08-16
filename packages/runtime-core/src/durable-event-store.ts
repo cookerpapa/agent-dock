@@ -1,13 +1,13 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
-  parseAgentDockEvent,
+  parsePiCloudEvent,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
-  type AgentDockEvent,
+  type PiCloudEvent,
   type EventAckMessage,
   type EventPublishBatchMessage,
   type EventPublishMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEventHub } from "./session-event-hub.ts";
@@ -23,7 +23,7 @@ import type {
   WorkerEventLogPosition,
   WorkerEventProjectionSink,
 } from "./worker-event-log.ts";
-import type { AgentDockMetrics } from "@agent-dock/observability";
+import type { PiCloudMetrics } from "@pi-cloud/observability";
 
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
 
@@ -57,11 +57,11 @@ export type DurableEventStoreOptions = {
   idGenerator?: () => string;
   workerEventLog?: WorkerEventLogAppender;
   liveEventStore?: LiveSessionEventStore;
-  metrics?: AgentDockMetrics;
+  metrics?: PiCloudMetrics;
 };
 
 export type EventReplayWindow = {
-  events: readonly AgentDockEvent[];
+  events: readonly PiCloudEvent[];
   highWaterMark: number;
 };
 
@@ -87,7 +87,7 @@ export interface DurableEventLog extends DurableEventIngestor {
     afterSequence: number,
     throughSequence: number,
     limit?: number,
-  ): Promise<readonly AgentDockEvent[]>;
+  ): Promise<readonly PiCloudEvent[]>;
 }
 
 type PersistedEventRow = {
@@ -161,8 +161,8 @@ function isoTimestamp(value: Date | string): string {
   return parsed.toISOString();
 }
 
-function eventFromRow(row: PersistedEventRow): AgentDockEvent {
-  return parseAgentDockEvent({
+function eventFromRow(row: PersistedEventRow): PiCloudEvent {
+  return parsePiCloudEvent({
     schemaVersion: row.schema_version,
     eventId: row.event_id,
     sessionId: row.session_id,
@@ -226,7 +226,7 @@ export class DurableEventStore
   readonly #workerEventLog: WorkerEventLogAppender | undefined;
   readonly #externalWorkerEventLog: boolean;
   readonly #liveEventStore: LiveSessionEventStore | undefined;
-  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #metrics: PiCloudMetrics | undefined;
 
   constructor(options: DurableEventStoreOptions) {
     this.#database = options.database;
@@ -776,7 +776,7 @@ export class DurableEventStore
     afterSequence: number,
     throughSequence: number,
     pageSize = DEFAULT_REPLAY_PAGE_SIZE,
-  ): Promise<readonly AgentDockEvent[]> {
+  ): Promise<readonly PiCloudEvent[]> {
     positiveInteger(pageSize, "pageSize");
     if (
       !Number.isSafeInteger(afterSequence) ||
@@ -817,7 +817,7 @@ export class DurableEventStore
           .execute(),
       ]);
       const terminalEvents = terminalRows.map((row) =>
-        parseAgentDockEvent({
+        parsePiCloudEvent({
           schemaVersion: row.schema_version,
           eventId: row.event_id,
           sessionId: row.session_id,
@@ -921,7 +921,7 @@ export class DurableEventStore
       // direct PostgreSQL endpoint. Shared transaction locks let all normal
       // projectors run concurrently while making reset/rebuild race-free even
       // when an older Event Gateway replica is still serving.
-      await sql`select pg_advisory_xact_lock_shared(hashtext('agent-dock'), hashtext('live-event-repair-v1'))`.execute(
+      await sql`select pg_advisory_xact_lock_shared(hashtext('pi-cloud'), hashtext('live-event-repair-v1'))`.execute(
         transaction,
       );
       const consumed = await transaction
@@ -1338,7 +1338,7 @@ export class DurableEventStore
     transaction: Transaction<Database>,
     tenantId: string,
     message: EventPublishMessage,
-    turnEvents?: readonly AgentDockEvent[],
+    turnEvents?: readonly PiCloudEvent[],
   ): Promise<void> {
     const event = message.payload.event;
     if (event.type !== "tool.completed" || event.turnId === null) return;

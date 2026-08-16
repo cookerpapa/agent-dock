@@ -6,8 +6,8 @@ import type {
   SandboxRetentionPolicy,
   TenantIdentityResource,
   WorkspaceSummaryResource,
-} from "@agent-dock/protocol";
-import { AgentDockApi, AgentDockApiError, newIdempotencyKey } from "./api.ts";
+} from "@pi-cloud/protocol";
+import { PiCloudApi, PiCloudApiError, newIdempotencyKey } from "./api.ts";
 import { AdminPage } from "./AdminPage.tsx";
 import { AuthScreen } from "./AuthScreen.tsx";
 import { ConversationTreeNavigator } from "./ConversationTreeNavigator.tsx";
@@ -43,7 +43,7 @@ function relativeTime(value: string): string {
 }
 
 export default function ChatApp() {
-  const api = useMemo(() => new AgentDockApi(), []);
+  const api = useMemo(() => new PiCloudApi(), []);
   const [authPhase, setAuthPhase] = useState<AuthPhase>("checking");
   const [identity, setIdentity] = useState<TenantIdentityResource | null>(null);
   const [state, setState] = useState(createInitialSessionView);
@@ -84,7 +84,7 @@ export default function ChatApp() {
     (workspace) => workspace.workspaceId === selectedWorkspaceId,
   );
   const conversationPanel = useResizablePanel({
-    storageKey: "agent-dock:conversation-list",
+    storageKey: "pi-cloud:conversation-list",
     initialWidth: 260,
     minimumWidth: 210,
     maximumWidth: 420,
@@ -166,7 +166,7 @@ export default function ChatApp() {
       },
       (error: unknown) => {
         if (cancelled) return;
-        if (error instanceof AgentDockApiError && error.status === 401) {
+        if (error instanceof PiCloudApiError && error.status === 401) {
           setIdentity(null);
           setAuthPhase("anonymous");
           return;
@@ -601,7 +601,7 @@ export default function ChatApp() {
     return (
       <main className="product-loading-page">
         <div className="product-logo product-logo-large">A</div>
-        <span>AgentDock · 正在恢复登录状态…</span>
+        <span>PiCloud · 正在恢复登录状态…</span>
       </main>
     );
   }
@@ -647,7 +647,7 @@ export default function ChatApp() {
         <div className="product-panel-content product-sidebar-content">
           <header className="product-sidebar-brand">
             <div className="product-logo">A</div>
-            <strong>AgentDock</strong>
+            <strong>PiCloud</strong>
           </header>
           <div className="product-sidebar-actions">
             <button
@@ -1033,7 +1033,7 @@ export default function ChatApp() {
               <div className="product-welcome">
                 <div className="product-logo product-logo-large">A</div>
                 <h1>你好，{identity.displayName}</h1>
-                <p>今天想让 AgentDock 帮你完成什么？</p>
+                <p>今天想让 PiCloud 帮你完成什么？</p>
                 <div className="product-examples">
                   {EXAMPLE_PROMPTS.map((example) => (
                     <button key={example} onClick={() => setPrompt(example)} type="button">
@@ -1096,9 +1096,7 @@ export default function ChatApp() {
                   void submitTurn();
                 }
               }}
-              placeholder={
-                currentTurn ? "继续输入，消息会在当前任务后执行" : "给 AgentDock 发送消息"
-              }
+              placeholder={currentTurn ? "继续输入，消息会在当前任务后执行" : "给 PiCloud 发送消息"}
               rows={1}
               value={prompt}
             />

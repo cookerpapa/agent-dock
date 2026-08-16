@@ -10,7 +10,7 @@ import type {
   ToolSandboxCaptureResponse,
   ToolSandboxOperationRequest,
   ToolSandboxOperationResponse,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 
 export const SANDBOX_PROVIDER_API_VERSION = 1 as const;
 
@@ -230,7 +230,7 @@ export interface SandboxProvider {
   terminateAndConfirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void>;
   confirmAbsent(assignment: SupervisorRuntimeAssignment): Promise<void>;
   importGitHub?(
-    source: import("@agent-dock/protocol").GitHubRepositorySource,
+    source: import("@pi-cloud/protocol").GitHubRepositorySource,
     signal: AbortSignal,
   ): Promise<Uint8Array>;
   close(): Promise<void>;

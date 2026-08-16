@@ -1,6 +1,6 @@
-# AgentDock
+# PiCloud
 
-AgentDock is a self-hosted, multi-tenant Cloud Coding Agent built on the Pi
+PiCloud is a self-hosted, multi-tenant Cloud Coding Agent built on the Pi
 SDK. It keeps the Agent Loop and provider credentials in a trusted Worker pool,
 while every model-generated file or shell operation runs in a CubeSandbox KVM
 microVM.
@@ -66,7 +66,7 @@ reimplement Pi's unused generic Harness surface.
 
 The tenant-scoped PostgreSQL adapter implements Pi's public `SessionRepo` and
 `SessionStorage` ports. CI runs Pi 0.84.1's unmodified backend conformance suite
-against it; AgentDock then adds separate transaction-scoped authority and
+against it; PiCloud then adds separate transaction-scoped authority and
 tenant-isolation contracts required by the cloud Worker path.
 
 The browser projects the same native parent-linked entries as a human-readable
@@ -147,19 +147,19 @@ npm run production:backup
 
 `production:check` consumes real model tokens and exercises Cube KVM. The
 long-context gate additionally requires
-`AGENT_DOCK_LIVE_LONG_CONTEXT_CHECK=1`; it runs sustained coding Turns until Pi
+`PI_CLOUD_LIVE_LONG_CONTEXT_CHECK=1`; it runs sustained coding Turns until Pi
 performs native compaction, then verifies post-compaction coding and
 cross-Worker recovery.
 
 ## Kubernetes deployment
 
-The chart in `deploy/helm/agent-dock-platform` expects external PostgreSQL
+The chart in `deploy/helm/pi-cloud-platform` expects external PostgreSQL
 (plus a direct notification endpoint), Kafka, Valkey, ReadWriteMany persistent
 Workspace storage and Cube authorities. KEDA scales the shared Worker pool from
 the PostgreSQL ready-Run backlog.
 
 ```bash
-cp deploy/helm/agent-dock-platform/values.distributed.example.yaml values.yaml
+cp deploy/helm/pi-cloud-platform/values.distributed.example.yaml values.yaml
 npm run kubernetes:distributed:preflight -- --values values.yaml
 npm run kubernetes:distributed:deploy -- --values values.yaml
 ```
@@ -172,7 +172,7 @@ See [Distributed deployment](docs/DISTRIBUTED_DEPLOYMENT.md).
 ```bash
 npm ci
 npm run ci
-npm run test --workspace @agent-dock/pi-session-postgres
+npm run test --workspace @pi-cloud/pi-session-postgres
 npm run cubesandbox:template-check
 npm run production:check
 ```

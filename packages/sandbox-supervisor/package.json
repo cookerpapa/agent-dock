@@ -1,5 +1,5 @@
 {
-  "name": "@agent-dock/sandbox-supervisor",
+  "name": "@pi-cloud/sandbox-supervisor",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,11 +15,11 @@
     "test": "vitest --run"
   },
   "dependencies": {
-    "@agent-dock/fake-model-server": "0.1.0",
-    "@agent-dock/observability": "0.1.0",
-    "@agent-dock/pi-session-postgres": "0.1.0",
-    "@agent-dock/protocol": "0.1.0",
-    "@agent-dock/workspace-runtime": "0.1.0",
+    "@pi-cloud/fake-model-server": "0.1.0",
+    "@pi-cloud/observability": "0.1.0",
+    "@pi-cloud/pi-session-postgres": "0.1.0",
+    "@pi-cloud/protocol": "0.1.0",
+    "@pi-cloud/workspace-runtime": "0.1.0",
     "@earendil-works/pi-agent-core": "0.84.1",
     "@earendil-works/pi-ai": "0.84.1",
     "@earendil-works/pi-coding-agent": "0.84.1",

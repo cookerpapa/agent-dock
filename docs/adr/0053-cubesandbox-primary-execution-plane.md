@@ -6,7 +6,7 @@
 
 ## Context
 
-AgentDock separates the trusted Pi SDK runtime from untrusted Tool execution.
+PiCloud separates the trusted Pi SDK runtime from untrusted Tool execution.
 Tencent CubeSandbox supplies a complete KVM execution plane rather than only a
 queue: CubeAPI, CubeMaster, Cubelet, CubeShim/VMM, CubeProxy and Cube egress
 components create and route microVM Sandboxes.
@@ -29,13 +29,13 @@ Browser / REST / SSE
         -> CubeMaster / Cubelet / KVM microVM
 ```
 
-1. Cube owns physical placement and lifecycle. AgentDock owns tenants, Sessions,
+1. Cube owns physical placement and lifecycle. PiCloud owns tenants, Sessions,
    Runs/Attempts, leases, fences, Tool replay policy and terminal commits.
 2. Pi, provider credentials, PostgreSQL credentials and conversation state
    remain outside Cube. The guest contains only fixed
    toolchains and its assigned `/workspace`.
 3. CubeAPI is private and protected through its upstream authorization callback
-   using an AgentDock-owned constant-time authorizer. The trusted Manager has
+   using an PiCloud-owned constant-time authorizer. The trusted Manager has
    only the closed management permissions it requires.
 4. Chat-only Runs do not create a microVM. The first Tool call activates Cube;
    ADR-0068 governs exact-Session warm retention, rebinding and idle cleanup.

@@ -1,4 +1,4 @@
-import type { EventPublishMessage } from "@agent-dock/protocol";
+import type { EventPublishMessage } from "@pi-cloud/protocol";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -69,7 +69,7 @@ describe("in-memory live Session event store", () => {
 
 describe.skipIf(!existsSync("/usr/bin/redis-server"))("Valkey live Session event store", () => {
   beforeAll(async () => {
-    root = await mkdtemp(resolve(tmpdir(), "agent-dock-valkey-test-"));
+    root = await mkdtemp(resolve(tmpdir(), "pi-cloud-valkey-test-"));
     port = 20_000 + Math.floor(Math.random() * 20_000);
     const server = spawn(
       "/usr/bin/redis-server",

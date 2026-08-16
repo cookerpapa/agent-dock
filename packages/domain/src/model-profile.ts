@@ -1,4 +1,4 @@
-import { OpaqueIdSchema, PositiveSafeIntegerSchema } from "@agent-dock/protocol";
+import { OpaqueIdSchema, PositiveSafeIntegerSchema } from "@pi-cloud/protocol";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 

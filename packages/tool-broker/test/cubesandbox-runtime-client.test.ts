@@ -77,7 +77,7 @@ beforeAll(async () => {
         response.end(
           JSON.stringify({
             sandboxID: "cube-runtime-1",
-            templateID: "agent-dock-tool-v1",
+            templateID: "pi-cloud-tool-v1",
             state: runtimeState,
             domain: "cube.test",
             metadata: (body as { metadata?: unknown }).metadata,
@@ -93,10 +93,10 @@ beforeAll(async () => {
         response.end(
           JSON.stringify({
             sandboxID: "cube-runtime-1",
-            templateID: "agent-dock-tool-v1",
+            templateID: "pi-cloud-tool-v1",
             state: runtimeState,
             domain: "cube.test",
-            metadata: { "agentdock.managed": "true" },
+            metadata: { "picloud.managed": "true" },
           }),
         );
         return;
@@ -107,10 +107,10 @@ beforeAll(async () => {
           JSON.stringify([
             {
               sandboxID: "cube-runtime-1",
-              templateID: "agent-dock-tool-v1",
+              templateID: "pi-cloud-tool-v1",
               state: runtimeState,
               domain: "cube.test",
-              metadata: { "agentdock.managed": "true" },
+              metadata: { "picloud.managed": "true" },
             },
           ]),
         );
@@ -151,19 +151,19 @@ describe("official CubeSandbox HTTP compatibility client", () => {
       headers: { authorization: `Bearer ${"k".repeat(48)}` },
     });
     const volumeId = `adw-${"a".repeat(48)}`;
-    await expect(client.ensureVolume(volumeId, "agentdock-posix")).resolves.toEqual({
+    await expect(client.ensureVolume(volumeId, "picloud-posix")).resolves.toEqual({
       volumeId,
       name: volumeId,
     });
     expect(observed.find((request) => request.path === "/volumes")).toMatchObject({
       method: "POST",
       headers: { authorization: `Bearer ${"k".repeat(48)}` },
-      body: { name: volumeId, driver: "agentdock-posix" },
+      body: { name: volumeId, driver: "picloud-posix" },
     });
     const instance = await client.create({
-      templateId: "agent-dock-tool-v1",
+      templateId: "pi-cloud-tool-v1",
       timeoutSeconds: 900,
-      metadata: { "agentdock.managed": "true" },
+      metadata: { "picloud.managed": "true" },
       allowInternetAccess: true,
       allowPublicTraffic: false,
       volumeMounts: [{ name: volumeId, path: "/workspace" }],
@@ -172,7 +172,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
     expect(observed.find((request) => request.path === "/sandboxes")).toMatchObject({
       headers: { authorization: `Bearer ${"k".repeat(48)}` },
       body: {
-        templateID: "agent-dock-tool-v1",
+        templateID: "pi-cloud-tool-v1",
         timeout: 900,
         allow_internet_access: true,
         network: {
@@ -203,9 +203,9 @@ describe("official CubeSandbox HTTP compatibility client", () => {
         host: "49984-cube-runtime-1.cube.test",
         "e2b-traffic-access-token": "private-traffic-token",
         "cube-traffic-access-token": "private-traffic-token",
-        "x-agent-dock-handoff-secret": `adch_${"h".repeat(43)}`,
-        "x-agent-dock-fencing-token": "7",
-        "x-agent-dock-binding-sha256": "a".repeat(64),
+        "x-pi-cloud-handoff-secret": `adch_${"h".repeat(43)}`,
+        "x-pi-cloud-fencing-token": "7",
+        "x-pi-cloud-binding-sha256": "a".repeat(64),
       },
     });
     const terminal = await client.openTerminal(instance, {
@@ -230,9 +230,9 @@ describe("official CubeSandbox HTTP compatibility client", () => {
         host: "49984-cube-runtime-1.cube.test",
         "e2b-traffic-access-token": "private-traffic-token",
         "cube-traffic-access-token": "private-traffic-token",
-        "x-agent-dock-handoff-secret": `adch_${"h".repeat(43)}`,
-        "x-agent-dock-fencing-token": "7",
-        "x-agent-dock-binding-sha256": "a".repeat(64),
+        "x-pi-cloud-handoff-secret": `adch_${"h".repeat(43)}`,
+        "x-pi-cloud-fencing-token": "7",
+        "x-pi-cloud-binding-sha256": "a".repeat(64),
       },
     });
     expect(start?.body).toEqual({ rows: 24, cols: 100 });
@@ -244,7 +244,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
     });
     await expect(client.read(instance.sandboxId)).resolves.toMatchObject({
       sandboxId: "cube-runtime-1",
-      metadata: { "agentdock.managed": "true" },
+      metadata: { "picloud.managed": "true" },
     });
     await expect(client.list()).resolves.toHaveLength(1);
     await client.destroy(instance.sandboxId);

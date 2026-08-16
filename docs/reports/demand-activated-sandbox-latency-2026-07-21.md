@@ -5,7 +5,7 @@
 This report compares the production latency observed before ADR-0040 with a
 real-provider, four-Run Session after revision `db70dd6`. The deployment used
 the existing `deepseek-v4-flash` platform profile and the mandatory Kubernetes
-`RuntimeClass/agent-dock-gvisor` (`runsc`/KVM) execution plane. It is a measured
+`RuntimeClass/pi-cloud-gvisor` (`runsc`/KVM) execution plane. It is a measured
 single-host result, not a general provider benchmark.
 
 Measured Session:
@@ -57,7 +57,7 @@ restore and operation execution. In the following Run, the first Bash completed
 The Kubernetes identity before and after rebind was:
 
 ```text
-Pod:   agent-dock-tool-4ae2befb-0b02-43e2-88f9-0d751c144667
+Pod:   pi-cloud-tool-4ae2befb-0b02-43e2-88f9-0d751c144667
 UID:   33b047a8-228a-44d6-bde1-f6f18da6b882
 Run 2: fence=2, turn=0e8ddd90-8987-4157-8394-dc236f78545b
 Run 3: fence=3, turn=06d21db2-3aa2-432f-9030-c7437d437693

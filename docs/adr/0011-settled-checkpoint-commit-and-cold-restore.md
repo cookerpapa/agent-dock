@@ -25,7 +25,7 @@ Pi Session state and Workspace state have different durability owners:
    checkpoint head and Workspace version/head in one fenced PostgreSQL
    transaction. A failure before that transaction cannot expose a completed
    Run.
-3. Pi JSONL/SessionStorage remains Pi's conversation authority. AgentDock never
+3. Pi JSONL/SessionStorage remains Pi's conversation authority. PiCloud never
    reconstructs a competing mutable `messages[]` from browser text.
 4. Workspace bytes remain on the Workspace's persistent Cube Volume across
    warm reuse and fresh Cube activation. The checkpoint carries only provider

@@ -13,12 +13,12 @@ RUN sh scripts/retry-npm-command.sh ci --omit=dev --ignore-scripts \
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
 
-ARG AGENT_DOCK_VERSION=development
-ARG AGENT_DOCK_REVISION=unknown
-LABEL org.opencontainers.image.title="AgentDock trusted GitHub Gateway" \
+ARG PI_CLOUD_VERSION=development
+ARG PI_CLOUD_REVISION=unknown
+LABEL org.opencontainers.image.title="PiCloud trusted GitHub Gateway" \
       org.opencontainers.image.description="GitHub App token broker, exact snapshot importer and pull-request delivery boundary" \
-      org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
-      org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
+      org.opencontainers.image.version="${PI_CLOUD_VERSION}" \
+      org.opencontainers.image.revision="${PI_CLOUD_REVISION}"
 
 ENV NODE_ENV=production
 WORKDIR /app

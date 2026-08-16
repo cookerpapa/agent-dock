@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import type {
   AcceptedTurnResource,
   AcceptedTurnCancellationResource,
@@ -10,8 +10,8 @@ import type {
   EventPublishMessage,
   ProjectResource,
   SessionResource,
-} from "@agent-dock/protocol";
-import { parseControlToSupervisorMessage } from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
+import { parseControlToSupervisorMessage } from "@pi-cloud/protocol";
 import {
   WalEventSpoolStore,
   LocalSandboxSupervisor,
@@ -19,7 +19,7 @@ import {
   PiTurnError,
   type SandboxAssignmentInventory,
   type SandboxRuntimeAssignment,
-} from "@agent-dock/sandbox-supervisor";
+} from "@pi-cloud/sandbox-supervisor";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -45,10 +45,10 @@ import {
   createControlPlaneApplication,
 } from "../src/index.ts";
 import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
-import type { WorkerEventLogBatch } from "@agent-dock/runtime-core/worker-event-log";
-import { commitTerminalTurnEvent } from "@agent-dock/runtime-core/terminal-turn-event";
-import { MemoryLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
-import { LiveTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
+import type { WorkerEventLogBatch } from "@pi-cloud/runtime-core/worker-event-log";
+import { commitTerminalTurnEvent } from "@pi-cloud/runtime-core/terminal-turn-event";
+import { MemoryLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
+import { LiveTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 
 const IDS = {
   tenant: "00000000-0000-4000-8000-000000000001",
@@ -134,9 +134,9 @@ async function seedSingleUserProfile(): Promise<void> {
     .values({
       id: IDS.credential,
       tenant_id: IDS.tenant,
-      provider: "agent-dock-fake",
+      provider: "pi-cloud-fake",
       kind: "brokered",
-      secret_ref: "broker://test/agent-dock-fake",
+      secret_ref: "broker://test/pi-cloud-fake",
       version: 1,
       status: "active",
     })
@@ -147,8 +147,8 @@ async function seedSingleUserProfile(): Promise<void> {
       id: IDS.profile,
       tenant_id: IDS.tenant,
       name: "default",
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       default_thinking_level: "off",
       allowed_thinking_levels: ["off", "low"],
       credential_binding_id: IDS.credential,
@@ -518,7 +518,7 @@ async function createAssignedTurn(options: {
 }
 
 beforeAll(async () => {
-  let connectionString = process.env.AGENT_DOCK_TEST_DATABASE_URL;
+  let connectionString = process.env.PI_CLOUD_TEST_DATABASE_URL;
   if (!connectionString) {
     pglite = await PGlite.create();
     socketServer = new PGLiteSocketServer({
@@ -540,7 +540,7 @@ beforeAll(async () => {
   if (pglite === undefined) {
     sessionEventNotifications = new PostgresSessionEventNotifications({
       connectionString: databaseConnectionString,
-      applicationName: `agent-dock-api-test-${process.pid}`,
+      applicationName: `pi-cloud-api-test-${process.pid}`,
       initialReconnectDelayMs: 20,
       maxReconnectDelayMs: 100,
     });
@@ -2332,7 +2332,7 @@ describe.sequential("single-user durable turn intake API", () => {
     ).rejects.toMatchObject({ code: "event_store_invariant", retryable: true });
   });
 
-  it.skipIf(!process.env.AGENT_DOCK_TEST_DATABASE_URL)(
+  it.skipIf(!process.env.PI_CLOUD_TEST_DATABASE_URL)(
     "notifies a second control-plane replica without duplicating its durable SSE sequence",
     async () => {
       const assigned = await createAssignedTurn({
@@ -2344,7 +2344,7 @@ describe.sequential("single-user durable turn intake API", () => {
       });
       const secondNotifications = new PostgresSessionEventNotifications({
         connectionString: databaseConnectionString,
-        applicationName: `agent-dock-second-api-test-${process.pid}`,
+        applicationName: `pi-cloud-second-api-test-${process.pid}`,
         initialReconnectDelayMs: 20,
         maxReconnectDelayMs: 100,
       });
@@ -3012,7 +3012,7 @@ describe.sequential("single-user durable turn intake API", () => {
   });
 
   it("replays an ACK-lost event from a fresh supervisor spool without duplicating PostgreSQL", async () => {
-    const spoolRoot = await mkdtemp(resolve(tmpdir(), "agent-dock-durable-event-spool-"));
+    const spoolRoot = await mkdtemp(resolve(tmpdir(), "pi-cloud-durable-event-spool-"));
     try {
       const sessionResponse = await http.inject({
         method: "POST",

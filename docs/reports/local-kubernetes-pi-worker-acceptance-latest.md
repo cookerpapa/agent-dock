@@ -23,9 +23,9 @@ Kubernetes Worker PVCs held only replica-private boot/spool state.
 
 ## Real-model Worker failover
 
-- First Worker: `agent-dock-pi-worker-local-v1-1`
+- First Worker: `pi-cloud-pi-worker-local-v1-1`
 - Follow-up Worker after scaling out the owner:
-  `agent-dock-pi-worker-local-v1-0`
+  `pi-cloud-pi-worker-local-v1-0`
 - Native Pi session artifact restored: yes
 - Previous-turn marker recovered: yes
 - First/follow-up settlement: 1,547 / 1,784 ms

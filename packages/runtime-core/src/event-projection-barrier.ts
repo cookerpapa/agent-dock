@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type { Kysely } from "kysely";
 
 export interface EventProjectionBarrier {

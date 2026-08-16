@@ -1,0 +1,11 @@
+apiVersion: v2
+name: pi-cloud-pi-worker-pool
+description: Horizontally scalable trusted Pi SDK Workers for PiCloud
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+annotations:
+  pi-cloud.io/state-authority: "postgresql"
+  pi-cloud.io/scheduler: "postgresql-run-queue"
+  pi-cloud.io/tool-runtime: "remote-cubesandbox"

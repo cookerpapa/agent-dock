@@ -1,7 +1,7 @@
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
-import type { EventPublishMessage } from "@agent-dock/protocol";
-import { MemoryLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
-import { ValkeyLiveTurnSnapshotSource } from "@agent-dock/runtime-core/live-turn-snapshot";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
+import type { EventPublishMessage } from "@pi-cloud/protocol";
+import { MemoryLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
+import { ValkeyLiveTurnSnapshotSource } from "@pi-cloud/runtime-core/live-turn-snapshot";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import type { Kysely } from "kysely";
@@ -81,7 +81,7 @@ beforeAll(async () => {
     .values({
       id: IDS.credential,
       tenant_id: IDS.tenant,
-      provider: "agent-dock-fake",
+      provider: "pi-cloud-fake",
       kind: "api_key",
       secret_ref: "test://repair",
       version: 1,
@@ -94,8 +94,8 @@ beforeAll(async () => {
       id: IDS.profile,
       tenant_id: IDS.tenant,
       name: "repair-profile",
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       default_thinking_level: "off",
       allowed_thinking_levels: ["off"],
       credential_binding_id: IDS.credential,
@@ -138,8 +138,8 @@ beforeAll(async () => {
       input_kind: "prompt",
       input_text: "continue",
       model_profile_id: IDS.profile,
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       thinking_level: "off",
       credential_binding_id: IDS.credential,
       credential_binding_version: 1,

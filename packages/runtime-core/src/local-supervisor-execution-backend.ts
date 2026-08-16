@@ -3,16 +3,16 @@ import {
   LocalSandboxSupervisorError,
   PiTurnCancelledError,
   PiTurnError,
-} from "@agent-dock/sandbox-supervisor";
+} from "@pi-cloud/sandbox-supervisor";
 import {
-  AgentDockWireProtocolError,
+  PiCloudWireProtocolError,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
   type EventAckMessage,
   type EventPublishMessage,
   type CancelTurnCommandMessage,
   type ExecuteTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   TurnCancellationBackendError,
   type TurnCancellationBackend,
@@ -120,7 +120,7 @@ function normalizeBackendError(error: unknown): TurnExecutionBackendError {
   if (error instanceof LocalSandboxSupervisorError) {
     return new TurnExecutionBackendError(error.code, error.message, false);
   }
-  if (error instanceof AgentDockWireProtocolError) {
+  if (error instanceof PiCloudWireProtocolError) {
     return new TurnExecutionBackendError(
       "backend_protocol_violation",
       "Supervisor wire protocol validation failed",
@@ -142,7 +142,7 @@ function normalizeCancellationError(error: unknown): TurnCancellationBackendErro
   if (error instanceof LocalSandboxSupervisorError) {
     return new TurnCancellationBackendError(error.code, error.message, false);
   }
-  if (error instanceof AgentDockWireProtocolError) {
+  if (error instanceof PiCloudWireProtocolError) {
     return new TurnCancellationBackendError(
       "backend_protocol_violation",
       "Supervisor wire protocol validation failed",

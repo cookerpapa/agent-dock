@@ -85,7 +85,7 @@ export class ProductionHttpGateway {
         await reply.code(503).send({
           error: {
             code: "authentication_unavailable",
-            message: "The AgentDock identity service is temporarily unavailable",
+            message: "The PiCloud identity service is temporarily unavailable",
           },
         });
         return;
@@ -100,7 +100,7 @@ export class ProductionHttpGateway {
         .send({
           error: {
             code: "authentication_required",
-            message: "A valid AgentDock login session or API credential is required",
+            message: "A valid PiCloud login session or API credential is required",
           },
         });
     });

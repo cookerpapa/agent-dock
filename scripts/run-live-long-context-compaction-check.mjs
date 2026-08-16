@@ -7,28 +7,28 @@ import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { format } from "prettier";
-import { AgentDockApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
+import { PiCloudApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-if (process.env.AGENT_DOCK_LIVE_LONG_CONTEXT_CHECK !== "1") {
+if (process.env.PI_CLOUD_LIVE_LONG_CONTEXT_CHECK !== "1") {
   throw new Error(
-    "Set AGENT_DOCK_LIVE_LONG_CONTEXT_CHECK=1 to acknowledge sustained real-model and Cube KVM usage",
+    "Set PI_CLOUD_LIVE_LONG_CONTEXT_CHECK=1 to acknowledge sustained real-model and Cube KVM usage",
   );
 }
 
-const maximumCodingTurns = Number(process.env.AGENT_DOCK_LONG_CONTEXT_MAX_TURNS ?? "32");
+const maximumCodingTurns = Number(process.env.PI_CLOUD_LONG_CONTEXT_MAX_TURNS ?? "32");
 if (
   !Number.isSafeInteger(maximumCodingTurns) ||
   maximumCodingTurns < 8 ||
   maximumCodingTurns > 64
 ) {
-  throw new Error("AGENT_DOCK_LONG_CONTEXT_MAX_TURNS must be an integer between 8 and 64");
+  throw new Error("PI_CLOUD_LONG_CONTEXT_MAX_TURNS must be an integer between 8 and 64");
 }
-const writeReport = process.env.AGENT_DOCK_LONG_CONTEXT_REPORT !== "0";
+const writeReport = process.env.PI_CLOUD_LONG_CONTEXT_REPORT !== "0";
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 
 async function readPrivate(path, maximumBytes, label) {
@@ -59,8 +59,8 @@ const environment = Object.fromEntries(
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
 );
-const bindAddress = environment.AGENT_DOCK_HTTP_BIND_ADDRESS;
-const port = environment.AGENT_DOCK_HTTP_PORT;
+const bindAddress = environment.PI_CLOUD_HTTP_BIND_ADDRESS;
+const port = environment.PI_CLOUD_HTTP_PORT;
 if (bindAddress === undefined || port === undefined) {
   throw new Error("Production HTTP endpoint configuration is missing");
 }
@@ -76,7 +76,7 @@ const fetchFromProduction = (input, init = {}) =>
     ...init,
     signal: init.signal ?? AbortSignal.timeout(20 * 60_000),
   });
-let api = new AgentDockApi(fetchFromProduction, bootstrapToken);
+let api = new PiCloudApi(fetchFromProduction, bootstrapToken);
 let authorizationToken = bootstrapToken;
 let tenantId;
 
@@ -119,9 +119,9 @@ async function psql(query) {
     "postgres",
     "psql",
     "--username",
-    "agent_dock",
+    "pi_cloud",
     "--dbname",
-    "agent_dock",
+    "pi_cloud",
     "--no-align",
     "--tuples-only",
     "--set",
@@ -141,7 +141,7 @@ async function acceptanceIdentity(suffix) {
       limit 1`,
   );
   if (reusable.length === 0) {
-    return new AgentDockApi(fetchFromProduction).registerTenant(
+    return new PiCloudApi(fetchFromProduction).registerTenant(
       `long-context-${suffix}`.replaceAll(/[^a-z0-9-]/g, "-").slice(0, 63),
       "Long-context compaction acceptance",
     );
@@ -739,7 +739,7 @@ const bootstrapApi = api;
 const suffix = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
 const marker = `ALGO-LAB-${suffix.toUpperCase()}`;
 const registration = await acceptanceIdentity(suffix);
-api = new AgentDockApi(fetchFromProduction, registration.apiToken);
+api = new PiCloudApi(fetchFromProduction, registration.apiToken);
 authorizationToken = registration.apiToken;
 tenantId = registration.tenantId;
 const model = await api.getModelConfiguration();

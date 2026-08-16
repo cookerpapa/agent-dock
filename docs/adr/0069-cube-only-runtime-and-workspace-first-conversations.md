@@ -7,7 +7,7 @@
 
 ## Context
 
-Agent Dock's untrusted Tool execution already runs in CubeSandbox, but the
+Pi Cloud's untrusted Tool execution already runs in CubeSandbox, but the
 repository still constructed a Kubernetes gVisor provider for repository
 imports and dependency bootstrap. That left two executable isolation paths,
 two deployment stacks and misleading product copy even though Cube is the

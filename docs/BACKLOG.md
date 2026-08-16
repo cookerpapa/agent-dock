@@ -6,6 +6,8 @@ retired and remain only in Git history or explicitly superseded ADRs.
 
 ## Release verification
 
+- [x] Rename the maintained product and deployment contract to Pi Cloud without
+      retaining mixed pre-release runtime identifiers.
 - [ ] Keep formatting, typecheck, unit/integration, build, Helm and security
       gates green.
 - [ ] Run a clean self-hosted install after every deployment contract change.

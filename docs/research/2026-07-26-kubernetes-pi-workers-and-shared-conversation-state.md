@@ -38,7 +38,7 @@ stable unique identity and persistent storage across rescheduling. Each ordinal
 can receive its own persistent claim, while `Parallel` Pod management permits
 independent replicas to start and stop concurrently.
 
-This matches AgentDock's current boot-ledger/event-spool contract. Kubernetes
+This matches PiCloud's current boot-ledger/event-spool contract. Kubernetes
 also recommends `ReadWriteOncePod` when one Pod must exclusively mount a claim.
 
 Sources:
@@ -51,7 +51,7 @@ Sources:
 
 A Deployment is the simpler choice for interchangeable stateless pollers. It
 would be preferable if the Worker held no private crash-recovery bytes.
-AgentDock cannot use it honestly today because a replacement Pod would not
+PiCloud cannot use it honestly today because a replacement Pod would not
 automatically reacquire the previous Pod's unacknowledged event spool and boot
 ledger.
 
@@ -67,7 +67,7 @@ versions control new Workflow routing and permit rollback.
 
 The installed TypeScript SDK is `1.21.1`. The self-hosted Server image is
 Temporal `1.29.1`, which is the documented minimum Server version for current
-Worker Deployment Versioning. AgentDock's per-Run Workflow is bounded, so
+Worker Deployment Versioning. PiCloud's per-Run Workflow is bounded, so
 `PINNED` is a better fit than automatically moving one Run between revisions.
 
 Sources:
@@ -88,7 +88,7 @@ drain cleanup, HPA, and KEDA. Its own guidance prefers:
   counts;
 - KEDA for scale-to-zero, long idle periods, or faster first-backlog reaction.
 
-The Controller creates and manages Kubernetes Deployments. AgentDock currently
+The Controller creates and manages Kubernetes Deployments. PiCloud currently
 needs stable per-replica private storage, so adopting it would either discard
 delivery state or require a separate spool migration first.
 
@@ -133,7 +133,7 @@ operator manages a primary with hot standbys, failover, rolling updates,
 backups, and services that follow the current writer. Its documentation
 recommends shared-nothing replicas across nodes/zones.
 
-AgentDock does not bundle CloudNativePG in the Worker chart. Database lifecycle,
+PiCloud does not bundle CloudNativePG in the Worker chart. Database lifecycle,
 backup, storage class, RPO/RTO, and availability-zone policy are a separate
 operator concern. The Worker contract accepts one PostgreSQL URL, so a managed
 database, CloudNativePG `-rw` Service, or another compatible HA endpoint can be

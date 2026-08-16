@@ -111,7 +111,7 @@ function renderTranscript({ title, messages, source }) {
 async function fetchShareHtml(url) {
   try {
     const response = await fetch(url, {
-      headers: { "user-agent": "Mozilla/5.0 AgentDock discussion importer" },
+      headers: { "user-agent": "Mozilla/5.0 PiCloud discussion importer" },
       redirect: "follow",
       signal: AbortSignal.timeout(60_000),
     });

@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type { Kysely } from "kysely";
 import type { ProductionBootstrapConfig } from "./production-config.ts";
 import { tenantApiTokenDigest } from "./tenant-identity.ts";
@@ -98,7 +98,7 @@ export async function bootstrapProductionDatabase(
       .values({
         id: config.userId,
         tenant_id: config.tenantId,
-        display_name: "AgentDock Operator",
+        display_name: "PiCloud Operator",
       })
       .onConflict((conflict) => conflict.column("id").doNothing())
       .executeTakeFirst();
@@ -108,7 +108,7 @@ export async function bootstrapProductionDatabase(
       .where("id", "=", config.userId)
       .executeTakeFirstOrThrow();
     exact(
-      user.tenant_id === config.tenantId && user.display_name === "AgentDock Operator",
+      user.tenant_id === config.tenantId && user.display_name === "PiCloud Operator",
       "operator user",
     );
 
@@ -117,7 +117,7 @@ export async function bootstrapProductionDatabase(
       .values({
         id: config.credentialBindingId,
         tenant_id: config.tenantId,
-        provider: "agent-dock-fake",
+        provider: "pi-cloud-fake",
         kind: "brokered",
         secret_ref: "broker://self-hosted/deterministic-java-repair",
         version: 1,
@@ -133,7 +133,7 @@ export async function bootstrapProductionDatabase(
       .where("version", "=", "1")
       .executeTakeFirstOrThrow();
     exact(
-      credential.provider === "agent-dock-fake" &&
+      credential.provider === "pi-cloud-fake" &&
         credential.kind === "brokered" &&
         credential.secret_ref === "broker://self-hosted/deterministic-java-repair" &&
         credential.status === "active",
@@ -146,8 +146,8 @@ export async function bootstrapProductionDatabase(
         id: config.modelProfileId,
         tenant_id: config.tenantId,
         name: config.modelProfileName,
-        provider: "agent-dock-fake",
-        model_id: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        model_id: "pi-cloud-fake",
         default_thinking_level: "off",
         allowed_thinking_levels: ["off"],
         credential_binding_id: config.credentialBindingId,
@@ -193,8 +193,8 @@ export async function bootstrapProductionDatabase(
       .execute();
     const credentialVersion = Number(profile.credential_binding_version);
     const deterministicProfile =
-      profile.provider === "agent-dock-fake" &&
-      profile.model_id === "agent-dock-fake" &&
+      profile.provider === "pi-cloud-fake" &&
+      profile.model_id === "pi-cloud-fake" &&
       credentialVersion === 1;
     const ownerConfiguredDeepSeekProfile =
       profile.provider === "deepseek" &&

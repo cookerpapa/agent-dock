@@ -35,9 +35,9 @@ function parseArguments(argv) {
     output: undefined,
     passphraseFile: undefined,
     runtimeDirectory:
-      process.env.AGENT_DOCK_RUNTIME_DIRECTORY ??
+      process.env.PI_CLOUD_RUNTIME_DIRECTORY ??
       resolve(repositoryRoot, "deploy/production/runtime"),
-    projectName: process.env.COMPOSE_PROJECT_NAME ?? "agent-dock-production",
+    projectName: process.env.COMPOSE_PROJECT_NAME ?? "pi-cloud-production",
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -81,7 +81,7 @@ async function assertRuntimeTree(path) {
       segments[0] === "state" &&
       segments[1] === "cube-shared" &&
       segments[2] === "volume" &&
-      /^agentdock-posix-adw-[0-9a-f]{48}$/.test(segments[3]) &&
+      /^picloud-posix-adw-[0-9a-f]{48}$/.test(segments[3]) &&
       segments[4] === "workspace"
     );
   }
@@ -118,10 +118,10 @@ async function imageEvidence(imageVersion, cubeToolRevision) {
     "provider-egress-relay",
   ];
   const references = [
-    ...productionRepositories.map((repository) => `agent-dock/${repository}:${imageVersion}`),
-    "agent-dock/cube-api-authorizer:local",
-    "agent-dock/cube-egress-gateway:local",
-    `localhost:5000/agent-dock/cubesandbox-tool:${cubeToolRevision}`,
+    ...productionRepositories.map((repository) => `pi-cloud/${repository}:${imageVersion}`),
+    "pi-cloud/cube-api-authorizer:local",
+    "pi-cloud/cube-egress-gateway:local",
+    `localhost:5000/pi-cloud/cubesandbox-tool:${cubeToolRevision}`,
   ];
   return Promise.all(
     references.map(async (reference) => ({
@@ -153,7 +153,7 @@ const environment = Object.fromEntries(
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
 );
-const imageVersion = environment.AGENT_DOCK_IMAGE_VERSION;
+const imageVersion = environment.PI_CLOUD_IMAGE_VERSION;
 if (imageVersion === undefined || !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(imageVersion)) {
   throw new Error("Production image version is missing or invalid");
 }
@@ -174,7 +174,7 @@ await capture(process.execPath, ["scripts/production-compose.mjs", "config", "--
   cwd: repositoryRoot,
   environment: {
     ...process.env,
-    AGENT_DOCK_RUNTIME_DIRECTORY: options.runtimeDirectory,
+    PI_CLOUD_RUNTIME_DIRECTORY: options.runtimeDirectory,
     COMPOSE_PROJECT_NAME: options.projectName,
   },
 });
@@ -186,7 +186,7 @@ for (const logicalName of BACKUP_VOLUMES) {
 }
 
 const passphrase = await readPassphrase(options.passphraseFile);
-const temporaryDirectory = await mkdtemp(join(tmpdir(), "agent-dock-backup-"));
+const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-cloud-backup-"));
 try {
   const stageDirectory = resolve(temporaryDirectory, "stage");
   const volumeDirectory = resolve(stageDirectory, "volumes");

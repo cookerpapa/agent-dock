@@ -59,7 +59,7 @@ afterEach(async () => {
 
 describe("shared workspace runtime", () => {
   it("round-trips a bounded snapshot envelope without replacing the Git baseline", async () => {
-    const source = await temporaryDirectory("agent-dock-workspace-runtime-source-");
+    const source = await temporaryDirectory("pi-cloud-workspace-runtime-source-");
     await mkdir(resolve(source, ".git"));
     await mkdir(resolve(source, "src"));
     await writeFile(resolve(source, "src/App.java"), "class App {}\n");
@@ -70,7 +70,7 @@ describe("shared workspace runtime", () => {
     const restoredEnvelope = decodeWorkspaceSnapshotBlob(encodeWorkspaceSnapshotBlob(snapshot));
     expect(Buffer.from(restoredEnvelope)).toEqual(Buffer.from(snapshot));
 
-    const target = await temporaryDirectory("agent-dock-workspace-runtime-target-");
+    const target = await temporaryDirectory("pi-cloud-workspace-runtime-target-");
     await mkdir(resolve(target, ".git"));
     await writeFile(resolve(target, ".git/HEAD"), "fixture-baseline\n");
     await writeFile(resolve(target, "stale.txt"), "remove me");
@@ -85,8 +85,8 @@ describe("shared workspace runtime", () => {
   });
 
   it("keeps the platform baseline outside the user tree while collecting a cumulative patch", async () => {
-    const root = await temporaryDirectory("agent-dock-workspace-runtime-patch-");
-    const metadata = await temporaryDirectory("agent-dock-workspace-runtime-metadata-");
+    const root = await temporaryDirectory("pi-cloud-workspace-runtime-patch-");
+    const metadata = await temporaryDirectory("pi-cloud-workspace-runtime-metadata-");
     const gitDirectory = resolve(metadata, "git");
     await mkdir(resolve(root, "src"));
     await writeFile(resolve(root, "tracked.txt"), "before\n");
@@ -146,7 +146,7 @@ describe("shared workspace runtime", () => {
   });
 
   it("indexes a large Workspace without embedding file bytes or dropping nested Git state", async () => {
-    const root = await temporaryDirectory("agent-dock-cube-workspace-index-");
+    const root = await temporaryDirectory("pi-cloud-cube-workspace-index-");
     await mkdir(resolve(root, ".git"));
     await writeFile(resolve(root, ".git/HEAD"), "ref: refs/heads/main\n");
     await mkdir(resolve(root, "nested/.git"), { recursive: true });
@@ -167,7 +167,7 @@ describe("shared workspace runtime", () => {
   });
 
   it("indexes symlinks without following them", async () => {
-    const root = await temporaryDirectory("agent-dock-cube-workspace-link-");
+    const root = await temporaryDirectory("pi-cloud-cube-workspace-link-");
     await writeFile(resolve(root, "target.txt"), "target\n");
     await symlink("target.txt", resolve(root, "link.txt"));
     const index = await captureWorkspaceIndex(root);
@@ -230,7 +230,7 @@ describe("shared workspace runtime", () => {
 
     const previousLayout = {
       ...(JSON.parse(Buffer.from(checkpoint).toString("utf8")) as Record<string, unknown>),
-      format: "agent-dock.workspace-volume-reference.v0",
+      format: "pi-cloud.workspace-volume-reference.v0",
     };
     expect(
       parsePersistentVolumeReference(Buffer.from(JSON.stringify(previousLayout))),

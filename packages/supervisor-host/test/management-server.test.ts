@@ -2,16 +2,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  parseControlToSupervisorMessage,
-  type SteerTurnCommandMessage,
-} from "@agent-dock/protocol";
+import { parseControlToSupervisorMessage, type SteerTurnCommandMessage } from "@pi-cloud/protocol";
 
 import {
   HttpSandboxAssignmentInventory,
   HttpSupervisorManagementClient,
   HttpSupervisorOwnerBoundary,
-} from "@agent-dock/control-plane";
+} from "@pi-cloud/control-plane";
 import {
   SupervisorBootLedger,
   SupervisorManagementServer,
@@ -27,7 +24,7 @@ const IDENTITY: SupervisorHostBootIdentity = {
 const RUNTIME_ID = "66666666-6666-4666-8666-666666666666";
 const ASSIGNMENT = {
   runtimeId: RUNTIME_ID,
-  runtimeName: "agent-dock-runtime-1",
+  runtimeName: "pi-cloud-runtime-1",
   ...IDENTITY,
   commandId: "10000000-0000-4000-8000-000000000003",
   workspaceId: "10000000-0000-4000-8000-000000000008",
@@ -57,7 +54,7 @@ afterEach(async () => {
 });
 
 async function harness() {
-  const directory = await mkdtemp(join(tmpdir(), "agent-dock-management-"));
+  const directory = await mkdtemp(join(tmpdir(), "pi-cloud-management-"));
   roots.push(directory);
   const ledger = new SupervisorBootLedger({
     rootDirectory: directory,

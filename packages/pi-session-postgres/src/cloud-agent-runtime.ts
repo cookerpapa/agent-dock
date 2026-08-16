@@ -92,7 +92,7 @@ export type CloudAgentRunResult = Readonly<{
   error?: Readonly<{ code: string; message: string }>;
 }>;
 
-const INTERRUPTION_CUSTOM_TYPE = "agent-dock.run_interrupted";
+const INTERRUPTION_CUSTOM_TYPE = "pi-cloud.run_interrupted";
 const UNKNOWN_TOOL_EFFECT_TEXT =
   "The previous Worker stopped while this Tool was active. Its side effects are unknown. " +
   "Do not replay it blindly; inspect the Workspace and environment before continuing.";
@@ -697,7 +697,7 @@ export class CloudAgentRuntime {
           toolCallId: tool.toolCallId,
           toolName: tool.toolName,
           content: [{ type: "text", text: UNKNOWN_TOOL_EFFECT_TEXT }],
-          details: { kind: "agent-dock.unknown_tool_effect" },
+          details: { kind: "pi-cloud.unknown_tool_effect" },
           isError: true,
           timestamp: Date.now(),
         };

@@ -78,7 +78,7 @@ function integer(
 
 async function readSecret(path: string): Promise<string> {
   if (!isAbsolute(path) || path.includes("\0")) {
-    throw new TypeError("AGENT_DOCK_TOOL_BROKER_TOKEN_FILE must be an absolute path");
+    throw new TypeError("PI_CLOUD_TOOL_BROKER_TOKEN_FILE must be an absolute path");
   }
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -151,26 +151,26 @@ export async function loadToolBrokerConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<ToolBrokerConfig> {
   if (
-    environment.AGENT_DOCK_DOCKER_COMMAND !== undefined ||
-    environment.AGENT_DOCK_REPOSITORY_IMPORT_NETWORK !== undefined ||
-    Object.keys(environment).some((name) => name.startsWith("AGENT_DOCK_MICROVM_"))
+    environment.PI_CLOUD_DOCKER_COMMAND !== undefined ||
+    environment.PI_CLOUD_REPOSITORY_IMPORT_NETWORK !== undefined ||
+    Object.keys(environment).some((name) => name.startsWith("PI_CLOUD_MICROVM_"))
   ) {
     throw new TypeError(
       "Legacy Sandbox Provider configuration was removed; select a current trusted Provider",
     );
   }
-  const cubeProxyScheme = environment.AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME ?? "http";
+  const cubeProxyScheme = environment.PI_CLOUD_CUBESANDBOX_PROXY_SCHEME ?? "http";
   if (cubeProxyScheme !== "http" && cubeProxyScheme !== "https") {
-    throw new TypeError("AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME is invalid");
+    throw new TypeError("PI_CLOUD_CUBESANDBOX_PROXY_SCHEME is invalid");
   }
   const ownershipLeaseMs = integer(
-    environment.AGENT_DOCK_TOOL_BROKER_OWNERSHIP_LEASE_MS,
+    environment.PI_CLOUD_TOOL_BROKER_OWNERSHIP_LEASE_MS,
     15_000,
     3_000,
     300_000,
   );
   const ownershipHeartbeatMs = integer(
-    environment.AGENT_DOCK_TOOL_BROKER_OWNERSHIP_HEARTBEAT_MS,
+    environment.PI_CLOUD_TOOL_BROKER_OWNERSHIP_HEARTBEAT_MS,
     5_000,
     1_000,
     60_000,
@@ -179,105 +179,103 @@ export async function loadToolBrokerConfig(
     throw new TypeError("Tool Broker heartbeat must leave lease failure margin");
   }
   return {
-    host: bounded(environment.AGENT_DOCK_TOOL_BROKER_HOST ?? "127.0.0.1", "host", 256),
-    port: integer(environment.AGENT_DOCK_TOOL_BROKER_PORT, 4_300, 1, 65_535),
+    host: bounded(environment.PI_CLOUD_TOOL_BROKER_HOST ?? "127.0.0.1", "host", 256),
+    port: integer(environment.PI_CLOUD_TOOL_BROKER_PORT, 4_300, 1, 65_535),
     databaseUrl: await readDatabaseUrl(required(environment, "DATABASE_URL_FILE")),
     sandboxDomainId: bounded(
-      required(environment, "AGENT_DOCK_SANDBOX_DOMAIN_ID"),
+      required(environment, "PI_CLOUD_SANDBOX_DOMAIN_ID"),
       "sandboxDomainId",
       64,
     ),
     advertisedBaseUrl: serviceUrl(
-      required(environment, "AGENT_DOCK_TOOL_BROKER_ADVERTISED_URL"),
+      required(environment, "PI_CLOUD_TOOL_BROKER_ADVERTISED_URL"),
       "advertisedBaseUrl",
     ),
     ownershipLeaseMs,
     ownershipHeartbeatMs,
-    serviceToken: await readSecret(required(environment, "AGENT_DOCK_TOOL_BROKER_TOKEN_FILE")),
+    serviceToken: await readSecret(required(environment, "PI_CLOUD_TOOL_BROKER_TOKEN_FILE")),
     terminalToken: await readSecret(
-      required(environment, "AGENT_DOCK_WORKSPACE_TERMINAL_TOKEN_FILE"),
+      required(environment, "PI_CLOUD_WORKSPACE_TERMINAL_TOKEN_FILE"),
     ),
-    ...(environment.AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE === undefined
+    ...(environment.PI_CLOUD_SANDBOX_MATERIALIZER_TOKEN_FILE === undefined
       ? {}
       : {
-          materializerToken: await readSecret(
-            environment.AGENT_DOCK_SANDBOX_MATERIALIZER_TOKEN_FILE,
-          ),
+          materializerToken: await readSecret(environment.PI_CLOUD_SANDBOX_MATERIALIZER_TOKEN_FILE),
         }),
     imageRevision: bounded(
-      required(environment, "AGENT_DOCK_IMAGE_REVISION"),
-      "AGENT_DOCK_IMAGE_REVISION",
+      required(environment, "PI_CLOUD_IMAGE_REVISION"),
+      "PI_CLOUD_IMAGE_REVISION",
       128,
     ),
     maximumActiveSandboxes: integer(
-      environment.AGENT_DOCK_MAXIMUM_ACTIVE_TOOL_SANDBOXES,
+      environment.PI_CLOUD_MAXIMUM_ACTIVE_TOOL_SANDBOXES,
       2,
       1,
       1_000,
     ),
     warmTtlMs: integer(
-      environment.AGENT_DOCK_SANDBOX_WARM_TTL_MS,
+      environment.PI_CLOUD_SANDBOX_WARM_TTL_MS,
       15 * 60_000,
       1_000,
       24 * 60 * 60_000,
     ),
-    maximumWarmActivations: integer(environment.AGENT_DOCK_MAXIMUM_WARM_SANDBOXES, 4, 1, 1_000),
+    maximumWarmActivations: integer(environment.PI_CLOUD_MAXIMUM_WARM_SANDBOXES, 4, 1, 1_000),
     cubeSandbox: {
       apiUrl: bounded(
-        required(environment, "AGENT_DOCK_CUBESANDBOX_API_URL"),
+        required(environment, "PI_CLOUD_CUBESANDBOX_API_URL"),
         "cubeSandboxApiUrl",
         2_048,
       ),
-      apiKey: await readCubeApiKey(required(environment, "AGENT_DOCK_CUBESANDBOX_API_KEY_FILE")),
+      apiKey: await readCubeApiKey(required(environment, "PI_CLOUD_CUBESANDBOX_API_KEY_FILE")),
       templateId: bounded(
-        required(environment, "AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID"),
+        required(environment, "PI_CLOUD_CUBESANDBOX_TEMPLATE_ID"),
         "cubeSandboxTemplateId",
         256,
       ),
       proxyNodeIp: bounded(
-        required(environment, "AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP"),
+        required(environment, "PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP"),
         "cubeSandboxProxyNodeIp",
         253,
       ),
       proxyPort: integer(
-        environment.AGENT_DOCK_CUBESANDBOX_PROXY_PORT,
+        environment.PI_CLOUD_CUBESANDBOX_PROXY_PORT,
         cubeProxyScheme === "https" ? 443 : 80,
         1,
         65_535,
       ),
       proxyScheme: cubeProxyScheme,
       sandboxDomain: bounded(
-        environment.AGENT_DOCK_CUBESANDBOX_DOMAIN ?? "cube.app",
+        environment.PI_CLOUD_CUBESANDBOX_DOMAIN ?? "cube.app",
         "cubeSandboxDomain",
         253,
       ),
       egressProxyHost: bounded(
-        environment.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254",
+        environment.PI_CLOUD_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254",
         "cubeSandboxEgressProxyHost",
         15,
       ),
       egressProxyPort: integer(
-        environment.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_PORT,
+        environment.PI_CLOUD_CUBESANDBOX_EGRESS_PROXY_PORT,
         3_128,
         1,
         65_535,
       ),
       requestTimeoutMs: integer(
-        environment.AGENT_DOCK_CUBESANDBOX_REQUEST_TIMEOUT_MS,
+        environment.PI_CLOUD_CUBESANDBOX_REQUEST_TIMEOUT_MS,
         30_000,
         1_000,
         300_000,
       ),
       workspaceVolumeGatewayUrl: bounded(
-        required(environment, "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL"),
-        "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL",
+        required(environment, "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_URL"),
+        "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_URL",
         2_048,
       ),
       workspaceVolumeGatewayToken: await readSecret(
-        required(environment, "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE"),
+        required(environment, "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE"),
       ),
       workspaceVolumeGatewayRequestTimeoutMs: integer(
-        environment.AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS,
+        environment.PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS,
         660_000,
         1_000,
         900_000,

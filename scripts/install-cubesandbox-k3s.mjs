@@ -20,21 +20,21 @@ const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const kubeconfig = "/etc/rancher/k3s/k3s.yaml";
 const cubeRepository = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_CUBESANDBOX_REPOSITORY ?? "../CubeSandbox",
+  process.env.PI_CLOUD_CUBESANDBOX_REPOSITORY ?? "../CubeSandbox",
 );
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 const credentialPath = resolve(runtimeDirectory, "secrets/cubesandbox-api-key");
 const secretValuesPath = resolve(runtimeDirectory, "cubesandbox/secret-values.yaml");
 const cubeMasterCliPath = resolve(runtimeDirectory, "cubesandbox/cubemastercli");
-const authorizerImageRepository = "agent-dock/cube-api-authorizer";
-const cubeEgressGatewayImageRepository = "agent-dock/cube-egress-gateway";
+const authorizerImageRepository = "pi-cloud/cube-api-authorizer";
+const cubeEgressGatewayImageRepository = "pi-cloud/cube-egress-gateway";
 const cubeEgressConfigTokenPath = resolve(runtimeDirectory, "secrets/cube-egress-config-token");
 const k3sImageDirectory = "/var/lib/rancher/k3s/agent/images";
 const wslStableNodeIp = "10.255.255.254";
-const wslStableNodeInterface = "agentdock0";
+const wslStableNodeInterface = "picloud0";
 const wslStableNodeMtu = 1_500;
 const wslFlannelMtu = 1_450;
 const noProxyEntries = [
@@ -54,24 +54,24 @@ const environment = {
   NO_PROXY: noProxyEntries,
   no_proxy: noProxyEntries,
 };
-const kubectlCommand = process.env.AGENT_DOCK_KUBECTL_BIN ?? "/usr/local/bin/k3s";
-const kubectlPrefix = process.env.AGENT_DOCK_KUBECTL_BIN === undefined ? ["kubectl"] : [];
+const kubectlCommand = process.env.PI_CLOUD_KUBECTL_BIN ?? "/usr/local/bin/k3s";
+const kubectlPrefix = process.env.PI_CLOUD_KUBECTL_BIN === undefined ? ["kubectl"] : [];
 const k3sConfigPath = "/etc/rancher/k3s/config.yaml";
-const k3sWslPreparePath = "/usr/local/libexec/agent-dock-prepare-k3s-wsl";
-const k3sServiceRouteHelperPath = "/usr/local/libexec/agent-dock-route-k3s-services";
+const k3sWslPreparePath = "/usr/local/libexec/pi-cloud-prepare-k3s-wsl";
+const k3sServiceRouteHelperPath = "/usr/local/libexec/pi-cloud-route-k3s-services";
 const k3sServiceRouteDropInPath =
-  "/etc/systemd/system/k3s.service.d/agent-dock-cube-service-route.conf";
-const cubeSysctlPath = "/etc/sysctl.d/90-agent-dock-cubesandbox.conf";
+  "/etc/systemd/system/k3s.service.d/pi-cloud-cube-service-route.conf";
+const cubeSysctlPath = "/etc/sysctl.d/90-pi-cloud-cubesandbox.conf";
 const inotifyInstanceLimitPath = "/proc/sys/fs/inotify/max_user_instances";
 const minimumInotifyInstances = 1_024;
 const k3sServiceCidr = "10.43.0.0/16";
-const templateRegistryTlsSecret = "agent-dock-cube-template-registry-tls";
+const templateRegistryTlsSecret = "pi-cloud-cube-template-registry-tls";
 const templateRegistryDockerTrustDirectory = "/etc/docker/certs.d/localhost:5000";
-const posixVolumePluginName = "agentdock-posix";
-const posixVolumePluginConfigMap = "agent-dock-posix-volume-plugin";
+const posixVolumePluginName = "picloud-posix";
+const posixVolumePluginConfigMap = "pi-cloud-posix-volume-plugin";
 const posixVolumePluginSource = resolve(
   repositoryRoot,
-  "deploy/cubesandbox/cube-volume-agentdock-posix.sh",
+  "deploy/cubesandbox/cube-volume-picloud-posix.sh",
 );
 const posixSharedRoot = resolve(runtimeDirectory, "state/cube-shared");
 const posixVolumeRoot = resolve(posixSharedRoot, "volume");
@@ -266,12 +266,12 @@ async function ensureHostInotifyCapacity() {
 
   const desiredLimit = Math.max(configuredLimit, minimumInotifyInstances);
   const configuration = [
-    "# Managed by AgentDock for the local CubeSandbox Kubernetes profile.",
+    "# Managed by PiCloud for the local CubeSandbox Kubernetes profile.",
     `fs.inotify.max_user_instances = ${String(desiredLimit)}`,
     "",
   ].join("\n");
   if ((await readOptional(cubeSysctlPath)) !== configuration) {
-    const temporaryPath = `${cubeSysctlPath}.agent-dock.tmp`;
+    const temporaryPath = `${cubeSysctlPath}.pi-cloud.tmp`;
     await writeFile(temporaryPath, configuration, { mode: 0o644 });
     await rename(temporaryPath, cubeSysctlPath);
   }
@@ -288,7 +288,7 @@ async function ensureHostInotifyCapacity() {
 }
 
 function stableWslInterfacePreparation() {
-  return `# AgentDock gives K3s a stable WSL node address on an MTU-bounded
+  return `# PiCloud gives K3s a stable WSL node address on an MTU-bounded
 # dummy interface. Binding Flannel to loopback would inherit its 65536-byte
 # MTU and create a black-hole for ordinary Ethernet-sized Pod traffic.
 if grep -qi microsoft-standard-wsl /proc/sys/kernel/osrelease; then
@@ -306,8 +306,8 @@ fi`;
 async function persistStableWslInterfacePreparation() {
   const helper = await readOptional(k3sWslPreparePath);
   if (helper === undefined) return false;
-  const start = "# BEGIN AGENT_DOCK_WSL_NODE_INTERFACE";
-  const end = "# END AGENT_DOCK_WSL_NODE_INTERFACE";
+  const start = "# BEGIN PI_CLOUD_WSL_NODE_INTERFACE";
+  const end = "# END PI_CLOUD_WSL_NODE_INTERFACE";
   const block = `${start}\n${stableWslInterfacePreparation()}\n${end}`;
   const expression = new RegExp(`${start}[\\s\\S]*?${end}`, "u");
   const updated = expression.test(helper)
@@ -317,7 +317,7 @@ async function persistStableWslInterfacePreparation() {
   if (!updated.includes(block)) {
     throw new Error(`${k3sWslPreparePath} has an unexpected format`);
   }
-  const temporaryPath = `${k3sWslPreparePath}.agent-dock.tmp`;
+  const temporaryPath = `${k3sWslPreparePath}.pi-cloud.tmp`;
   const mode = (await stat(k3sWslPreparePath)).mode & 0o777;
   await writeFile(temporaryPath, updated, { mode });
   await rename(temporaryPath, k3sWslPreparePath);
@@ -404,7 +404,7 @@ async function ensureStableWslNodeAddress() {
     return { isWsl: true, changed: false, podNetworkMtu: wslFlannelMtu };
   }
 
-  const temporaryPath = `${k3sConfigPath}.agent-dock.tmp`;
+  const temporaryPath = `${k3sConfigPath}.pi-cloud.tmp`;
   const mode = (await stat(k3sConfigPath)).mode & 0o777;
   if (updated !== original) {
     await writeFile(temporaryPath, updated, { mode });
@@ -488,7 +488,7 @@ function withCubeletPosixVolumePlugin(config) {
     [[plugins."io.cubelet.internal.v1.storage".volume_plugins]]
       name        = "${posixVolumePluginName}"
       type        = "binary"
-      binary_path = "/usr/local/services/cubetoolbox/Cubelet/plugin/cube-volume-agentdock-posix"`,
+      binary_path = "/usr/local/services/cubetoolbox/Cubelet/plugin/cube-volume-picloud-posix"`,
   );
 }
 
@@ -505,7 +505,7 @@ function withCubeMasterPosixVolumePlugin(config) {
     `${marker}
   - name: ${posixVolumePluginName}
     type: binary
-    binary_path: /usr/local/services/cubetoolbox/CubeMaster/plugin/cube-volume-agentdock-posix`,
+    binary_path: /usr/local/services/cubetoolbox/CubeMaster/plugin/cube-volume-picloud-posix`,
   );
 }
 
@@ -561,7 +561,7 @@ async function installPosixVolumePlugin() {
   const masterConfig = withCubeMasterPosixVolumePlugin(
     Buffer.from(encodedMasterConfig, "base64").toString("utf8"),
   );
-  const temporary = await mkdtemp(join(tmpdir(), "agent-dock-cube-posix-volume-"));
+  const temporary = await mkdtemp(join(tmpdir(), "pi-cloud-cube-posix-volume-"));
   try {
     const cubeletConfigPath = join(temporary, "cubelet-config.toml");
     await writeFile(cubeletConfigPath, cubeletConfig, { mode: 0o600 });
@@ -572,7 +572,7 @@ async function installPosixVolumePlugin() {
       "configmap",
       posixVolumePluginConfigMap,
       `--from-file=cubelet-config.toml=${cubeletConfigPath}`,
-      `--from-file=cube-volume-agentdock-posix=${posixVolumePluginSource}`,
+      `--from-file=cube-volume-picloud-posix=${posixVolumePluginSource}`,
       "--dry-run=client",
       "-o",
       "json",
@@ -603,7 +603,7 @@ async function installPosixVolumePlugin() {
           template: {
             metadata: {
               annotations: {
-                "agent-dock.io/posix-shared-root-identity": sharedRootIdentity,
+                "pi-cloud.io/posix-shared-root-identity": sharedRootIdentity,
               },
             },
             spec: {
@@ -612,14 +612,14 @@ async function installPosixVolumePlugin() {
                   name: "cube-master",
                   volumeMounts: [
                     {
-                      name: "agentdock-posix-volume-plugin",
+                      name: "picloud-posix-volume-plugin",
                       mountPath:
-                        "/usr/local/services/cubetoolbox/CubeMaster/plugin/cube-volume-agentdock-posix",
-                      subPath: "cube-volume-agentdock-posix",
+                        "/usr/local/services/cubetoolbox/CubeMaster/plugin/cube-volume-picloud-posix",
+                      subPath: "cube-volume-picloud-posix",
                       readOnly: true,
                     },
                     {
-                      name: "agentdock-posix-shared",
+                      name: "picloud-posix-shared",
                       mountPath: "/data/cube-shared",
                     },
                   ],
@@ -627,11 +627,11 @@ async function installPosixVolumePlugin() {
               ],
               volumes: [
                 {
-                  name: "agentdock-posix-volume-plugin",
+                  name: "picloud-posix-volume-plugin",
                   configMap: { name: posixVolumePluginConfigMap, defaultMode: 365 },
                 },
                 {
-                  name: "agentdock-posix-shared",
+                  name: "picloud-posix-shared",
                   hostPath: { path: posixSharedRoot, type: "Directory" },
                 },
               ],
@@ -653,7 +653,7 @@ async function installPosixVolumePlugin() {
           template: {
             metadata: {
               annotations: {
-                "agent-dock.io/posix-shared-root-identity": sharedRootIdentity,
+                "pi-cloud.io/posix-shared-root-identity": sharedRootIdentity,
               },
             },
             spec: {
@@ -662,13 +662,13 @@ async function installPosixVolumePlugin() {
                   name: "cubelet",
                   volumeMounts: [
                     {
-                      name: "agentdock-posix-volume-plugin",
-                      mountPath: "/opt/cube-image/Cubelet/plugin/cube-volume-agentdock-posix",
-                      subPath: "cube-volume-agentdock-posix",
+                      name: "picloud-posix-volume-plugin",
+                      mountPath: "/opt/cube-image/Cubelet/plugin/cube-volume-picloud-posix",
+                      subPath: "cube-volume-picloud-posix",
                       readOnly: true,
                     },
                     {
-                      name: "agentdock-posix-volume-plugin",
+                      name: "picloud-posix-volume-plugin",
                       mountPath: "/opt/cube-image/Cubelet/config/config.toml",
                       subPath: "cubelet-config.toml",
                       readOnly: true,
@@ -682,7 +682,7 @@ async function installPosixVolumePlugin() {
               ],
               volumes: [
                 {
-                  name: "agentdock-posix-volume-plugin",
+                  name: "picloud-posix-volume-plugin",
                   configMap: { name: posixVolumePluginConfigMap, defaultMode: 365 },
                 },
                 {
@@ -719,8 +719,8 @@ async function installPosixVolumePlugin() {
 async function assertCubePodMtu(expectedMtu) {
   if (expectedMtu === undefined) return;
   for (const deployment of [
-    "agent-dock-cube-api-authorizer",
-    "agent-dock-cube-template-registry",
+    "pi-cloud-cube-api-authorizer",
+    "pi-cloud-cube-template-registry",
     "cube-api",
     "cube-master",
     "cube-proxy",
@@ -762,7 +762,7 @@ async function ensureSharedRootMount() {
   if (updated === helper) {
     throw new Error(`${k3sWslPreparePath} has an unexpected format`);
   }
-  const temporaryPath = `${k3sWslPreparePath}.agent-dock.tmp`;
+  const temporaryPath = `${k3sWslPreparePath}.pi-cloud.tmp`;
   const mode = (await stat(k3sWslPreparePath)).mode & 0o777;
   await writeFile(temporaryPath, updated, { mode });
   await rename(temporaryPath, k3sWslPreparePath);
@@ -808,7 +808,7 @@ async function ensureBpfFilesystem() {
   if (updated === helper) {
     throw new Error(`${k3sWslPreparePath} is missing its shared-mount preparation`);
   }
-  const temporaryPath = `${k3sWslPreparePath}.agent-dock.tmp`;
+  const temporaryPath = `${k3sWslPreparePath}.pi-cloud.tmp`;
   const mode = (await stat(k3sWslPreparePath)).mode & 0o777;
   await writeFile(temporaryPath, updated, { mode });
   await rename(temporaryPath, k3sWslPreparePath);
@@ -903,7 +903,7 @@ done
 echo "cni0 did not become ready" >&2
 exit 1
 `;
-  const routeHelperTemporaryPath = `${k3sServiceRouteHelperPath}.agent-dock.tmp`;
+  const routeHelperTemporaryPath = `${k3sServiceRouteHelperPath}.pi-cloud.tmp`;
   await writeFile(routeHelperTemporaryPath, routeHelper, { mode: 0o755 });
   await rename(routeHelperTemporaryPath, k3sServiceRouteHelperPath);
   await chmod(k3sServiceRouteHelperPath, 0o755);
@@ -911,7 +911,7 @@ exit 1
   const dropIn = `[Service]
 ExecStartPost=${k3sServiceRouteHelperPath}
 `;
-  const dropInTemporaryPath = `${k3sServiceRouteDropInPath}.agent-dock.tmp`;
+  const dropInTemporaryPath = `${k3sServiceRouteDropInPath}.pi-cloud.tmp`;
   await writeFile(dropInTemporaryPath, dropIn, { mode: 0o644 });
   await rename(dropInTemporaryPath, k3sServiceRouteDropInPath);
   await run("systemctl", ["daemon-reload"]);
@@ -925,7 +925,7 @@ ExecStartPost=${k3sServiceRouteHelperPath}
   const obsoleteCommand = `ip route replace ${k3sServiceCidr} dev lo`;
   if (!helper.includes(obsoleteCommand)) return;
   const updated = helper.replace(`${obsoleteCommand}\n`, "");
-  const temporaryPath = `${k3sWslPreparePath}.agent-dock.tmp`;
+  const temporaryPath = `${k3sWslPreparePath}.pi-cloud.tmp`;
   const mode = (await stat(k3sWslPreparePath)).mode & 0o777;
   await writeFile(temporaryPath, updated, { mode });
   await rename(temporaryPath, k3sWslPreparePath);
@@ -943,7 +943,7 @@ async function repositoryHead(path) {
 }
 
 async function installTemplateRegistry() {
-  const temporary = await mkdtemp(join(tmpdir(), "agent-dock-cube-registry-"));
+  const temporary = await mkdtemp(join(tmpdir(), "pi-cloud-cube-registry-"));
   try {
     const caCertificatePath = join(temporary, "cube-root-ca.crt");
     const caKeyPath = join(temporary, "cube-root-ca.key");
@@ -984,7 +984,7 @@ async function installTemplateRegistry() {
         "basicConstraints=critical,CA:FALSE",
         "keyUsage=critical,digitalSignature,keyEncipherment",
         "extendedKeyUsage=serverAuth",
-        "subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:agent-dock-cube-template-registry,DNS:agent-dock-cube-template-registry.cube-system,DNS:agent-dock-cube-template-registry.cube-system.svc,DNS:agent-dock-cube-template-registry.cube-system.svc.cluster.local",
+        "subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:pi-cloud-cube-template-registry,DNS:pi-cloud-cube-template-registry.cube-system,DNS:pi-cloud-cube-template-registry.cube-system.svc,DNS:pi-cloud-cube-template-registry.cube-system.svc.cluster.local",
         "",
       ].join("\n"),
       { mode: 0o600 },
@@ -996,7 +996,7 @@ async function installTemplateRegistry() {
       "rsa:3072",
       "-nodes",
       "-subj",
-      "/CN=agent-dock-cube-template-registry.cube-system.svc.cluster.local",
+      "/CN=pi-cloud-cube-template-registry.cube-system.svc.cluster.local",
       "-keyout",
       privateKeyPath,
       "-out",
@@ -1044,14 +1044,14 @@ async function installTemplateRegistry() {
       "cube-system",
       "rollout",
       "restart",
-      "deployment/agent-dock-cube-template-registry",
+      "deployment/pi-cloud-cube-template-registry",
     ]);
     await runKubectl([
       "-n",
       "cube-system",
       "rollout",
       "status",
-      "deployment/agent-dock-cube-template-registry",
+      "deployment/pi-cloud-cube-template-registry",
       "--timeout=300s",
     ]);
 
@@ -1110,9 +1110,9 @@ await run("docker", [
   "--file",
   "packages/cube-api-authorizer/Dockerfile",
   "--build-arg",
-  `AGENT_DOCK_VERSION=cube-primary`,
+  `PI_CLOUD_VERSION=cube-primary`,
   "--build-arg",
-  `AGENT_DOCK_REVISION=${agentDockRevision}`,
+  `PI_CLOUD_REVISION=${agentDockRevision}`,
   "--tag",
   authorizerImage,
   ".",
@@ -1122,15 +1122,15 @@ await run("docker", [
   "--file",
   "packages/cube-egress-gateway/Dockerfile",
   "--build-arg",
-  "AGENT_DOCK_VERSION=cube-primary",
+  "PI_CLOUD_VERSION=cube-primary",
   "--build-arg",
-  `AGENT_DOCK_REVISION=${agentDockRevision}`,
+  `PI_CLOUD_REVISION=${agentDockRevision}`,
   "--tag",
   cubeEgressGatewayImage,
   ".",
 ]);
 
-await stagePinnedK3sImages("agent-dock-cube-platform-local.tar", [
+await stagePinnedK3sImages("pi-cloud-cube-platform-local.tar", [
   authorizerImage,
   cubeEgressGatewayImage,
 ]);
@@ -1151,7 +1151,7 @@ const secret = await captureKubectl([
   "create",
   "secret",
   "generic",
-  "agent-dock-cube-api-credential",
+  "pi-cloud-cube-api-credential",
   `--from-file=api-key=${credentialPath}`,
   "--dry-run=client",
   "-o",
@@ -1164,7 +1164,7 @@ const egressSecret = await captureKubectl([
   "create",
   "secret",
   "generic",
-  "agent-dock-cube-egress-config",
+  "pi-cloud-cube-egress-config",
   `--from-file=config-token=${cubeEgressConfigTokenPath}`,
   "--dry-run=client",
   "-o",
@@ -1178,7 +1178,7 @@ await runKubectl([
   "cube-system",
   "set",
   "image",
-  "deployment/agent-dock-cube-api-authorizer",
+  "deployment/pi-cloud-cube-api-authorizer",
   `authorizer=${authorizerImage}`,
 ]);
 await runKubectl([
@@ -1186,7 +1186,7 @@ await runKubectl([
   "cube-system",
   "set",
   "image",
-  "deployment/agent-dock-cube-egress-gateway",
+  "deployment/pi-cloud-cube-egress-gateway",
   `gateway=${cubeEgressGatewayImage}`,
 ]);
 await runKubectl([
@@ -1194,10 +1194,10 @@ await runKubectl([
   "cube-system",
   "rollout",
   "status",
-  "deployment/agent-dock-cube-api-authorizer",
+  "deployment/pi-cloud-cube-api-authorizer",
   "--timeout=180s",
 ]);
-await waitForRunningPod("app.kubernetes.io/name=agent-dock-cube-egress-gateway", 180_000);
+await waitForRunningPod("app.kubernetes.io/name=pi-cloud-cube-egress-gateway", 180_000);
 
 await run("helm", [
   "upgrade",
@@ -1209,7 +1209,7 @@ await run("helm", [
   "--values",
   join(cubeRepository, "deploy/kubernetes/chart/values-single-node.yaml"),
   "--values",
-  resolve(repositoryRoot, "deploy/cubesandbox/values-agent-dock-single-node.yaml"),
+  resolve(repositoryRoot, "deploy/cubesandbox/values-pi-cloud-single-node.yaml"),
   "--values",
   secretValuesPath,
   "--wait",

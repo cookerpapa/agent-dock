@@ -5,7 +5,7 @@
 
 ## Context
 
-AgentDock already stores each turn and command before returning `202`, permits
+PiCloud already stores each turn and command before returning `202`, permits
 several queued turns for one session, and prevents more than one active normal
 turn. The dispatcher currently approximates mailbox order with
 `(created_at, UUID)`. PostgreSQL timestamps can tie, while random UUID order is

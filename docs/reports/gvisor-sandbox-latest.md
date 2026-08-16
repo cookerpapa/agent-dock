@@ -5,7 +5,7 @@ Measured on 2026-07-21 with:
 ```bash
 npm run sandbox:check
 npm run production:check
-AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check
+PI_CLOUD_LIVE_GITHUB_CHECK=1 npm run production:github-check
 ```
 
 ## Environment
@@ -17,7 +17,7 @@ AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check
 | Kubernetes | K3s `v1.36.2+k3s1` |
 | Container runtime | embedded containerd `2.3.2-k3s2` |
 | gVisor | `runsc release-20260714.0`, OCI spec `1.2.1` |
-| Runtime mapping | `RuntimeClass/agent-dock-gvisor -> io.containerd.runsc.v1` |
+| Runtime mapping | `RuntimeClass/pi-cloud-gvisor -> io.containerd.runsc.v1` |
 | gVisor configuration | `platform=kvm`, `network=sandbox`, host/software GSO disabled |
 | Tool gate image | `sha256:a5962cc849e9d5084d63039ca09aea3452c9a80e23e246d9d04ddf622884b1f6` |
 | Guest-visible kernel | `4.19.0-gvisor` |

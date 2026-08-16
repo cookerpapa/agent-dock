@@ -1,5 +1,5 @@
-import { createDatabase } from "@agent-dock/database";
-import { operationalLog, startServiceObservability } from "@agent-dock/observability";
+import { createDatabase } from "@pi-cloud/database";
+import { operationalLog, startServiceObservability } from "@pi-cloud/observability";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { sql } from "kysely";
@@ -9,11 +9,11 @@ import {
   RoutedHttpSandboxAssignmentInventory,
   RoutedHttpSupervisorOwnerBoundary,
 } from "./http-supervisor-management.ts";
-import { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
-import { PostgresCheckpointObjectStore } from "@agent-dock/runtime-core/postgres-checkpoint-object-store";
-import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
-import { HttpDurableEventIngestor } from "@agent-dock/runtime-core/http-durable-event-ingestor";
-import { HttpTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
+import { SessionLeaseCoordinator } from "@pi-cloud/runtime-core/session-lease-coordinator";
+import { PostgresCheckpointObjectStore } from "@pi-cloud/runtime-core/postgres-checkpoint-object-store";
+import { PostgresSessionEventNotifications } from "@pi-cloud/runtime-core/postgres-session-event-notifications";
+import { HttpDurableEventIngestor } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
+import { HttpTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 import {
   PostgresSupervisorCredentialAuthorizer,
   SupervisorBootProvisioner,
@@ -22,12 +22,12 @@ import {
 import { loadProductionControlPlaneConfig } from "./production-config.ts";
 import { ProductionHttpGateway } from "./production-http-gateway.ts";
 import { PostgresTenantApiAuthenticator } from "./tenant-identity.ts";
-import { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
+import { TenantModelCredentialVault } from "@pi-cloud/runtime-core/model-credential-runtime";
 import { resolvePlatformInitialModel } from "./platform-model-configuration.ts";
 import { WebAuthenticationService } from "./web-authentication.ts";
 import { createControlPlaneRuntime, type ControlPlaneRuntime } from "./control-plane-runtime.ts";
-import { ReplicatedToolBrokerClient } from "@agent-dock/tool-broker/client";
-import { encodeWorkspaceSnapshotBlob } from "@agent-dock/workspace-runtime";
+import { ReplicatedToolBrokerClient } from "@pi-cloud/tool-broker/client";
+import { encodeWorkspaceSnapshotBlob } from "@pi-cloud/workspace-runtime";
 import { WorkspaceTerminalGateway } from "./workspace-terminal-gateway.ts";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
@@ -50,7 +50,7 @@ async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Pro
 export async function startControlPlane(): Promise<void> {
   const config = await loadProductionControlPlaneConfig();
   const observability = await startServiceObservability({
-    serviceName: "agent-dock-control-plane",
+    serviceName: "pi-cloud-control-plane",
     defaultMetricsPort: 9464,
   });
   const database = createDatabase({ connectionString: config.databaseUrl, maxConnections: 12 });
@@ -217,7 +217,7 @@ export async function startControlPlane(): Promise<void> {
       maintenance: {
         onActivity: (activity) =>
           operationalLog({
-            service: "agent-dock-control-plane",
+            service: "pi-cloud-control-plane",
             level: activity.type === "runtime.failure" ? "error" : "info",
             event: activity.type,
             attributes: { ...activity },
@@ -226,7 +226,7 @@ export async function startControlPlane(): Promise<void> {
     });
     await runtime.listen(config.port, config.host);
     process.stdout.write(
-      `AgentDock production control plane listening on ${config.host}:${String(config.port)}\n`,
+      `PiCloud production control plane listening on ${config.host}:${String(config.port)}\n`,
     );
 
     const close = async (): Promise<void> => {
@@ -258,7 +258,7 @@ export async function startControlPlane(): Promise<void> {
 const entrypoint = process.argv[1];
 if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
   startControlPlane().catch(() => {
-    process.stderr.write("AgentDock production control plane failed to start\n");
+    process.stderr.write("PiCloud production control plane failed to start\n");
     process.exitCode = 1;
   });
 }

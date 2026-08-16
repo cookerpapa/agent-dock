@@ -51,10 +51,10 @@ describe("coding Run model request limit migration", () => {
           (id, tenant_id, provider, kind, secret_ref, status)
          values
           ('10000000-0000-4000-8000-000000000003',
-           '10000000-0000-4000-8000-000000000001', 'agent-dock-fake', 'brokered',
+           '10000000-0000-4000-8000-000000000001', 'pi-cloud-fake', 'brokered',
            'fixture-a', 'active'),
           ('20000000-0000-4000-8000-000000000003',
-           '20000000-0000-4000-8000-000000000001', 'agent-dock-fake', 'brokered',
+           '20000000-0000-4000-8000-000000000001', 'pi-cloud-fake', 'brokered',
            'fixture-b', 'active')`,
       );
       await postgres.query(
@@ -63,12 +63,12 @@ describe("coding Run model request limit migration", () => {
           credential_binding_version)
          values
           ('10000000-0000-4000-8000-000000000002',
-           '10000000-0000-4000-8000-000000000001', 'default', 'agent-dock-fake',
-           'agent-dock-fake', 'off', array['off'],
+           '10000000-0000-4000-8000-000000000001', 'default', 'pi-cloud-fake',
+           'pi-cloud-fake', 'off', array['off'],
            '10000000-0000-4000-8000-000000000003', 1),
           ('20000000-0000-4000-8000-000000000002',
-           '20000000-0000-4000-8000-000000000001', 'default', 'agent-dock-fake',
-           'agent-dock-fake', 'off', array['off'],
+           '20000000-0000-4000-8000-000000000001', 'default', 'pi-cloud-fake',
+           'pi-cloud-fake', 'off', array['off'],
            '20000000-0000-4000-8000-000000000003', 1)`,
       );
       await postgres.query(

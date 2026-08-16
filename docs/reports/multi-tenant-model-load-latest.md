@@ -5,7 +5,7 @@
 - Tenants / Runs: 6 / 12
 - Completed / failed: 12 / 0
 - Marker restores / cross-tenant leaks: 6 / 0
-- Worker assignments: agent-dock-pi-worker-local-v1-1=6, agent-dock-pi-worker-local-v1-0=6
+- Worker assignments: pi-cloud-pi-worker-local-v1-1=6, pi-cloud-pi-worker-local-v1-0=6
 - Acceptance p50/p95: 32 / 43 ms
 - First text p50/p95: 4650 / 15222 ms
 - Settled p50/p95: 5766 / 17107 ms

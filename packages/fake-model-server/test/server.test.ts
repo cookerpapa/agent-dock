@@ -53,7 +53,7 @@ describe("fake model HTTP boundary", () => {
       headers: {
         authorization: `Bearer ${FAKE_MODEL_API_KEY}`,
         "content-type": "application/json",
-        "x-agent-dock-scenario": "unknown",
+        "x-pi-cloud-scenario": "unknown",
       },
       body: JSON.stringify(completionRequest("not retained")),
     });
@@ -68,7 +68,7 @@ describe("fake model HTTP boundary", () => {
       headers: {
         authorization: `Bearer ${FAKE_MODEL_API_KEY}`,
         "content-type": "application/json",
-        "x-agent-dock-scenario": "text",
+        "x-pi-cloud-scenario": "text",
       },
       body: JSON.stringify(completionRequest(privateMarker)),
     });
@@ -98,7 +98,7 @@ describe("fake model HTTP boundary", () => {
       headers: {
         authorization: `Bearer ${FAKE_MODEL_API_KEY}`,
         "content-type": "application/json",
-        "x-agent-dock-scenario": "timeout",
+        "x-pi-cloud-scenario": "timeout",
       },
       body: JSON.stringify(completionRequest("abort me")),
     });
@@ -115,7 +115,7 @@ describe("fake model HTTP boundary", () => {
       headers: {
         authorization: `Bearer ${FAKE_MODEL_API_KEY}`,
         "content-type": "application/json",
-        "x-agent-dock-scenario": "timeout",
+        "x-pi-cloud-scenario": "timeout",
       },
       body: JSON.stringify(completionRequest("stop the server")),
     });

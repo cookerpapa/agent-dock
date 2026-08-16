@@ -13,15 +13,15 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Cube's base image uses the global Ubuntu archive, which is pathologically
 # slow from GitHub-hosted Azure runners. This official mirror serves the same
 # signed Ubuntu repository metadata and remains overrideable for self-hosters.
-ARG AGENT_DOCK_UBUNTU_MIRROR=http://azure.archive.ubuntu.com/ubuntu
+ARG PI_CLOUD_UBUNTU_MIRROR=http://azure.archive.ubuntu.com/ubuntu
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     set -eu; \
     rm -f /etc/apt/apt.conf.d/docker-clean; \
     sed -i \
-      -e "s|http://archive.ubuntu.com/ubuntu|${AGENT_DOCK_UBUNTU_MIRROR}|g" \
-      -e "s|http://security.ubuntu.com/ubuntu|${AGENT_DOCK_UBUNTU_MIRROR}|g" \
+      -e "s|http://archive.ubuntu.com/ubuntu|${PI_CLOUD_UBUNTU_MIRROR}|g" \
+      -e "s|http://security.ubuntu.com/ubuntu|${PI_CLOUD_UBUNTU_MIRROR}|g" \
       /etc/apt/sources.list; \
     packages="bash ca-certificates git openjdk-17-jdk-headless util-linux"; \
     installed=0; \
@@ -46,7 +46,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 COPY --from=python-runtime /usr/local /usr/local
 COPY --from=node-runtime /usr/local /usr/local
-# Cube's inherited envd channel is deliberately unused: AgentDock routes
+# Cube's inherited envd channel is deliberately unused: PiCloud routes
 # every tool through its authenticated Tool Worker. Removing the dormant
 # binary also keeps its independently compiled Go dependency tree out of the
 # production attack surface and SBOM.
@@ -54,14 +54,14 @@ RUN ln -sf /usr/local/bin/python3 /usr/bin/python3 \
     && ln -sf /usr/local/bin/node /usr/bin/node \
     && rm -f /usr/bin/envd
 
-RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 agent-dock; fi \
+RUN if ! getent group 1000 >/dev/null; then groupadd --gid 1000 pi-cloud; fi \
     && if ! getent passwd 1000 >/dev/null; then \
-         useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash agent-dock; \
+         useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash pi-cloud; \
        fi \
     && install -d -o 1000 -g 1000 -m 0700 \
          /workspace \
-         /tmp/agent-dock-tool-home \
-         /opt/agent-dock
+         /tmp/pi-cloud-tool-home \
+         /opt/pi-cloud
 
 WORKDIR /app
 
@@ -98,21 +98,21 @@ COPY packages/tool-sandbox/src packages/tool-sandbox/src
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
 COPY --chown=1000:1000 \
   packages/sandbox-supervisor/test/fixtures/sample-java-repair \
-  /opt/agent-dock/sample-java-repair
-COPY deploy/cubesandbox/tool-entrypoint.sh /usr/local/bin/agent-dock-cube-tool
-RUN chmod 0555 /usr/local/bin/agent-dock-cube-tool
+  /opt/pi-cloud/sample-java-repair
+COPY deploy/cubesandbox/tool-entrypoint.sh /usr/local/bin/pi-cloud-cube-tool
+RUN chmod 0555 /usr/local/bin/pi-cloud-cube-tool
 
-ARG AGENT_DOCK_VERSION=development
-ARG AGENT_DOCK_REVISION=development
-LABEL org.opencontainers.image.title="AgentDock CubeSandbox tool template" \
-      org.opencontainers.image.description="Credential-free AgentDock Tool Worker for CubeSandbox KVM microVMs" \
-      org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
-      org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
-RUN printf '%s\n' "${AGENT_DOCK_REVISION}" > /opt/agent-dock/image-revision \
-    && chmod 0444 /opt/agent-dock/image-revision
+ARG PI_CLOUD_VERSION=development
+ARG PI_CLOUD_REVISION=development
+LABEL org.opencontainers.image.title="PiCloud CubeSandbox tool template" \
+      org.opencontainers.image.description="Credential-free PiCloud Tool Worker for CubeSandbox KVM microVMs" \
+      org.opencontainers.image.version="${PI_CLOUD_VERSION}" \
+      org.opencontainers.image.revision="${PI_CLOUD_REVISION}"
+RUN printf '%s\n' "${PI_CLOUD_REVISION}" > /opt/pi-cloud/image-revision \
+    && chmod 0444 /opt/pi-cloud/image-revision
 
 ENV NODE_ENV=production \
-    HOME=/tmp/agent-dock-tool-home
+    HOME=/tmp/pi-cloud-tool-home
 
 WORKDIR /workspace
 # The base image's OCI metadata also declares 49983 and Docker has no
@@ -122,8 +122,8 @@ EXPOSE 49984
 
 # Deliberately replace cubesandbox-base's entrypoint: the inherited script
 # starts envd, which would be a second unmediated command/file channel inside
-# the guest. The one root-owned AgentDock supervisor authenticates every
+# the guest. The one root-owned PiCloud supervisor authenticates every
 # mutable request, starts Tool Workers and user commands as uid 1000, and
 # enforces the checkpoint/rebind boundary while the Session Cube stays running.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/usr/local/bin/agent-dock-cube-tool"]
+CMD ["/usr/local/bin/pi-cloud-cube-tool"]

@@ -7,14 +7,14 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const composeFile = resolve(repositoryRoot, "deploy/production/compose.yaml");
-const configuredOverride = process.env.AGENT_DOCK_PRODUCTION_COMPOSE_OVERRIDE;
+const configuredOverride = process.env.PI_CLOUD_PRODUCTION_COMPOSE_OVERRIDE;
 const composeOverride =
   configuredOverride === undefined
     ? resolve(repositoryRoot, "deploy/cubesandbox/compose.primary.yaml")
     : resolve(repositoryRoot, configuredOverride);
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 const environmentFile = resolve(runtimeDirectory, ".env");
 const input = process.argv.slice(2);
@@ -36,16 +36,16 @@ const runtimeEnvironment = Object.fromEntries(
     }),
 );
 const piWorkerDeployment =
-  process.env.AGENT_DOCK_PI_WORKER_DEPLOYMENT ??
-  runtimeEnvironment.AGENT_DOCK_PI_WORKER_DEPLOYMENT ??
+  process.env.PI_CLOUD_PI_WORKER_DEPLOYMENT ??
+  runtimeEnvironment.PI_CLOUD_PI_WORKER_DEPLOYMENT ??
   "compose";
 if (piWorkerDeployment !== "compose" && piWorkerDeployment !== "kubernetes") {
-  throw new Error("AGENT_DOCK_PI_WORKER_DEPLOYMENT must be compose or kubernetes");
+  throw new Error("PI_CLOUD_PI_WORKER_DEPLOYMENT must be compose or kubernetes");
 }
 const supportedOptionalProfiles = new Set(["observability", "github"]);
 const requestedOptionalProfiles = (
-  process.env.AGENT_DOCK_PRODUCTION_PROFILES ??
-  runtimeEnvironment.AGENT_DOCK_PRODUCTION_PROFILES ??
+  process.env.PI_CLOUD_PRODUCTION_PROFILES ??
+  runtimeEnvironment.PI_CLOUD_PRODUCTION_PROFILES ??
   ""
 )
   .split(",")
@@ -56,7 +56,7 @@ const unsupportedOptionalProfiles = requestedOptionalProfiles.filter(
 );
 if (unsupportedOptionalProfiles.length > 0) {
   throw new Error(
-    `AGENT_DOCK_PRODUCTION_PROFILES contains unsupported profiles: ${unsupportedOptionalProfiles.join(", ")}`,
+    `PI_CLOUD_PRODUCTION_PROFILES contains unsupported profiles: ${unsupportedOptionalProfiles.join(", ")}`,
   );
 }
 const allowsStaleCubeTemplate =
@@ -198,10 +198,10 @@ const repositoryRevision = execFileSync("git", ["rev-parse", "HEAD"], {
   stdio: ["ignore", "pipe", "ignore"],
 }).trim();
 const imageRevision =
-  process.env.AGENT_DOCK_IMAGE_REVISION ??
+  process.env.PI_CLOUD_IMAGE_REVISION ??
   (command === "build" || invalidTemplateEvidence ? repositoryRevision : template.imageRevision);
 if (!/^[0-9a-f]{40}$/.test(imageRevision)) {
-  throw new Error("AGENT_DOCK_IMAGE_REVISION must be a full lowercase Git commit");
+  throw new Error("PI_CLOUD_IMAGE_REVISION must be a full lowercase Git commit");
 }
 if (
   !allowsStaleCubeTemplate &&
@@ -209,23 +209,23 @@ if (
   template.imageRevision !== imageRevision
 ) {
   throw new Error(
-    "CubeSandbox READY template does not match this AgentDock Git revision; register a fresh immutable template",
+    "CubeSandbox READY template does not match this PiCloud Git revision; register a fresh immutable template",
   );
 }
 const cubeEnvironment = {
-  AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID:
+  PI_CLOUD_CUBESANDBOX_TEMPLATE_ID:
     invalidTemplateEvidence || template === undefined
       ? "tpl-000000000000000000000000"
       : template.templateId,
-  AGENT_DOCK_CUBESANDBOX_DOMAIN:
+  PI_CLOUD_CUBESANDBOX_DOMAIN:
     invalidClusterEvidence || cluster === undefined ? "cube.app" : cluster.sandboxDomain,
-  AGENT_DOCK_CUBESANDBOX_API_NODE_IP:
+  PI_CLOUD_CUBESANDBOX_API_NODE_IP:
     invalidClusterEvidence || cluster === undefined ? "127.0.0.1" : cluster.api.host,
-  AGENT_DOCK_CUBESANDBOX_API_NODE_PORT:
+  PI_CLOUD_CUBESANDBOX_API_NODE_PORT:
     invalidClusterEvidence || cluster === undefined ? "3000" : String(cluster.api.port),
-  AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP:
+  PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP:
     invalidClusterEvidence || cluster === undefined ? "127.0.0.1" : cluster.proxy.host,
-  AGENT_DOCK_CUBESANDBOX_PROXY_NODE_PORT:
+  PI_CLOUD_CUBESANDBOX_PROXY_NODE_PORT:
     invalidClusterEvidence || cluster === undefined ? "80" : String(cluster.proxy.port),
 };
 
@@ -272,11 +272,11 @@ await new Promise((resolvePromise, rejectPromise) => {
     cwd: repositoryRoot,
     env: {
       ...process.env,
-      AGENT_DOCK_IMAGE_REVISION: imageRevision,
-      AGENT_DOCK_APPLICATION_UID: String(applicationOwner.uid),
-      AGENT_DOCK_APPLICATION_GID: String(applicationOwner.gid),
-      AGENT_DOCK_OTLP_TRACES_ENDPOINT:
-        process.env.AGENT_DOCK_OTLP_TRACES_ENDPOINT ??
+      PI_CLOUD_IMAGE_REVISION: imageRevision,
+      PI_CLOUD_APPLICATION_UID: String(applicationOwner.uid),
+      PI_CLOUD_APPLICATION_GID: String(applicationOwner.gid),
+      PI_CLOUD_OTLP_TRACES_ENDPOINT:
+        process.env.PI_CLOUD_OTLP_TRACES_ENDPOINT ??
         (requestedOptionalProfiles.includes("observability") ? "http://jaeger:4318/v1/traces" : ""),
       ...cubeEnvironment,
     },

@@ -2,9 +2,9 @@ import {
   SandboxCheckpointStoreError,
   validateCheckpointObjectKey,
   type CheckpointObjectStore,
-} from "@agent-dock/runtime-core/checkpoint-runtime";
-import type { Database } from "@agent-dock/database";
-import { GitHubGatewayClient, GitHubGatewayError } from "@agent-dock/github-gateway";
+} from "@pi-cloud/runtime-core/checkpoint-runtime";
+import type { Database } from "@pi-cloud/database";
+import { GitHubGatewayClient, GitHubGatewayError } from "@pi-cloud/github-gateway";
 import {
   canonicalWorkspaceSourceSetJson,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
@@ -12,11 +12,11 @@ import {
   type ExecuteTurnCommandMessage,
   type GitHubRepositorySource,
   type WorkspaceSourceSetSnapshot,
-} from "@agent-dock/protocol";
-import { PiTurnError, validateWorkspaceSnapshot } from "@agent-dock/sandbox-supervisor";
+} from "@pi-cloud/protocol";
+import { PiTurnError, validateWorkspaceSnapshot } from "@pi-cloud/sandbox-supervisor";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Kysely } from "kysely";
-import { createWorkspaceSnapshot, mergeWorkspaceSnapshots } from "@agent-dock/workspace-runtime";
+import { createWorkspaceSnapshot, mergeWorkspaceSnapshots } from "@pi-cloud/workspace-runtime";
 
 type GitHubWorkspaceImporter = {
   import(source: GitHubRepositorySource, signal: AbortSignal): Promise<Uint8Array>;

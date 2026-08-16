@@ -1,10 +1,10 @@
-import { createAgentDockEventFactory } from "@agent-dock/protocol";
+import { createPiCloudEventFactory } from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
 import { SessionEventHub } from "../src/index.ts";
 
 function fixture() {
   let eventNumber = 0;
-  return createAgentDockEventFactory(
+  return createPiCloudEventFactory(
     { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
     {
       clock: () => new Date("2026-07-18T08:00:00.000Z"),

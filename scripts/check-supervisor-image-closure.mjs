@@ -16,7 +16,7 @@ for (const entry of packageDirectories) {
   workspaces.set(manifest.name, { directory: entry.name, manifest });
 }
 
-const rootName = "@agent-dock/supervisor-host";
+const rootName = "@pi-cloud/supervisor-host";
 const pending = [rootName];
 const closure = new Set();
 while (pending.length > 0) {

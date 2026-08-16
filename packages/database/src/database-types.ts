@@ -8,7 +8,7 @@ import type {
   SandboxState,
   SessionState,
   TurnState,
-} from "@agent-dock/domain";
+} from "@pi-cloud/domain";
 import type { ColumnType, Generated, JSONColumnType } from "kysely";
 
 type Timestamp = ColumnType<Date, Date | string, Date | string>;

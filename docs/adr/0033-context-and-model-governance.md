@@ -32,12 +32,12 @@ would create a second, incompatible conversation implementation.
    writes one linked UsageLedger record.
 4. Prices are tenant-owner configuration expressed as integer micro-USD per
    million tokens. Every completed request snapshots the four rates actually
-   used as well as its calculated integer cost. AgentDock does not present the
+   used as well as its calculated integer cost. PiCloud does not present the
    seeded zero rate as a provider price.
 5. One fallback model may be configured. It is attempted only for the selected
    rate-limit, server-error or timeout classes and reuses the existing
    reservation; arbitrary errors and a second fallback are not retried.
-6. Pi remains the context authority. AgentDock supplies an ordered construction:
+6. Pi remains the context authority. PiCloud supplies an ordered construction:
    Pi/platform system instructions, a bounded repository `AGENTS.md` when
    present, Pi's durable summary, recent transcript messages, bounded tool
    results and the current accepted task. Repository instructions are clearly
@@ -103,7 +103,7 @@ Concurrent requests can overspend before any ledger row exists.
 ### Reimplement Pi messages and compaction in the Control Plane
 
 It would fork upstream semantics and make Pi upgrades and checkpoint restore
-unsafe. AgentDock configures and observes the native mechanism instead.
+unsafe. PiCloud configures and observes the native mechanism instead.
 
 ### Put full command output in SSE or Pi JSONL
 

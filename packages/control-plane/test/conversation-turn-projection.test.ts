@@ -1,12 +1,12 @@
-import { createAgentDockEventFactory, type AgentDockEventBody } from "@agent-dock/protocol";
+import { createPiCloudEventFactory, type PiCloudEventBody } from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
-import { projectConversationTurnTranscript } from "@agent-dock/runtime-core/conversation-turn-projection";
+import { projectConversationTurnTranscript } from "@pi-cloud/runtime-core/conversation-turn-projection";
 
 const CREATED_AT = "2026-07-23T00:00:00.000Z";
 
-function events(bodies: readonly AgentDockEventBody[]) {
+function events(bodies: readonly PiCloudEventBody[]) {
   let id = 0;
-  const factory = createAgentDockEventFactory(
+  const factory = createPiCloudEventFactory(
     {
       sessionId: "10000000-0000-4000-8000-000000000001",
       turnId: "20000000-0000-4000-8000-000000000001",
@@ -155,7 +155,7 @@ describe("conversation turn projection", () => {
   });
 
   it("collapses a high-frequency completed stream into one semantic text item", () => {
-    const deltas: AgentDockEventBody[] = Array.from({ length: 1_000 }, () => ({
+    const deltas: PiCloudEventBody[] = Array.from({ length: 1_000 }, () => ({
       type: "assistant.text.delta",
       payload: { text: "x" },
     }));

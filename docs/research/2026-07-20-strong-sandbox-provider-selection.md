@@ -3,7 +3,7 @@
 ## Question
 
 Which second Provider can be implemented and exercised honestly on the current
-Docker Desktop/WSL2 development host, while preserving AgentDock's existing
+Docker Desktop/WSL2 development host, while preserving PiCloud's existing
 Runner/Manager/Tool boundary?
 
 ## Candidates
@@ -32,7 +32,7 @@ Primary sources:
    its loopback upstream was also rejected by the sandbox private-address
    policy, so the local validation used an ephemeral host-only relay on an
    existing globally scoped interface. This is a workstation constraint, not
-   AgentDock product logic.
+   PiCloud product logic.
 3. The first VM attempt failed with Windows error 1450 because fewer than 4 GiB
    of physical memory was available. Reclaiming WSL page cache provided enough
    headroom. Capacity admission must account for VM memory, not only inner
@@ -45,7 +45,7 @@ Primary sources:
 6. After `--policy deny`, requests to `example.com` and the host Docker endpoint
    were blocked and recorded in the Docker Sandbox network log.
 7. The standard shell template exposes only `proxy-managed` placeholder model
-   variables in its trusted bridge. AgentDock never executes user commands in
+   variables in its trusted bridge. PiCloud never executes user commands in
    that bridge. The nested Tool Worker receives the existing fixed safe
    environment and no model/platform credential.
 
@@ -66,7 +66,7 @@ It also avoids giving user commands the microVM-local Docker socket.
 
 - Docker Sandboxes v0.12.0 is an opt-in Docker Desktop host integration, not a
   portable in-container daemon API.
-- VM-level CPU/memory sizing is not exposed by the current CLI. AgentDock
+- VM-level CPU/memory sizing is not exposed by the current CLI. PiCloud
   enforces the requested limits on the nested worker and treats VM capacity as
   deployment admission overhead.
 - MicroVM cold start is much slower than the shared-kernel Docker Provider.

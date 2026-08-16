@@ -1,11 +1,11 @@
-import type { Database } from "@agent-dock/database";
-import { TURN_COMMAND_OUTBOX_TOPIC } from "@agent-dock/protocol";
+import type { Database } from "@pi-cloud/database";
+import { TURN_COMMAND_OUTBOX_TOPIC } from "@pi-cloud/protocol";
 import { sql, type Kysely } from "kysely";
 
 import {
   RunCommandExecutor,
   type RunCommandExecutionResult,
-} from "@agent-dock/runtime-core/run-command-executor";
+} from "@pi-cloud/runtime-core/run-command-executor";
 
 /**
  * Test-only convenience for suites that create several accepted commands.

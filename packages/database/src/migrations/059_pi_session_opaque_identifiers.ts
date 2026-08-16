@@ -30,7 +30,7 @@ async function addSessionForeignKeys(db: Kysely<Database>): Promise<void> {
   }
 }
 
-/** Pi IDs are opaque strings; AgentDock product UUIDs are a valid subset. */
+/** Pi IDs are opaque strings; PiCloud product UUIDs are a valid subset. */
 export async function up(db: Kysely<Database>): Promise<void> {
   await dropSessionForeignKeys(db);
   for (const statement of [

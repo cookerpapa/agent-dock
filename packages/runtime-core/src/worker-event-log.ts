@@ -127,8 +127,8 @@ export class KafkaWorkerEventLog implements WorkerEventLogAppender {
           key: sessionId,
           value: JSON.stringify(envelope),
           headers: {
-            "agent-dock-schema": "worker-events-v1",
-            "agent-dock-tenant": batch.tenantId,
+            "pi-cloud-schema": "worker-events-v1",
+            "pi-cloud-tenant": batch.tenantId,
           },
         };
       }),

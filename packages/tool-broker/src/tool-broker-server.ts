@@ -9,9 +9,9 @@ import {
   parseToolSandboxOperationRequest,
   type InternalServiceError,
   type SupervisorManagementResponse,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import fastifyWebsocket from "@fastify/websocket";
-import { parseTraceCarrier, withSpan, type AgentDockMetrics } from "@agent-dock/observability";
+import { parseTraceCarrier, withSpan, type PiCloudMetrics } from "@pi-cloud/observability";
 import { createHash, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { RawData, WebSocket } from "ws";
@@ -38,7 +38,7 @@ export type ToolBrokerServerOptions = {
   terminalToken?: string;
   broker: ToolBrokerBackend;
   bodyLimit?: number;
-  metrics?: AgentDockMetrics;
+  metrics?: PiCloudMetrics;
 };
 
 export type ToolBrokerBackend = Pick<
@@ -126,7 +126,7 @@ function reportFailure(event: string, failure: ToolBrokerError, error: unknown):
   process.stderr.write(
     `${JSON.stringify({
       level: "error",
-      service: "agent-dock-tool-broker",
+      service: "pi-cloud-tool-broker",
       event,
       publicCode: failure.code,
       retryable: failure.retryable,
@@ -143,7 +143,7 @@ export class ToolBrokerServer {
   readonly #terminalDigest: Buffer | undefined;
   readonly #broker: ToolBrokerBackend;
   readonly #server: FastifyInstance;
-  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #metrics: PiCloudMetrics | undefined;
   readonly #capacityMetrics: NodeJS.Timeout;
   #address: string | undefined;
   #ready = false;
@@ -272,10 +272,10 @@ export class ToolBrokerServer {
     });
     const startedAt = performance.now();
     return withSpan({
-      serviceName: "agent-dock-tool-broker",
+      serviceName: "pi-cloud-tool-broker",
       name: options.spanName,
       ...(parent === undefined ? {} : { parent }),
-      attributes: { "agent_dock.sandbox.operation": options.operation },
+      attributes: { "pi_cloud.sandbox.operation": options.operation },
       run: async () => {
         try {
           const result = await options.run();
@@ -455,7 +455,7 @@ export class ToolBrokerServer {
           kind: "sandbox",
           run: () => this.#broker.importGitHub(message.source, controller.signal),
         });
-        const { encodeWorkspaceSnapshotBlob } = await import("@agent-dock/workspace-runtime");
+        const { encodeWorkspaceSnapshotBlob } = await import("@pi-cloud/workspace-runtime");
         await reply.code(200).send({
           toolBrokerProtocolVersion: 1,
           type: "workspace.github_imported",

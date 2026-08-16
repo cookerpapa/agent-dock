@@ -85,7 +85,7 @@ describe("provider egress relay", () => {
       socket.pipe(socket);
     });
     const upstreamPort = await listenTcp(upstream);
-    const directory = await mkdtemp(join(tmpdir(), "agent-dock-provider-relay-"));
+    const directory = await mkdtemp(join(tmpdir(), "pi-cloud-provider-relay-"));
     directories.push(directory);
     const socketPath = join(directory, "relay.sock");
     const audit: ProviderEgressAuditRecord[] = [];
@@ -118,10 +118,10 @@ describe("provider egress relay", () => {
   it("validates closed relay configuration", () => {
     expect(
       loadProviderEgressRelayConfig({
-        AGENT_DOCK_PROVIDER_RELAY_MODE: "host",
-        AGENT_DOCK_PROVIDER_RELAY_SOCKET: "/tmp/relay.sock",
-        AGENT_DOCK_PROVIDER_RELAY_ALLOWED_HOSTS: "api.deepseek.com",
-        AGENT_DOCK_PROVIDER_RELAY_UPSTREAM_PROXY: "http://127.0.0.1:10808",
+        PI_CLOUD_PROVIDER_RELAY_MODE: "host",
+        PI_CLOUD_PROVIDER_RELAY_SOCKET: "/tmp/relay.sock",
+        PI_CLOUD_PROVIDER_RELAY_ALLOWED_HOSTS: "api.deepseek.com",
+        PI_CLOUD_PROVIDER_RELAY_UPSTREAM_PROXY: "http://127.0.0.1:10808",
       }),
     ).toMatchObject({
       mode: "host",
@@ -129,15 +129,15 @@ describe("provider egress relay", () => {
     });
     expect(() =>
       loadProviderEgressRelayConfig({
-        AGENT_DOCK_PROVIDER_RELAY_MODE: "host",
-        AGENT_DOCK_PROVIDER_RELAY_ALLOWED_HOSTS: "127.0.0.1",
+        PI_CLOUD_PROVIDER_RELAY_MODE: "host",
+        PI_CLOUD_PROVIDER_RELAY_ALLOWED_HOSTS: "127.0.0.1",
       }),
     ).toThrow(/ALLOWED_HOSTS/);
     expect(() =>
       loadProviderEgressRelayConfig({
-        AGENT_DOCK_PROVIDER_RELAY_MODE: "bridge",
-        AGENT_DOCK_PROVIDER_RELAY_HOST: "0.0.0.0",
-        AGENT_DOCK_PROVIDER_RELAY_PORT: "0",
+        PI_CLOUD_PROVIDER_RELAY_MODE: "bridge",
+        PI_CLOUD_PROVIDER_RELAY_HOST: "0.0.0.0",
+        PI_CLOUD_PROVIDER_RELAY_PORT: "0",
       }),
     ).toThrow(/PORT/);
   });

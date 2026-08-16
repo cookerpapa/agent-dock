@@ -203,7 +203,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 
   await sql`
-    create function agent_dock_reject_review_bundle_mutation()
+    create function pi_cloud_reject_review_bundle_mutation()
     returns trigger
     language plpgsql
     as $$
@@ -215,7 +215,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
     create trigger review_bundles_immutable
     before update or delete on review_bundles
-    for each row execute function agent_dock_reject_review_bundle_mutation()
+    for each row execute function pi_cloud_reject_review_bundle_mutation()
   `.execute(db);
 
   await db.schema
@@ -232,7 +232,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
 export async function down(db: Kysely<unknown>): Promise<void> {
   await sql`drop trigger if exists review_bundles_immutable on review_bundles`.execute(db);
-  await sql`drop function if exists agent_dock_reject_review_bundle_mutation()`.execute(db);
+  await sql`drop function if exists pi_cloud_reject_review_bundle_mutation()`.execute(db);
   await db.schema.dropTable("review_bundles").ifExists().execute();
   await db.schema.dropTable("run_rewinds").ifExists().execute();
   await db.schema.alterTable("runs").dropConstraint("runs_pi_session_base_artifact_fk").execute();

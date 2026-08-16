@@ -13,7 +13,7 @@
 - Background process survived idle TTL and a new Run/fence: true
 - Revoked Tool authority rejected: true
 - Cancellation destroyed executing microVM: true
-- Remaining AgentDock microVMs: 0
+- Remaining PiCloud microVMs: 0
 
 The gate created real Cubelet/CubeShim KVM guests for two independent tenant
 assignments, wrote different canaries to the same Workspace path, verified each

@@ -9,14 +9,14 @@
 
 ## 2026-08-12 — Cube 模板生命周期与数据容量
 
-- 定位生产模板注册失败的根因是 Cubelet XFS 满盘：101 个旧 AgentDock Tool
+- 定位生产模板注册失败的根因是 Cubelet XFS 满盘：101 个旧 PiCloud Tool
   模板占满原 25 GiB 本地数据镜像。确认无 Active Sandbox 后，通过 CubeMaster
   官方删除协议清理旧模板，仅保留当前版本与两份回滚模板，未触碰租户
   Workspace 或 Pi 数据。
 - 本地 Cube 验证环境扩容至 64 GiB；安装器会在校验普通文件、Loop Device、
-  挂载点和 XFS 文件系统后安全扩展旧 AgentDock 数据镜像，不重新格式化已有
+  挂载点和 XFS 文件系统后安全扩展旧 PiCloud 数据镜像，不重新格式化已有
   数据。
-- 模板注册在构建前和注册后执行 AgentDock 专属保留策略：排除外部模板和构建
+- 模板注册在构建前和注册后执行 PiCloud 专属保留策略：排除外部模板和构建
   中模板，保护当前不可变版本，并明确报告 Cube 延迟清理错误。
 - Cube 安装器不再从 WSL PATH 误选 Windows `kubectl.exe`；默认固定使用 Linux
   原生 `k3s kubectl`，避免客户端证书和文件路径落入另一套操作系统语义。
@@ -98,7 +98,7 @@
   provider/SDK retry 固定为 0，避免绕过 Model Gateway 的请求账本和预算。
 - 瞬时 429/5xx 失败继续使用同一冻结 Step，只递增 `samplingAttempt`；每次尝试
   独立预留预算、记录审计和 trace，取消可以直接打断退避等待。
-- AgentDock Run 现在正确接纳 Pi retry/compaction/follow-up 产生的多个原生
+- PiCloud Run 现在正确接纳 Pi retry/compaction/follow-up 产生的多个原生
   subturn，但只向产品层发布一次 `turn.started`。
 - 确定性集成测试覆盖“429 → retry → Tool → final answer”、Tool 仅执行一次、
   退避期间取消不再发请求，以及 Gateway 对同 Step 多次采样的独立账本记录。
@@ -137,7 +137,7 @@
 - 利用 Pi 公开的 `context` extension hook，在每次 provider request 前捕获
   一个新的 `CloudStepContext`。同一模型响应产生的所有 Tool Call 共享该
   Step 的递增序号和摘要；Manager 拒绝旧序号或同序号不同摘要。
-- 将 `agent-dock.runtime_world_state` 升级为逐 Step 比较的类型化基线。只在
+- 将 `pi-cloud.runtime_world_state` 升级为逐 Step 比较的类型化基线。只在
   Cube 活跃进程环境丢失、执行环境变化或 Tool/网络策略变化时写入最小的
   model-visible custom message；Worker/Attempt/Activation/Fence 等内部身份不
   进入模型上下文。
@@ -163,7 +163,7 @@
 - Supervisor 在返回 prepared result 前必须取得 durable event barrier receipt，
   证明本地 spool 已清空且累计 ACK 到达最高已产生序号；公共终态仍由 Control
   Plane 在 Run、Checkpoint、Workspace head 的同一 PostgreSQL 事务中写入。
-- 用类型化、版本化 `agent-dock.runtime_world_state` 替代旧的松散 Sandbox
+- 用类型化、版本化 `pi-cloud.runtime_world_state` 替代旧的松散 Sandbox
   marker，保存 Sandbox 连续性、环境、Workspace revision 和 Tool policy 等
   模型判断相关事实；只有真实丢失活跃进程环境时才写入最小
   `<sandbox_reset>`。
@@ -174,7 +174,7 @@
 ## 2026-08-01 — 一键自托管部署
 
 - 增加 `./install.sh`，面向启用了 systemd/KVM 的 Debian/Ubuntu Linux 与
-  WSL2，补齐从宿主机到 Cube/K3s、AgentDock 和 Pi Worker Pool 的完整安装。
+  WSL2，补齐从宿主机到 Cube/K3s、PiCloud 和 Pi Worker Pool 的完整安装。
 - 支持纯只读 `--check-only`、无副作用 `--print-plan`、Compose/Kubernetes
   Worker 选择、失败后原命令续跑；Node.js、Helm 和 K3s 安装器均固定版本并
   校验 SHA-256，Cube 源码固定到已验收 commit。
@@ -203,14 +203,14 @@
 - 额外发现：本机经过修改的 `0.79.3` workspace build 被 Node pipe 启动时，
   会把 stdin 识别为 EOF，并在第一个 RPC 响应前退出；锁定的正式发布包
   没有这个问题。在查清本机构建差异前，不把它当作云端基线。
-- 下一步：Docker 可用后补做容器验收，然后定义 AgentDock 自己的事件
+- 下一步：Docker 可用后补做容器验收，然后定义 PiCloud 自己的事件
   envelope，避免未来控制面直接依赖原始 Pi RPC 消息格式。
 
 ## 2026-07-18 — 公共事件 envelope 与 Pi 适配器
 
-- 目标：让数据库、控制面和浏览器只依赖 AgentDock 自己的稳定事件，而不
+- 目标：让数据库、控制面和浏览器只依赖 PiCloud 自己的稳定事件，而不
   直接认识 Pi RPC 的内部消息形状。
-- 实现：建立 npm workspace；新增 TypeBox `AgentDockEvent v1` 闭合联合类型，
+- 实现：建立 npm workspace；新增 TypeBox `PiCloudEvent v1` 闭合联合类型，
   统一携带 `eventId/sessionId/turnId/agentId/seq/occurredAt`；覆盖 turn、
   session state、文本增量、工具、审批、通知和失败事件；新增 Pi RPC
   adapter，把 `confirm/select/input/editor/notify` 显式转换成公共事件。
@@ -251,7 +251,7 @@
   WebSocket 和 sandbox 生命周期存在后，再用磁盘实现替换相同接口，避免
   现在过早选择 LevelDB/SQLite 等存储。
 - 真实链路：Pi extension 的 confirm/notify 已实际经过
-  `Pi RPC -> adapter -> AgentDockEvent -> event.publish -> spool`。模拟断线时
+  `Pi RPC -> adapter -> PiCloudEvent -> event.publish -> spool`。模拟断线时
   重放 1/2/3；累计 ACK 到 2 后只剩 3；最终 ACK 后 spool 为空。
 - 验证：协议与 supervisor 共 27 个测试通过，覆盖消息方向、闭合 schema、
   heartbeat 交叉约束、累计 ACK、重放、fencing、冲突和 backpressure；真实
@@ -267,7 +267,7 @@
 - 调研：核对 OpenClaw、Microsoft Agent Framework、Flink Agents、
   LangGraph、OpenHands、agentserver、E2B、Agent Substrate、Kubernetes Agent
   Sandbox 和 Google AX 的源码。结论是没有单一项目覆盖完整 Agent 云化；
-  AgentDock 应把会话控制面与执行后端解耦。详细证据保存在
+  PiCloud 应把会话控制面与执行后端解耦。详细证据保存在
   `docs/research/2026-07-18-agent-cloud-runtime-landscape.md`，决策记录在
   ADR-0005。
 - 实现：新增 `spikes/pi-embedded-rehydrate/`。同一个 Node worker 内，每轮
@@ -326,7 +326,7 @@
 
 - 目标：在数据库和 API 之前，把 session、turn、sandbox、approval、
   agent-node 的合法状态变化写成唯一、可执行的规则。
-- 实现：新增 `@agent-dock/domain`。状态集合是闭合 union，所有 transition
+- 实现：新增 `@pi-cloud/domain`。状态集合是闭合 union，所有 transition
   都经过纯函数；非法跳转、自跳转和终态复活抛出带 entity/from/to 的
   `DomainTransitionError`。approval 只能从 pending 离开一次；sandbox 失败后
   只能清理，不能重回池中；agent-node 显式表达 waiting/cancelling/terminal。
@@ -347,7 +347,7 @@
 
 - 目标：把 ADR-0003/0004/0006 和 domain 状态机中的不变量落实为可执行的
   PostgreSQL schema，而不是只画 ER 图。
-- 实现：新增 `@agent-dock/database`，包含 typed Kysely `Database`、`pg`
+- 实现：新增 `@pi-cloud/database`，包含 typed Kysely `Database`、`pg`
   runtime client、静态 migration provider、up/down CLI 和一份初始 migration。
   18 张表覆盖 ownership、workspace、credential binding metadata、model
   profile、session/turn/agent、sandbox/lease、command、approval、event/cursor、
@@ -366,7 +366,7 @@
 - Web 方向：只读审查 Pi `0.80.10` `/export` template 和现有 Session Tree
   Browser 源码，没有读取真实 transcript。设计基线记录在
   `docs/WEB_UI_DIRECTION.md`：保留等宽紧凑风格、可缩放 tree、800px transcript
-  和 tool/thinking 折叠；云端页面改走 AgentDock REST/SSE，不在浏览器直接
+  和 tool/thinking 折叠；云端页面改走 PiCloud REST/SSE，不在浏览器直接
   操作 Pi 进程或 JSONL。
 - 下一步：实现 deterministic OpenAI-compatible fake model server。原因是
   它能在不消耗 subscription token 的情况下稳定复现 text/tool stream、429、
@@ -376,8 +376,8 @@
 
 - 目标：让模型正常流式输出和失败路径都能从 clean checkout 稳定重现，CI 不
   依赖外网、真实 token 或订阅额度。
-- 实现：新增 `@agent-dock/fake-model-server`，在 loopback 上提供真实
-  OpenAI Chat Completions HTTP/SSE。通过 `x-agent-dock-scenario` 固定选择
+- 实现：新增 `@pi-cloud/fake-model-server`，在 loopback 上提供真实
+  OpenAI Chat Completions HTTP/SSE。通过 `x-pi-cloud-scenario` 固定选择
   `text`、`tool_call`、`rate_limit`、`timeout`、`malformed` 或
   `disconnect`；tool-call arguments 分成两段发送，tool result 到达后返回最终
   文本，因此能验证多次模型请求的工具回路协议。
@@ -410,15 +410,15 @@
 
 ## 2026-07-18 — Embedded SDK HTTP bootstrap and live rehydration proof
 
-- 现象澄清：probe 输出的 `network` 是 AgentDock 对 `fetch/socket` 类错误的粗粒度
+- 现象澄清：probe 输出的 `network` 是 PiCloud 对 `fetch/socket` 类错误的粗粒度
   分类，不表示 Pi CLI、账号或 OpenAI 服务整体不可用。用户手动运行的 Pi
-  `0.79.3` 可以快速返回；随后使用 AgentDock 依赖的同一个 Pi `0.80.10` CLI、
+  `0.79.3` 可以快速返回；随后使用 PiCloud 依赖的同一个 Pi `0.80.10` CLI、
   同一 OAuth 和同一 `gpt-5.4-mini` 发送最小请求，也在 4.2 秒内返回 `OK`。
 - 根因：Pi CLI 入口会在 provider SDK 发请求前调用 `configureHttpDispatcher()`，
-  安装 npm Undici 的 `EnvHttpProxyAgent` 和对应 global fetch；AgentDock 直接调用
+  安装 npm Undici 的 `EnvHttpProxyAgent` 和对应 global fetch；PiCloud 直接调用
   SDK 的 embedded path 绕过了 CLI `main()`，因此漏掉这一步。Node 自带的
   `--use-env-proxy` 不能替代 Pi 所用 npm Undici 实例的完整初始化。
-- 修复：embedded backend 仅在显式允许模型调用时安装 AgentDock 自有的、进程级
+- 修复：embedded backend 仅在显式允许模型调用时安装 PiCloud 自有的、进程级
   幂等 HTTP runtime；直接 pin `undici@8.5.0`，从 worker 环境读取 proxy/no-proxy，
   但不返回或记录代理 URL/凭据。相同 idle timeout 可重复初始化，不同 timeout
   会被明确拒绝，避免一个共享 worker 悄悄采用互相冲突的网络策略。
@@ -473,7 +473,7 @@
   64 MiB `/tmp` tmpfs、`network_mode: none`、`cap_drop: ALL`、
   `no-new-privileges`、128 PID、512 MiB memory、1 CPU 和 1024 nofile；没有
   volume、port、host PID/IPC、device 或 Compose secret。
-- 双重 non-root 检查：Compose 设置 `AGENT_DOCK_REQUIRE_NON_ROOT=1`；两个 spike
+- 双重 non-root 检查：Compose 设置 `PI_CLOUD_REQUIRE_NON_ROOT=1`；两个 spike
   启动时读取真实 Unix UID/GID，UID 为 0 或无法确认时直接失败，并在成功 JSON
   中记录 runtime identity。普通本地运行不会被这个容器专用开关误伤。
 - 构建供应链：Node `24.12.0-bookworm-slim` 固定到官方 multi-arch OCI index
@@ -531,12 +531,12 @@
 - 目标：先实现端到端路径的第一个事务边界，让 HTTP API 只有在 turn、command
   和 outbox 一起持久化之后才返回 `202 Accepted`；本切片暂不假装已经接通 Pi、
   SSE 或 Web UI。
-- 公共 API：`@agent-dock/protocol` 新增 closed TypeBox schema 和 parser，覆盖创建
+- 公共 API：`@pi-cloud/protocol` 新增 closed TypeBox schema 和 parser，覆盖创建
   project、创建 session、提交 prompt、thinking level、UUID path、
   `Idempotency-Key`、成功 resource 与统一 error envelope。额外字段、空白名称/
   prompt、不合法 UUID/header 和不受当前 model profile 允许的 thinking level
   都在写库前拒绝。
-- NestJS/Fastify：新增 `@agent-dock/control-plane`，实现
+- NestJS/Fastify：新增 `@pi-cloud/control-plane`，实现
   `POST /v1/projects`、`POST /v1/projects/:projectId/sessions` 和
   `POST /v1/sessions/:sessionId/turns`。v0 继续使用部署者配置的 tenant 与默认
   model profile，没有提前加入登录、多租户或前端 model picker。
@@ -558,7 +558,7 @@
 - 验证：新增 4 个 public-schema tests 和 6 个 HTTP/database integration tests，
   全仓从 75 增至 85 tests；`npm run ci`、0-vulnerability audit 以及两套重新构建
   的 hardened Docker probe 全部通过。同一套 6-test HTTP suite 还通过可选
-  `AGENT_DOCK_TEST_DATABASE_URL` 在仅绑定 `127.0.0.1` 的一次性
+  `PI_CLOUD_TEST_DATABASE_URL` 在仅绑定 `127.0.0.1` 的一次性
   PostgreSQL `15.2-alpine` container 中复跑成功，container 随后已删除。
 - backlog：第一条 vertical-slice acceptance criterion“command 在 execution 前
   durable accepted”已完成。其余 criterion 保持未完成，因为 supervisor dispatch、
@@ -623,16 +623,16 @@
 - Supervisor：新增 side-effect-free prepare、command payload 去重、session fence
   high-water、容量拒绝和 event identity 检查。同 command ID 如果 prompt/model 等
   immutable payload 改变会被拒绝，不能借“duplicate”偷换执行内容。
-- Pi runtime：`@agent-dock/sandbox-supervisor` 直接精确依赖 Pi `0.80.10`，每次测试
+- Pi runtime：`@pi-cloud/sandbox-supervisor` 直接精确依赖 Pi `0.80.10`，每次测试
   activation 使用独立临时 agent dir、环境变量引用的 request credential、严格 LF
   JSONL、8 MiB stdout 上限、4 KiB 且不外泄正文的 stderr 边界、RPC/turn timeout，
   ambient credential/process-injection env 过滤，以及 stdin EOF、process-group
   SIGTERM/SIGKILL 的回收路径。默认关闭 telemetry、extension、tool、skill、context
   file 和 session 落盘。
 - 事件：新增普通 agent event adapter，将 `agent_start`、assistant `text_delta`、tool
-  start/end 和 `agent_settled` 转成 AgentDock `turn.started`、文本、工具与 terminal
+  start/end 和 `agent_settled` 转成 PiCloud `turn.started`、文本、工具与 terminal
   event；原始 Pi message/partial/provider error 不越过 supervisor。测试中两段 delta
-  合并为 `AgentDock fake stream OK.`，序号为 1/2/3/4，所有 publication 使用同一个
+  合并为 `PiCloud fake stream OK.`，序号为 1/2/3/4，所有 publication 使用同一个
   command/lease/fence。
 - ACK 证据：端到端测试在每次 Pi event 到达时回查数据库，四次都已看到 command
   `acknowledged`、turn/session `running` 且 outbox `published_at` 非空，证明不是在
@@ -676,7 +676,7 @@
   session/lease/fence/seq 后，spool 才累计删除。该 spool 仍是 memory-only，runner
   进程重启后的持久化重投留在 Phase 2。
 - Web：新增 `GET /v1/sessions/:sessionId/events`。SSE frame 使用 session seq 作为
-  `id`、AgentDock type 作为 `event`、完整 versioned event 作为 JSON `data`；严格校验
+  `id`、PiCloud type 作为 `event`、完整 versioned event 作为 JSON `data`；严格校验
   canonical non-negative `Last-Event-ID`，拒绝超过 durable high-water 的 cursor。
   stream 先订阅 bounded process-local hub，再分页读取固定 replay window，最后按 seq
   去重 live overlap，并用 heartbeat 保活。因此 control-plane 重启后的浏览器 replay
@@ -792,7 +792,7 @@
 
 - 目标：补齐 Phase 1 最后一个用户可见切片，让页面真实驱动已经存在的 durable
   control-plane/sandbox 链路，而不是展示静态 mock 或让 browser 直接管理 Pi/Docker。
-- Web：新增独立 `@agent-dock/web-ui` React/Vite workspace。页面沿用 Pi `/export` 的
+- Web：新增独立 `@pi-cloud/web-ui` React/Vite workspace。页面沿用 Pi `/export` 的
   紧凑等宽语言、约 800 px transcript、克制 user card、非气泡 assistant prose、可折叠
   tool/diff、桌面可拖动且可键盘调整的 tree sidebar，以及移动端 overlay。turn/session/
   reconnect/cancel/failure 都同时使用文字和符号，不只依赖颜色；固定 fake model、Pi
@@ -804,7 +804,7 @@
   上限。
 - SSE：没有使用无法为手动新连接设置 cursor 的 `EventSource`，而是实现 bounded
   fetch-stream parser。它处理任意 chunk/CRLF/comment/multiline data，显式发送
-  `Last-Event-ID`，校验 AgentDock schema、session、frame id/type 和连续 seq；duplicate
+  `Last-Event-ID`，校验 PiCloud schema、session、frame id/type 和连续 seq；duplicate
   replay 幂等忽略，gap 重连，协议错误 fail visible，网络错误 bounded backoff。纯 reducer
   保留 text/tool/approval/terminal 时序，并拒绝旧 session 回调污染新 session。
 - Demo runtime：新增根目录 `npm run demo`。命令确认 Docker、默认构建 pinned sandbox
@@ -817,7 +817,7 @@
   completed，final unified diff 为 336 bytes 且包含 `return left + right`。第二个真实
   session 在 `turn.started #1` 后提交 durable cancellation，得到 `turn.cancelled #2`、
   `forced=false`；新 SSE 使用 `Last-Event-ID: 1` 只重放 #2。两条路径结束后均确认没有
-  `agent-dock.managed=true` container 遗留。
+  `pi-cloud.managed=true` container 遗留。
 - 自动验证：Web 有 8 个测试覆盖 fragmented SSE、断线重连 cursor、duplicate 去重、
   frame identity fail-closed、ordered transcript、cancel state、sequence gap 和 server
   rendering/旧 session 隔离；protocol resource parser 另增 2 个测试。production bundle
@@ -837,7 +837,7 @@
 
 ## 2026-07-19 — Settled checkpoint 与跨容器多轮恢复
 
-- 目标：让 AgentDock session 的 durable identity 真正独立于 Pi 进程/container。第一轮
+- 目标：让 PiCloud session 的 durable identity 真正独立于 Pi 进程/container。第一轮
   结束后不保留任何 runtime，第二轮仍必须同时看到旧 `messages[]` 和旧 workspace。
 - 决策：新增 ADR-0011。成功顺序固定为 Pi settled -> worker capture -> trusted host
   持久化并 ACK checkpoint -> worker 发布 `turn.completed` -> PostgreSQL durable event ACK。
@@ -848,7 +848,7 @@
   `--session`。`agent_end` 时先读取 JSONL、执行 checkpoint hook，再允许公开 terminal；
   fresh runner 可写回同一份 JSONL 后启动，实际测试确认第二次 model request 的 message
   数量增加。
-- Workspace：新增 `agent-dock.workspace-manifest.v1`。只允许 canonical relative POSIX
+- Workspace：新增 `pi-cloud.workspace-manifest.v1`。只允许 canonical relative POSIX
   regular files，拒绝 symlink/special file、`.git`、重复/穿越/冲突路径、非法 UTF-8、非
   canonical base64、长度/哈希不符；限制 512 files、512 KiB/file、512-byte path、2 MiB
   manifest。恢复保留 image fixture 的 baseline Git commit，替换其余 working tree，因此
@@ -870,7 +870,7 @@
   为 `send follow-up`。仍保留 active-turn serialization，browser 不接触 checkpoint bytes。
 - 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、150
   passed/4 skipped tests、两个 zero-token Pi spikes 和 0 high-severity vulnerabilities。
-  重新构建 `agent-dock/pi-workspace:phase2` 的 `npm run sandbox:check` 又通过 3 个 Docker
+  重新构建 `pi-cloud/pi-workspace:phase2` 的 `npm run sandbox:check` 又通过 3 个 Docker
   supervisor tests 与 19 个完整 control-plane tests；结束后没有 managed container 遗留。
 - 当前边界：这是 bounded sample workspace 的 semantic settled restore，不恢复进程内存、
   shell/open fd/in-flight tool，也还没有 MinIO/S3、generic repo archive、durable supervisor
@@ -882,7 +882,7 @@
 
 ## 2026-07-19 — Crash-safe supervisor event spool
 
-- 目标：让已由 runner 产生、但尚未拿到 durable control-plane ACK 的 AgentDock event 不因
+- 目标：让已由 runner 产生、但尚未拿到 durable control-plane ACK 的 PiCloud event 不因
   supervisor 进程退出而消失，同时覆盖“PostgreSQL 已 commit、返回 ACK 丢失”的反向窗口。
 - 决策：新增 ADR-0012 和 replaceable `SupervisorEventSpool` boundary。内存实现继续用于快速
   contract tests；文件实现要求一个 supervisor 独占 private persistent-volume root，不引入
@@ -932,9 +932,9 @@
   backfill、execute 非空/唯一约束和 control-command null 约束。
 - 自动验证：完整 `npm run ci` 通过 format、production Web build、全仓 typecheck、159
   passed/4 skipped tests、两个 zero-token Pi spikes 和 0 high-severity vulnerabilities。
-- Docker 验收：重新构建 `agent-dock/pi-workspace:phase2` 后，3 个 supervisor Docker tests
+- Docker 验收：重新构建 `pi-cloud/pi-workspace:phase2` 后，3 个 supervisor Docker tests
   通过跨容器 restore、Java repair 和 confirmed cancellation；21 个 control-plane tests 全部
-  通过，结束后 `io.agent-dock.managed=true` 容器为 0。
+  通过，结束后 `io.pi-cloud.managed=true` 容器为 0。
 - PostgreSQL 验收：同一套 control-plane suite 通过只绑定 `127.0.0.1` 的一次性 PostgreSQL
   `15.2-alpine` 复跑（20 passed/1 Docker-only skipped），覆盖真实 row lock、partial unique index、
   `SKIP LOCKED` 和五输入 FIFO；数据库容器随后自动删除。
@@ -989,7 +989,7 @@
   lease/capacity 并产生并发 writer。
 - 决策：新增 ADR-0015。可信 provisioner 必须先写入精确的 supervisor/boot/sandbox row，并把
   supervisor、boot、sandbox、fresh transport ID 作为认证后的 channel authority 交给 manager；
-  `supervisor.register` JSON 本身不授予身份或创建任意 sandbox。注册固定 protocol v1、AgentDock
+  `supervisor.register` JSON 本身不授予身份或创建任意 sandbox。注册固定 protocol v1、PiCloud
   supervisor `0.1.0`、Pi package/version、required capabilities 和预配容量。
 - 数据库：migration 004 新增 `supervisor_connections` 与 `sandbox_retirements`，当前 schema 共 20 张
   application tables。连接表持久化 transport/registration/response/connection ID、payload fingerprint、
@@ -1196,7 +1196,7 @@
   Kysely pool 的 `LISTEN` connection。初次连接失败会阻止应用启动；运行后断线使用 bounded equal-jitter
   backoff 自动重连。notification 做完整 schema/UUID/sequence 校验并按 configured tenant 过滤；重连成功会
   唤醒本进程全部 SSE subscription 做 durable rescan。应用关闭会中断 backoff 并关闭 dedicated client。
-- Hub/SSE：process-local hub 不再缓存完整 `AgentDockEvent[]`。每个 subscriber 只保留一个可合并 high-water
+- Hub/SSE：process-local hub 不再缓存完整 `PiCloudEvent[]`。每个 subscriber 只保留一个可合并 high-water
   wake；duplicate/out-of-order hint 取最大 sequence，resync wake 强制查当前 cursor。SSE 仍先 subscribe 再读
   initial replay window，之后每个 wake 都从 PostgreSQL 分页补连续 suffix，并显式拒绝 durable gap。idle
   heartbeat 也先检查 durable cursor，所以 listener 暂时离线或丢 hint 最多增加一个 heartbeat interval 的延迟，
@@ -1234,7 +1234,7 @@
   `PostgresSandboxCheckpointStore` 仍用独立数据库 hash 检出 `checkpoint_corrupt`。
 - 配置/安全：bucket、region、endpoint、prefix、boolean 和 retry 数均 fail-fast 校验；custom endpoint 默认
   path-style，明文 HTTP 必须显式 opt-in。SDK/network failure 映射成 closed safe error，不返回 endpoint、key、
-  access/secret/session token 或原始 SDK message。生产 factory 不新增 AgentDock secret channel，凭据继续走 AWS
+  access/secret/session token 或原始 SDK message。生产 factory 不新增 PiCloud secret channel，凭据继续走 AWS
   SDK 标准 provider chain。
 - 可执行证据：`npm run object-store:check` 使用 digest-pinned、仅绑定 `127.0.0.1`、无 volume 的一次性 MinIO。
   独立 writer 写入并销毁后，fresh reader 仅凭相同 PostgreSQL metadata 与 S3 namespace 恢复完整 Pi/workspace；
@@ -1278,7 +1278,7 @@
   maintenance 不重叠、raw secret 不泄漏、observer failure 被隔离，以及 drain 后晚到的 discovery 结果不会再起 lane。
 - 测试说明：该 composition test 将 Kysely pool 固定为 1，因为 PGlite socket adapter 在同一 embedded engine 上的
   多连接 extended-query 并发会偶发破坏 unnamed prepared statement；异步 lane 仍真实并发，数据库请求由 test
-  adapter 串行化。设置 `AGENT_DOCK_TEST_DATABASE_URL` 时，同一文件改用真实连接池，不采用这个限制。
+  adapter 串行化。设置 `PI_CLOUD_TEST_DATABASE_URL` 时，同一文件改用真实连接池，不采用这个限制。
 - 真实数据库复核：同一套 3 个 runtime tests 在一次性、仅绑定 `127.0.0.1` 的 PostgreSQL `15.2-alpine` 和
   8-connection pool 上全部通过；自动 execute/cancel/maintenance/drain 用例约 0.6 秒。测试 container 随后删除，
   Docker container 数回到 0。
@@ -1299,7 +1299,7 @@
   S3 checkpoint 组合成一套别人可以从 clean checkout 部署、重启、扩缩容、恢复和排障的真实拓扑，同时严格
   限定产品声明：当前只支持 single-user、deterministic Java repair/follow-up fixture，不冒充通用 coding-agent
   SaaS、任意仓库/extension 或 real-provider 平台。
-- 架构决策：新增 ADR-0023，固定可信 `@agent-dock/supervisor-host`、每进程 fresh boot/sandbox/connection
+- 架构决策：新增 ADR-0023，固定可信 `@pi-cloud/supervisor-host`、每进程 fresh boot/sandbox/connection
   credential、fsynced boot ledger、authenticated provisioning/owner/inventory、S3 checkpoint、显式 readiness 与
   单宿主 Docker Compose 边界。Docker socket 只进入 root-equivalent trusted host；control plane 和 Pi worker 都
   不接触它。每个 active turn 才创建一次性 worker，cold session 仍没有专属进程、thread、socket 或 timer。
@@ -1338,7 +1338,7 @@
 - 失败驱动修正：第一次完整构建发现 pinned MinIO 镜像没有 `sed`，bootstrap 改用纯 POSIX shell built-in `read`，
   没有向镜像增加包；第二次发现验收器用 running-only `compose ps` 检查已成功退出的 bootstrap container，改为
   `--all`。随后 cached iteration 和默认 full-build 两条路径均输出 `production_check_passed`；最终 full-build run
-  使用 `projectName=agent-dock-check-3eab0b077e`，完成 22 events 后自动删除全部临时 container/network/volume/runtime。
+  使用 `projectName=pi-cloud-check-3eab0b077e`，完成 22 events 后自动删除全部临时 container/network/volume/runtime。
 - 文档与 CI：新增 `docs/PRODUCTION_DEPLOYMENT.md`，记录 first deploy、拓扑、信任边界、TLS/remote exposure、
   routine ops、health/alerts、备份恢复、升级回滚、credential rotation、故障语义和验收命令；README、architecture、
   roadmap、backlog 与 ADR-0023 同步当前事实。GitHub Actions 新增独立 45 分钟 disposable production topology job。
@@ -1388,14 +1388,14 @@
   可并存、foreign project/session/turn/cancellation/SSE UUID 全部不可枚举、两个租户各有 10 条连续事件和两个
   tenant-prefixed S3 checkpoint object。常驻 control plane 的 env/mount inspection 证明它没有 tenant、default-profile
   或 API token。same-boot reconnect、stale-fence quarantine、`1 -> 2 -> 1`、fresh Supervisor boot、checkpoint restore 和
-  active cancellation 全部通过，最终输出 `production_check_passed`（project `agent-dock-check-4dd5955455`，22 durable
+  active cancellation 全部通过，最终输出 `production_check_passed`（project `pi-cloud-check-4dd5955455`，22 durable
   events）并只清理自己的随机资源。第一次 run 暴露验收器把“整个 boot 的 active spool 为空”当作单租户事实；双租户
   完成态本来就会保留 ACK manifest，因此修成只断言被拒绝的 exact assignment 已原子移入 quarantine，再从头通过。
-- 现有部署升级：默认 `agent-dock-production` 在保留原 PostgreSQL/MinIO volumes、稳定 tenant/user ID 和既有 API token
+- 现有部署升级：默认 `pi-cloud-production` 在保留原 PostgreSQL/MinIO volumes、稳定 tenant/user ID 和既有 API token
   的情况下运行 `production:deploy` 成功。五个常驻 service 全部 healthy，旧 token 经 `/v1/identity` 解析为原
-  `agent-dock` owner；offline `production:tenant -- list --tenant agent-dock` 能读取无 secret 的 credential metadata。
+  `pi-cloud` owner；offline `production:tenant -- list --tenant pi-cloud` 能读取无 secret 的 credential metadata。
   `docker inspect` 再次确认常驻 control plane 只挂载 database、Supervisor enrollment/management 三个 secret。
-- 当前边界与下一步：这个里程碑已经是可完整部署的私有、单宿主、多租户 deterministic AgentDock，不是公网 SaaS。
+- 当前边界与下一步：这个里程碑已经是可完整部署的私有、单宿主、多租户 deterministic PiCloud，不是公网 SaaS。
   public signup/OIDC、计费/滥用控制、跨宿主 mTLS、generic repository、request-scoped real-model gateway、extension
   policy、warm-pool cost accounting 和可观测性仍未宣称完成。若继续产品能力，优先做 generic repository import +
   request-scoped model gateway；原因是多租户 runtime correctness 已有真实部署证据，当前可用性的主要瓶颈已经是
@@ -1422,7 +1422,7 @@
   security context；token 只在 React memory 和可 dismiss 的一次性提示中出现。侧栏加载当前 tenant 的会话列表，
   选择会话后先恢复 prompt metadata，再从服务器给出的 cursor 续接 SSE。注册、换 token、logout 都先清空旧
   transcript/list/cursor/operation/stream；viewer 可以读列表/详情但不能写。
-- 配置与运维：Compose 和 `production:init` 支持 `AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED`、total cap 与四项
+- 配置与运维：Compose 和 `production:init` 支持 `PI_CLOUD_PUBLIC_REGISTRATION_ENABLED`、total cap 与四项
   tenant quota。新 runtime 会校验并持久化首次设置；旧 runtime 可只修改私有 `.env` 后 idempotent deploy。运行手册
   明确说明没有 password/OIDC/recovery/CAPTCHA/rate-limit/billing，也不允许据此把 plain-HTTP loopback ingress 直接
   暴露公网。
@@ -1430,16 +1430,16 @@
   capacity、owner/viewer role、双 tenant list/detail/SSE isolation、Web API/reducer/security-context 测试。新增 PGlite
   integration 后，四个重型 PGlite/WebSocket 文件并行曾分别触发两个不可重复的时序超时；失败用例单独均通过，
   将 control-plane suite 从 4 workers 降为 2 后整包稳定通过，业务断言未放宽。
-- 真实生产验收：默认 full-build run `agent-dock-check-d0fb9502cc` 和初始化修正后的 cached-image run
-  `agent-dock-check-d9b3f6389d` 均输出 `production_check_passed`。每次都在真实 PostgreSQL 下以 total cap 3 证明两个
+- 真实生产验收：默认 full-build run `pi-cloud-check-d0fb9502cc` 和初始化修正后的 cached-image run
+  `pi-cloud-check-d9b3f6389d` 均输出 `production_check_passed`。每次都在真实 PostgreSQL 下以 total cap 3 证明两个
   并发注册恰好一个 `201`、一个 `429`，并验证 owner/viewer conversation reads、foreign detail/SSE `404`、两租户
   checkpoint、same-boot reconnect、`1 -> 2 -> 1`、fresh boot、cancellation、22 条连续 event、secret scan 和精确清理。
 - 仓库门禁：最终 `npm run ci` 完整通过 production Web build、所有 workspace typecheck、260 passed/7 conditional
   skipped tests、两个 zero-model-call Pi spikes 和 `npm audit --audit-level=high`（0 vulnerabilities）。
 - 当前部署：保留原 PostgreSQL/MinIO/boot/spool volumes、stable tenant/user/token，把
-  `agent-dock-production` 的 registration 开关设为 true、total cap 32 后重新部署；五个常驻 service healthy，仍只发布
+  `pi-cloud-production` 的 registration 开关设为 true、total cap 32 后重新部署；五个常驻 service healthy，仍只发布
   `127.0.0.1:8080`。无污染探针得到 health `200`、同 slug registration `409`、匿名 conversation list `401`，旧 token
-  仍解析为原 `agent-dock` owner 且只看到本 tenant 的列表。
+  仍解析为原 `pi-cloud` owner 且只看到本 tenant 的列表。
 - 当前边界：用户现在可以用两个无痕/独立浏览器 context 自助创建 tenant 并验证互不可见，但丢失一次性 token 仍需
   operator offline 发新 credential。真正面向公网前仍需独立的人类 identity/recovery、edge TLS、rate limiting、
   abuse/billing、审计与 hostile-tenant sandbox threat model。
@@ -1470,7 +1470,7 @@
   `queued -> running -> completed`。Pi 实际调用 11 次工具（包含失败 `test.sh`、一次 `edit`、通过的复测），把
   `Calculator.add` 从减法改为加法，提交 407-byte non-truncated unified diff 和 settled checkpoint。gateway 收到 7 次
   provider model call，ledger 记录 input 2,274、output 909、cache-read 11,136、cache-write 0；这次测试确实消耗真实
-  provider quota。运行中 Docker inspection 证明 worker 唯一 network 是 `agent-dock-production_model-runtime`，容器
+  provider quota。运行中 Docker inspection 证明 worker 唯一 network 是 `pi-cloud-production_model-runtime`，容器
   env 没有 provider key/capability，完成后临时容器被删除。
 - 当前边界与下一步：现有 Web 已能向 cloud Pi 发真实请求，但 workspace 仍是 image-owned Java fixture，不是任意仓库。
   下一项产品瓶颈应是受控 repository import/workspace provisioning；原因是模型调用、agent loop、工具、持久化和
@@ -1515,9 +1515,9 @@
   同时包含新 `src/main/java/junit_project/Calculator.java` 和 `test.sh`。
 - 真实模型账本：两轮共 18 次 provider call，持久化 input 6,032、output 5,829、cache-read 93,568、cache-write 0。第二轮
   source 的 status/object key/hash/size/updated_at 与第一轮逐字相同，证明没有重新导入；conversation 恢复到 ready source
-  和两个 turns；运行中 Pi worker 只有 `agent-dock-production_model-runtime`，完成后没有 importer container 残留。
+  和两个 turns；运行中 Pi worker 只有 `pi-cloud-production_model-runtime`，完成后没有 importer container 残留。
 - 可重复 live gate：新增显式 opt-in 的
-  `AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check`。它默认使用上述 pinned tiny repo，也允许同时覆盖 repo/SHA；
+  `PI_CLOUD_LIVE_GITHUB_CHECK=1 npm run production:github-check`。它默认使用上述 pinned tiny repo，也允许同时覆盖 repo/SHA；
   脚本会创建真实 project/session、消费 provider quota、断言两轮工具/patch/ledger/seed reuse/cleanup，因此故意不进入常规
   zero-token CI。
 - 故障路径补强：最终 review 将 importer cleanup 从“任何 inspect error 都视为 absent”改为只接受 Docker 明确返回的
@@ -1531,7 +1531,7 @@
   remote-control-plane runtime test 在并发 PGlite 负载下超过 20 秒等待阈值；该文件隔离通过、control-plane 整包 91/91
   通过，第二次完整 CI 也原断言通过，因此没有放宽测试或修改生产调度逻辑。
 - Disposable production gate：默认 full-build `npm run production:check` 以随机项目
-  `agent-dock-check-dba675c049` 从当前源码重建四个镜像、应用 migration 008，随后证明 bootstrap 重跑、3-tenant admission
+  `pi-cloud-check-dba675c049` 从当前源码重建四个镜像、应用 migration 008，随后证明 bootstrap 重跑、3-tenant admission
   与隔离、control-plane restart、`1 -> 2 -> 1`、fresh Supervisor boot、S3 follow-up restore、active worker cancel、22 条
   durable events、worker hardening/secret absence 和 exact cleanup，最终输出 `production_check_passed`。该 deterministic
   gate 没有调用真实 provider；GitHub/真实模型组合由前述 opt-in live gate 单独证明。
@@ -1568,7 +1568,7 @@
   integration 启动 Pi + Manager + Tool Sandbox，完成 bash → edit → bash Java 修复，并检查 Sandbox UID、`network=none`、
   read-only、无 mount、无敏感 env、终态 diff 和删除确认。完整 `npm run ci` 通过 production Web build、所有 workspace
   typecheck、297 passed/8 conditional skipped tests、两个 zero-token Pi spikes 和 high-level audit（0 vulnerabilities）。
-- Disposable production gate：五个当前源码镜像完成重建后，最终门禁 `agent-dock-check-e8840586cc` 复用这些镜像，通过三租户
+- Disposable production gate：五个当前源码镜像完成重建后，最终门禁 `pi-cloud-check-e8840586cc` 复用这些镜像，通过三租户
   隔离、control-plane restart 与 `1 -> 2 -> 1`、fresh boot、S3 双轮恢复、active Sandbox cancel 和 22 条 durable events。新增
   inspection 断言还证明
   Supervisor 无 socket、Manager 是唯一 socket owner、两者均非 privileged/read-only rootfs、Manager 无 DB/S3/model credential、
@@ -1608,7 +1608,7 @@
   Java 修复与 checkpoint；整个 gate 不调用模型、不消耗 token。
 - 仓库门禁：最终 `npm run ci` 完整通过 production Web build、所有 workspace typecheck、301 passed/9 conditional skipped
   tests、两个 zero-model-call Pi spikes 和 `npm audit --audit-level=high`（0 vulnerabilities）。Disposable full-build production
-  gate `agent-dock-check-9b1a344c13` 通过公开注册、3 tenant 隔离、control-plane restart、`1 -> 2 -> 1`、fresh Supervisor
+  gate `pi-cloud-check-9b1a344c13` 通过公开注册、3 tenant 隔离、control-plane restart、`1 -> 2 -> 1`、fresh Supervisor
   boot、active worker cancel、22 条 durable events、新 provider/resource/identity 断言和精确清理。
 - 当前部署：正式栈已更新到同一批镜像，五个常驻服务 healthy，Web 仍只发布 `127.0.0.1:8080`。Supervisor 是非 root、
   read-only 且没有 Docker socket；Manager 只加入 sandbox-control，是唯一 socket owner；空闲时 managed sandbox 与 importer
@@ -1714,7 +1714,7 @@
   owner-only `/v1/operations/summary` 从 PostgreSQL 返回 tenant-scoped 24 小时 Run、usage、tool/test、sandbox 和失败聚合。
 - 部署：正式 Compose 增加持久 Prometheus、Badger Jaeger 和自动 provision 的 Grafana dashboard。三者留在 internal network，
   由无凭据、read-only、cap-drop 的独立 Caddy 只向 `127.0.0.1:9090/16686/3001` 代理；实测三条 scrape target 全部 up、
-  三个 Jaeger service 可见、Grafana `AgentDock Platform` dashboard 已加载。
+  三个 Jaeger service 可见、Grafana `PiCloud Platform` dashboard 已加载。
 - Eval：10 个 Java repair 全部通过完整 durable Pi/tool/checkpoint 流程（并发 2，p50 9.168 秒、p95 10.224 秒）；10 类
   ACK 丢失、旧 fence、object-store outage、checkpoint corruption/CAS、cancel/complete race、orphan runtime 等注入故障全部
   守住不变量。`sandbox-provider:check` 再次通过真实 Docker security contract 与 Pi remote-tool repair。
@@ -1847,14 +1847,14 @@
   `protobufjs@7.6.4` moderate。当前 Pi 已是 registry 最新版，root override 和 `npm audit fix` 都不能覆盖发布包内部 shrinkwrap；
   没有伪造修复或降低 audit level，已单独进入 Backlog 等待 upstream repack 或经过验证的 vendoring 方案。本次 Web-only image 不包含
   Pi runtime，部署不会把这两个包新增到浏览器镜像或重建 Trusted Runner。
-- 实际发布：commit `9b5adda` 已构建为 `agent-dock/web-ui:production`，OCI revision 与提交一致。Compose 只重建 Web 和复用同一静态
+- 实际发布：commit `9b5adda` 已构建为 `pi-cloud/web-ui:production`，OCI revision 与提交一致。Compose 只重建 Web 和复用同一静态
   镜像的 observability ingress；Control Plane 与 Supervisor 容器保持原启动时间和原 image ID。上线后 Web、内部服务和入口均
   healthy，`8080/healthz` 返回 `ok`，实际静态 bundle 包含阶段文本、命令、可展开输出和 `Took` 样式标记。
 
 ## 2026-07-21 — Pi Tool Call 真流式预览与源码高亮
 
 - 根因：上一版只能在 `tool_execution_start` 后展示 `write`。这时模型已经生成并解析完全部 JSON 参数，所以即使 SSE 正常，源码也会
-  一次性出现。Pi 在更早的 `message_update.toolcall_delta` 中实际提供了增量参数，只是 AgentDock v1 Adapter 先前将非文本 delta
+  一次性出现。Pi 在更早的 `message_update.toolcall_delta` 中实际提供了增量参数，只是 PiCloud v1 Adapter 先前将非文本 delta
   明确忽略；因此不能靠前端动画解决。
 - 协议：新增只包含 `toolCallId/toolName/delta` 的 `tool.input.delta` 公开事件。Adapter 从 Pi partial 中只提取已审查的调用身份和原始
   JSON fragment，不转发 provider/Pi 原对象；缺少调用身份的兼容 Provider delta 被安全忽略，最终 `tool_execution_start` 仍是执行
@@ -1902,12 +1902,12 @@
   校验实际 package version，并在任何未来 Pi 版本上 fail closed。安全审计只调和这两个精确 stale-metadata path，其他 high/critical
   仍照常阻断。全新 `npm ci --ignore-scripts` 后的 hardening、全仓 build/type/test、两个 zero-token Pi spike、备份密码学和审计全部通过。
 - 数据迁移：先记录 Desktop 旧库 `users=4`、`tenants=4`、`sessions=336`、`session_events=4655`、`tenant_model_credentials=2`，停掉旧
-  Compose 但保留其七个 volume；随后生成 `/home/rayn/agent-dock-pre-gvisor-20260721.adbackup` 加密冷备，把精确旧 image ID 流式导入原生
-  daemon，并恢复为同名 `agent-dock-production` volumes/runtime。旧 Desktop runtime 可恢复地保存在
+  Compose 但保留其七个 volume；随后生成 `/home/rayn/pi-cloud-pre-gvisor-20260721.adbackup` 加密冷备，把精确旧 image ID 流式导入原生
+  daemon，并恢复为同名 `pi-cloud-production` volumes/runtime。旧 Desktop runtime 可恢复地保存在
   `deploy/production/runtime-desktop-pre-gvisor/` 且已被 Git 忽略，没有删除用户对话或凭据。
 - 真实 GitHub 路径修正：首次真实 token gate 在模型调用前揭示 WSL 上的 `runsc`/KVM 无法访问用户自定义 Docker bridge 的
   `127.0.0.11` embedded DNS；相同 workload 使用 legacy default `bridge` 时会直接获得 WSL resolver 并可验证 exact commit。
-  因此删除可配置 repository network、Compose network bootstrap 和专用 bridge，固定 importer 使用 `bridge`。AgentDock 常驻服务
+  因此删除可配置 repository network、Compose network bootstrap 和专用 bridge，固定 importer 使用 `bridge`。PiCloud 常驻服务
   均不加入该 bridge；importer 没有凭据、prompt、mount、port、hook 或用户命令，只执行由代码构造的 GitHub exact-commit fetch。
   普通 Pi/Tool activation 仍严格为 `network=none`，没有把这一修正变成 Agent 的通用网络能力。
 - 真实闭环验收：修正后从 `mathewjonas/java-calculator-junit` 精确 commit 导入成功，在同一 Session 连续完成两个
@@ -1921,14 +1921,14 @@
 ## 2026-07-21 — Kubernetes + gVisor 执行面升级
 
 - 架构：ADR-0039 用 `KubernetesGvisorSandboxProvider` 完整取代 Manager 直接持有 Docker socket 的生命周期实现。K3s embedded
-  containerd 通过 `RuntimeClass/agent-dock-gvisor -> io.containerd.runsc.v1 -> runsc/KVM` 启动每个 active Turn 的独立 Pod；同一
+  containerd 通过 `RuntimeClass/pi-cloud-gvisor -> io.containerd.runsc.v1 -> runsc/KVM` 启动每个 active Turn 的独立 Pod；同一
   Turn 内所有工具复用该 Pod，任何终态都先 checkpoint 再 UID-fenced 删除，后续 Turn 从 PostgreSQL/MinIO 恢复到新 Pod，冷 Session
   不占 Pod。Pi、模型能力与 transcript 仍在 trusted Runner，用户代码只在 credential-free Tool Pod 中执行。
 - 权限：Sandbox Manager 改用官方 Kubernetes JavaScript client，作为非 root Compose 服务运行且没有 Docker/containerd socket。
   独立 kubeconfig 只允许两个 execution namespace 的 Pod/log/attach/exec、NetworkPolicy 读取，以及读取唯一命名 RuntimeClass；Tool 与
   Importer ServiceAccount 不挂 token。Restricted Pod Security、固定 PodSpec、non-root/read-only/cap-drop/seccomp、memory-backed
   workspace、cgroup/rlimit/output/timeout 和 default-deny NetworkPolicy 共同构成纵深边界。
-- 导入：public exact-commit import 独立到 `agent-dock-importers` gVisor Pod，只开放 DNS 与排除私网后的 TCP/443，不接收 prompt、凭据、
+- 导入：public exact-commit import 独立到 `pi-cloud-importers` gVisor Pod，只开放 DNS 与排除私网后的 TCP/443，不接收 prompt、凭据、
   PodSpec 或任意命令，也不执行 hooks/submodule/LFS/repository code。真实排障发现 WSL2/K3s 路径的 GSO 会造成 HTTP/2 framing error 与
   30 秒 TCP retransmission，因此保持 `network=sandbox`，显式关闭 host/software GSO，并固定 Git HTTP/1.1；Kubernetes `emptyDir` 的
   root owner 则用命令级 `safe.directory=/workspace` 处理，没有关闭全局 Git ownership 防护。后续门禁又捕获一次公共网络瞬时 stall，
@@ -1996,7 +1996,7 @@
   事实，Session warm Pod 也只校验 Workspace revision，无法证明复用的是同一开发环境。单纯让浏览器或模型传 Docker image 又会把供应链和
   Kubernetes 策略控制交给不可信输入。
 - 决策：ADR-0042 引入 append-only `environment_versions`。Project 只有一个 active version；Turn acceptance 把 environment UUID、版本、
-  固定 `agent-dock-fullstack/1` profile、部署 image revision 和 canonical spec SHA-256 快照进 Run。Control Plane 与 Sandbox Manager 都必须
+  固定 `pi-cloud-fullstack/1` profile、部署 image revision 和 canonical spec SHA-256 快照进 Run。Control Plane 与 Sandbox Manager 都必须
   配置同一 immutable revision，升级只为后续 Run 生成新 version，旧 Run 不被静默改写。
 - 执行：环境快照经过 durable outbox、Supervisor wire、Tool reservation 到 gVisor Pod。Tool Worker 在 Workspace restore 和任何用户命令前
   用镜像构建时写入的只读 revision 文件校验物理 image，而不是相信 Manager 注入的自报值；随后用绝对路径有界探测 Node 24、Java 17、
@@ -2062,7 +2062,7 @@
   verification 与 Agent bash 都只在第二个 Pod 中执行。
 - 恢复：bootstrap workload 不进入 Supervisor inventory。Manager 启动时先枚举并清理上次进程故障留下的 bootstrap Pod，正式
   `tool-sandbox` 才允许被 Session warm-reuse；因此旧联网 runtime 既不会被接管，也不会跨 tenant/session 复用。
-- 真实验收：在 K3s 1.36.2、`RuntimeClass/agent-dock-gvisor`、KVM platform 上，通过 capability 对
+- 真实验收：在 K3s 1.36.2、`RuntimeClass/pi-cloud-gvisor`、KVM platform 上，通过 capability 对
   `registry.npmjs.org` 实际执行 `npm install is-number@7.0.0`；随后新 Pod 离线 `require` 验证成功，访问 `example.com` 失败，最终 Pod 没有
   dependency-egress label，且 bootstrap inventory 为 0。完整 gVisor gate 还通过 exact-commit GitHub import、跨租户文件隔离、凭据与宿主信息
   隔离、cgroup/进程/输出/超时限制、取消清理、warm fence rebind、纯聊天零 Pod 和真实 remote-tool repair；6 个 live integration tests 全部通过，
@@ -2078,7 +2078,7 @@
   warm-reuse 或删除，永远没有返回 clean pool 的路径。dependency-bootstrap 不使用 pool，但它销毁后的新离线 Pod 可以领取 clean prewarm。
 - 恢复与观测：`listAssignments` 只选择正式 `tool-sandbox`，不会把 prewarm 当成 Supervisor runtime。singleton Manager 启动先清理上次进程遗留的
   clean/bootstrap Pod，再补足目标；shutdown 删除全部 tracked prewarm。新增独立低基数
-  `agent_dock_sandbox_prewarm{provider="gvisor"}` gauge，不把共享容量混入 active Session 数。
+  `pi_cloud_sandbox_prewarm{provider="gvisor"}` gauge，不把共享容量混入 active Session 数。
 - 真实证据：K3s/runsc 测试在领取前证明 Pod metadata 不含目标 tenant，领取后 name/UID 不变、prewarm annotation 消失并绑定 exact Attempt，随后
   离线 Node Tool 成功且 effective isolation 仍为 `runsc` + deny-all。相同已缓存 image/command 下两次实测分别为 2,260 ms vs 4,073 ms、
   2,218 ms vs 4,379 ms（ready clean-prewarm vs fresh Pod）；used Pod 删除，补池产生新的 clean Pod，测试退出后无残留。
@@ -2111,7 +2111,7 @@
 
 ## 2026-07-23 — Versioned Helm gVisor Execution Plane
 
-- 唯一来源：删除静态 execution-plane manifest，新增 `deploy/helm/agent-dock-execution-plane` 0.1.0 closed chart。RuntimeClass→`runsc`、四个 restricted
+- 唯一来源：删除静态 execution-plane manifest，新增 `deploy/helm/pi-cloud-execution-plane` 0.1.0 closed chart。RuntimeClass→`runsc`、四个 restricted
   namespace、tokenless ServiceAccount、resource-name-limited RBAC、default-deny/Proxy-only NetworkPolicy 和 ClusterIP identity 均不可通过 values 改写。
 - 可用性：dependency/repository CONNECT proxy 默认两副本，RollingUpdate `maxUnavailable=0`、PDB `minAvailable=1`、topology spread 与显式资源限制；chart
   故意不部署 Runner/Ingress，维持 Supervisor 仅向 Control Plane 发起认证出站连接。
@@ -2134,7 +2134,7 @@
 ## 2026-07-23 — Helm Release Takeover and Post-upgrade Acceptance
 
 - 实际接管：使用固定 Helm 3.18.6 对既有 execution plane 执行 `upgrade --install --take-ownership`。低权限 Manager 随后读到
-  `RuntimeClass/agent-dock-gvisor`、proxy Endpoints 与 trust ConfigMap 的 `managed-by=Helm`、release name/namespace 元数据；RuntimeClass handler
+  `RuntimeClass/pi-cloud-gvisor`、proxy Endpoints 与 trust ConfigMap 的 `managed-by=Helm`、release name/namespace 元数据；RuntimeClass handler
   仍为 `runsc`，Service 同时包含两个 Ready Pod UID。Manager 对 Deployment、PDB 和 NetworkPolicy 的读取仍被 RBAC 拒绝，证明 Helm 部署没有扩大
   运行时身份权限。
 - 信任链：从生产 capability issuer 私钥只派生公钥指纹，与 Helm 接管后 ConfigMap 以及 Service 的 8 次 `/health/ready` 返回逐一比较，全部为
@@ -2176,13 +2176,13 @@
   upstream proxy、普通 HTTP 拒绝、private DNS 拒绝与 direct CONNECT；production composition gate 验证 network membership、精确 proxy 配置、
   non-root、read-only、no privilege、no Docker socket/secret。
 - 安全部署：在 active Run 为 0 时生成
-  `/home/rayn/agent-dock-backups/pre-provider-relay-deploy-d216ae0.adbackup`（36,503,137 bytes、mode 0600），随后部署 revision
+  `/home/rayn/pi-cloud-backups/pre-provider-relay-deploy-d216ae0.adbackup`（36,503,137 bytes、mode 0600），随后部署 revision
   `76f276fea94319c637ac47f5b2a972a5286bfa40`。首次启动暴露 one-shot volume bootstrap 在 drop-all capability 下的 chmod 顺序问题；
   修复为先 chmod 后 chown，并只为 bootstrap 增加 `CHOWN`/`FOWNER`，长期 relay 仍保持 drop-all。最终所有生产服务健康。
 - 真实模型与 gVisor 闭环：production Web/API 使用 `deepseek-v4-flash` 完成两轮同一 Session 验收。纯聊天首字/settled 为
   4,127/4,332 ms，1 次真实请求消耗 65 input、27 output、1,280 cache-read token，0 Tool Call、0 Sandbox activation；第二轮编码
   首字/settled 为 5,186/5,793 ms，2 次真实请求消耗 182 input、200 output、2,816 cache-read token，在
-  `RuntimeClass/agent-dock-gvisor` 内完成 1 次 Tool Call并产生 207-byte patch。
+  `RuntimeClass/pi-cloud-gvisor` 内完成 1 次 Tool Call并产生 207-byte patch。
 - 投影与清理证据：两轮共 15 个 durable events 投影为 2 个 turn/3 个 semantic items，`replayAfterSequence=15` 与 durable high-water 一致；
   精确 gVisor Sandbox UID `06cb040a-b632-495b-88ba-cb5760674a1f` 验收后已销毁。脱敏报告保存在
   `docs/reports/semantic-conversation-acceptance-latest.{json,md}`。
@@ -2212,7 +2212,7 @@
   Bundle 继续完整保留每次 red/green attempt，Acceptance 对同一 canonical
   invocation 只采用最终结果。
 - 生产上线：部署前 active Run 为 0，并生成
-  `/home/rayn/agent-dock-backups/pre-parallel-candidate-races-3d6ba17.adbackup`
+  `/home/rayn/pi-cloud-backups/pre-parallel-candidate-races-3d6ba17.adbackup`
  （35,987,342 bytes、mode 0600）。migration 021 已应用；所有既有租户
   concurrent-turn quota 至少为 2；最终 production revision
   `176de64dc561effaea6496fd9d868f77c2c52ab8` 的服务全部健康。
@@ -2222,7 +2222,7 @@
   13,312/16,128 cache-read tokens。两个候选都只修改
   `src/Calculator.java`，完整 Bundle 分别保留 2/3 次测试尝试，最终有效结果
   均为 1 passed、0 failed。
-- 物理证据：同时观测到两个 `RuntimeClass/agent-dock-gvisor` Pod，UID 为
+- 物理证据：同时观测到两个 `RuntimeClass/pi-cloud-gvisor` Pod，UID 为
   `f347e02c-6244-4e50-9f79-5bdff6a603cd` 与
   `1e90c423-e38c-4a58-a7b7-8b32be62b549`，Tool activation 为
   `97a4da3d-a97c-41a0-9905-abb366861d53` 与
@@ -2240,7 +2240,7 @@
   Agent Loop，模型凭据、对话状态、RunAttempt、Lease 与 Fencing 均不进入
   Sandbox。Pi 的 `read/write/edit/bash/git` 调用经既有 narrow Tool RPC 到
   Sandbox Manager，再映射为一个绑定 tenant/session/run/attempt/fence 的
-  CubeSandbox KVM microVM；Cube 负责 microVM 生命周期与执行代理，AgentDock
+  CubeSandbox KVM microVM；Cube 负责 microVM 生命周期与执行代理，PiCloud
   继续负责多租户授权、调度、公平性、幂等、checkpoint 和最终清理。
 - 主方案：production 默认 Provider 已切换为 CubeSandbox，不保留普通 Tool
   execution 的 runc/runsc 兼容分支。gVisor 只保留在受信 exact-commit importer
@@ -2304,7 +2304,7 @@
 - Added an adopt-before-build repository rule: evaluate active open-source
   infrastructure from established companies/foundations before implementing a
   distributed subsystem, select on semantics rather than stars, keep an
-  AgentDock adapter/exit path, and assign one durable authority per concern.
+  PiCloud adapter/exit path, and assign one durable authority per concern.
 - Compared Temporal, Cadence, Dapr Workflow, Argo Workflows, Conductor, and the
   current PostgreSQL dispatcher using official docs, repositories, licenses,
   releases, TypeScript support, failure semantics, and operational topology.
@@ -2332,7 +2332,7 @@
 - The measured four 400 ms activities completed across both Workers in
   2,446 ms; killed attempt 1 was recovered as attempt 2 with fence 100 -> 101;
   the development-service restart recovery took 13,081 ms. This proves
-  Temporal mechanics but also confirms that the current AgentDock Run would be
+  Temporal mechanics but also confirms that the current PiCloud Run would be
   one long Activity. Production stays on the PostgreSQL dispatcher; no dual
   scheduler was introduced.
 - Added a direct Pi SDK versus RPC zero-token benchmark. Twenty samples measured
@@ -2341,7 +2341,7 @@
   because it supplies per-Run environment isolation, verified process-group
   termination, and a smaller failure radius; direct SDK requires a
   capacity-one replaceable Worker and instance-scoped configuration first.
-- Implemented `agent-dock.pi-session-manifest.v2` in the production checkpoint
+- Implemented `pi-cloud.pi-session-manifest.v2` in the production checkpoint
   adapter. It stores tenant/session-scoped SHA-256 line segments and immutable
   manifests, supports online v1 reads, conditional/idempotent S3 puts,
   append/rebase, 32-segment consolidation, per-segment and whole-file
@@ -2423,7 +2423,7 @@
   Pi JSONL, `messages[]`, model/Tool output, credentials and Workspace bytes
   remain in PostgreSQL/MinIO and trusted Worker memory.
 - Both capacity-one Supervisor processes now poll the common
-  `agent-dock-pi-runs-v1` Task Queue. The Activity performs an exact command
+  `pi-cloud-pi-runs-v1` Task Queue. The Activity performs an exact command
   claim, rechecks PostgreSQL FIFO/concurrency rules, acquires the existing
   RunAttempt lease/fence and executes the embedded Pi SDK. Later same-Session
   work defers through a durable Workflow timer.
@@ -2509,7 +2509,7 @@
 
 ## 2026-07-26: Kubernetes trusted Pi Worker pool
 
-- Added ADR-0058 and the `agent-dock-pi-worker-pool` Helm chart.
+- Added ADR-0058 and the `pi-cloud-pi-worker-pool` Helm chart.
 - Each capacity-one Pi SDK Worker now has a deployable StatefulSet identity,
   private `ReadWriteOncePod` boot/spool claim, per-Pod management Service,
   restricted trusted-plane network policy, PDB and topology spreading.
@@ -2531,7 +2531,7 @@
 
 ## 2026-07-26: local Kubernetes cutover and live acceptance
 
-- Created the disposable single-server `agent-dock-workers` k3d/K3s cluster
+- Created the disposable single-server `pi-cloud-workers` k3d/K3s cluster
   and moved the two capacity-one trusted Pi SDK Workers from Compose into a
   Kubernetes StatefulSet. Temporal remains the only Run scheduler and both
   Pods poll the same versioned Task Queue.
@@ -2584,7 +2584,7 @@
   `8721dd151971ce3c2966482bbd32904ad98f378e`. Cube's standard recovery path is
   explicit `pause` followed by `connect` (or CLM-managed timeout pause/automatic
   resume), coordinated through Cube lifecycle state and Redis locks. That
-  physical state machine does not identify the AgentDock RunAttempt allowed to
+  physical state machine does not identify the PiCloud RunAttempt allowed to
   mutate a Workspace, so ADR-0060 keeps PostgreSQL lease/fence state authoritative.
 - Reworked the Cube Tool template into a root-owned authenticated supervisor
   plus a UID/GID 1000 Tool Worker. Warm release now rejects active operations,
@@ -2623,7 +2623,7 @@
 - Added a non-root template-registration path through Cube v0.6.0's official
   `cubemastercli` and private CubeMaster port. It uses the same
   `create-from-image -> watch -> list/READY` protocol as the in-cluster CLI,
-  without granting AgentDock or Sandbox Manager Kubernetes administrator
+  without granting PiCloud or Sandbox Manager Kubernetes administrator
   credentials.
 - The private template registry is reached through a short-lived raw TCP relay
   bound only to `127.0.0.1`; the relay transports registry TLS unchanged and is
@@ -2672,17 +2672,17 @@
   both Kubernetes Worker Pods Ready.
 - Real-model acceptance used Session
   `462873bd-ef0d-4943-8eab-09f84c14d9c3`. Its first Run settled on Worker
-  `agent-dock-pi-worker-local-v1-0` in 1,919 ms and the next Run settled on the
+  `pi-cloud-pi-worker-local-v1-0` in 1,919 ms and the next Run settled on the
   same Worker in 1,679 ms after restoring a non-empty Pi base artifact.
   Temporal History, rather than the final Worker identity alone, proves the
   affinity hit: the second Activity was scheduled on
-  `agent-dock-pi-worker-v1-757ba511-294f-40e6-bdfc-e8a09a76a613` with the
+  `pi-cloud-pi-worker-v1-757ba511-294f-40e6-bdfc-e8a09a76a613` with the
   expected two-second Schedule-to-Start timeout.
 - A separate busy-capacity acceptance held that preferred Worker's only slot
   with Run `d121ab17-4e07-4aec-bf49-ae79ea3ae361`, then submitted Run
   `630923db-41f0-4093-bb76-5942fbd16e85` for the same Session. Every scheduled
   Activity for the queued Run used the shared
-  `agent-dock-pi-runs-v1` queue; none used the Worker-private queue. During the
+  `pi-cloud-pi-runs-v1` queue; none used the Worker-private queue. During the
   same-Session FIFO wait, Activity starts alternated between both Worker Pods,
   proving that the task was not pinned behind the occupied preferred Worker.
   It executed only after the earlier same-Session Run settled, preserving the
@@ -2782,7 +2782,7 @@
 - A real rollback attempt then proved an important Cube v0.6 constraint:
   rollback is origin-Sandbox-bound and rejects a fresh VM. Cold restore now
   follows Cube's supported snapshot-as-template clone path; rollback was
-  removed from the AgentDock Manager credential instead of weakening the
+  removed from the PiCloud Manager credential instead of weakening the
   physical-identity model.
 - The operational boundary is explicit: current Cube snapshot data is local to
   the single-node Cube storage plane. Compose backup alone is not a node-loss
@@ -2855,7 +2855,7 @@
 - Added ADR-0067 after checking Cube v0.6's official binary Volume Plugin
   contract and Kopia's current repository/restore behavior. New Cube
   activations receive one deterministic tenant/Workspace/Session volume through
-  the `agentdock-posix` plugin; browsers, models and Tool code cannot select a
+  the `picloud-posix` plugin; browsers, models and Tool code cannot select a
   host path, volume driver or repository.
 - Added a separately authenticated trusted Workspace Volume Gateway. It alone
   mounts the POSIX root and receives a dedicated Kopia repository password and
@@ -2885,7 +2885,7 @@
 
 - Audited CubeSandbox v0.6 source and confirmed that the binary Volume Plugin
   is a mount contract, while `CommitSandbox` rejects the host-path/shared
-  directories used for AgentDock's external `/workspace`. Native Cube snapshots
+  directories used for PiCloud's external `/workspace`. Native Cube snapshots
   therefore cannot be the complete version authority for this topology.
 - Adopted ADR-0068: one exact Session may retain one running Cube for the
   15-minute idle window. A settled Run revokes its Tool capability and closes
@@ -2918,7 +2918,7 @@
   that sidecar alone as proof caused restore to be skipped and mounted an empty
   Workspace into the replacement Cube.
 - Every new live volume now receives a random
-  `.agent-dock-runtime/generation` marker before user code starts. Kopia carries
+  `.pi-cloud-runtime/generation` marker before user code starts. Kopia carries
   that marker in every immutable snapshot, while the trusted sidecar records
   the same generation with the committed snapshot ID.
 - Warm reuse now requires exact tenant/workspace/session identity, exact
@@ -3094,23 +3094,23 @@
   results, Review Bundles, Candidate Race scoring and production acceptance,
   so it remains in the user Workspace.
 - Changed the Cube POSIX Volume from a directly mounted root to a trusted
-  envelope containing sibling `.agent-dock-runtime/generation` and
+  envelope containing sibling `.pi-cloud-runtime/generation` and
   `workspace/` paths. Cube now mounts only the latter at `/workspace`.
 - Kopia continues to snapshot the complete envelope, preserving an atomic
   generation-plus-data recovery point. File materialization resolves user
   paths beneath the `workspace/` snapshot child.
 - Advanced the Workspace Kopia reference to
-  `agent-dock.workspace-kopia-snapshot.v3` and the Cube Volume Plugin private
-  data to `agentdock-posix-v2`. Previous development layouts fail closed; no
+  `pi-cloud.workspace-kopia-snapshot.v3` and the Cube Volume Plugin private
+  data to `picloud-posix-v2`. Previous development layouts fail closed; no
   compatibility reader is retained.
 - Removed application-level reserved-path filtering for
-  `.agent-dock-runtime`; platform metadata is now absent from the guest rather
+  `.pi-cloud-runtime`; platform metadata is now absent from the guest rather
   than merely hidden from selected Tool APIs.
 
 ## 2026-07-30 — Trusted external Git baseline
 
-- Moved AgentDock's synthetic Git directory from `/workspace/.git` to the
-  trusted Volume envelope at `.agent-dock-runtime/git`. Cube continues to
+- Moved PiCloud's synthetic Git directory from `/workspace/.git` to the
+  trusted Volume envelope at `.pi-cloud-runtime/git`. Cube continues to
   mount only the sibling `workspace/` directory.
 - Removed platform Git initialization and Patch collection from the untrusted
   Tool Worker and Cube Tool service. The trusted Workspace Volume Gateway now
@@ -3123,7 +3123,7 @@
   writable `/workspace` boundary check and added a database migration for
   existing default environments.
 - Retained Git inside the Cube image for repositories that users explicitly
-  create or clone; only AgentDock-owned Git metadata moved to the trusted
+  create or clone; only PiCloud-owned Git metadata moved to the trusted
   plane.
 - Corrected the cold-backup tree validator to preserve symlinks inside
   untrusted user Workspace data without accepting symlinks in platform
@@ -3138,7 +3138,7 @@
   cache-read tokens across five Temporal Workflows. Pure chat created no Cube;
   two coding Runs reused one warm KVM; a 3,684-file repository recovered from
   Kopia into a fresh KVM; cross-tenant access was denied; every VM was
-  reclaimed. Physical evidence confirmed `.agent-dock-runtime/git` beside the
+  reclaimed. Physical evidence confirmed `.pi-cloud-runtime/git` beside the
   mounted data directory and no platform-created `.git` inside the user
   Workspace.
 # 2026-07-31 — Explicit active Pi steer and interrupted-text proof
@@ -3154,7 +3154,7 @@
   idempotently.
 - Added a provider-disconnect integration test proving visible partial
   assistant text is preserved in Pi-native interrupted JSONL together with the
-  `agent-dock.run_interrupted` marker.
+  `pi-cloud.run_interrupted` marker.
 - Fixed the local Kubernetes Worker cutover to treat Jaeger as the optional
   profile documented by ADR-0075. Core deployments no longer create a dead
   Jaeger bridge or inject an OTLP endpoint; an active local Jaeger container or
@@ -3189,7 +3189,7 @@
   `2b5bdcf67547860f2e5c5a605009a70026796b2b`: `Esc` submits an interrupt,
   Core cancels the active Task, appends a hidden model-visible
   `<turn_aborted>` item and flushes it before publishing terminal abort state.
-- Strengthened AgentDock's existing `agent-dock.run_interrupted` Pi custom
+- Strengthened PiCloud's existing `pi-cloud.run_interrupted` Pi custom
   message with explicit process uncertainty, conditional proactive inspection
   and no-blind-replay guidance. The marker remains hidden from the transcript
   while participating in Pi's compaction-aware model context.
@@ -3204,7 +3204,7 @@
 
 # 2026-08-02 — Minimal model-visible interruption and Sandbox continuity
 
-- Re-read Codex's exact model-visible marker and removed AgentDock's
+- Re-read Codex's exact model-visible marker and removed PiCloud's
   prescriptive verification/replay policy, internal reason codes and
   Run/Attempt identity from model input. Trusted checkpoint metadata retains
   those operational details.
@@ -3535,12 +3535,12 @@
   covering Entries, lanes, records, queries, immutable reads, usage, ordered
   mutation logs, repository lifecycle and branch/tree forks.
 - Removed accidental UUID restrictions from Pi-owned identifiers. Session,
-  Entry, parent, Record and run IDs are opaque `text`, while AgentDock's product
+  Entry, parent, Record and run IDs are opaque `text`, while PiCloud's product
   UUIDs remain valid values.
 - Corrected contract differences found by the suite: one ID namespace across
   Entries and Records, usage-ledger statistics and operation-finish ordering.
 - Aligned the Control Plane's atomic product-conversation fork with Pi's fork
   mutation order by renumbering copied Entries and recording Lane, name and
   label mutations in the child Session log.
-- Retained AgentDock's stronger cloud rules as separate tests: tenant-scoped
+- Retained PiCloud's stronger cloud rules as separate tests: tenant-scoped
   repository reads and transaction-scoped execution authority on mutations.

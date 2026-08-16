@@ -15,7 +15,7 @@ import {
   type SupervisorHeartbeatAckMessage,
   type SupervisorHeartbeatMessage,
   type SupervisorRegisteredMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import WebSocket, { type RawData } from "ws";
 import type { PreparedTurnSteer } from "./local-sandbox-supervisor.ts";
 import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";

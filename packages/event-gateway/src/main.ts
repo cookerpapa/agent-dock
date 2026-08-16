@@ -1,16 +1,16 @@
-import { createDatabase } from "@agent-dock/database";
-import { PostgresTenantApiAuthenticator } from "@agent-dock/control-plane/tenant-identity";
-import { WebAuthenticationService } from "@agent-dock/control-plane/web-authentication";
-import { operationalLog, startServiceObservability } from "@agent-dock/observability";
-import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
-import { ValkeyLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
-import { ValkeyLiveTurnSnapshotSource } from "@agent-dock/runtime-core/live-turn-snapshot";
-import { PostgresSessionEventNotifications } from "@agent-dock/runtime-core/postgres-session-event-notifications";
+import { createDatabase } from "@pi-cloud/database";
+import { PostgresTenantApiAuthenticator } from "@pi-cloud/control-plane/tenant-identity";
+import { WebAuthenticationService } from "@pi-cloud/control-plane/web-authentication";
+import { operationalLog, startServiceObservability } from "@pi-cloud/observability";
+import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
+import { ValkeyLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
+import { ValkeyLiveTurnSnapshotSource } from "@pi-cloud/runtime-core/live-turn-snapshot";
+import { PostgresSessionEventNotifications } from "@pi-cloud/runtime-core/postgres-session-event-notifications";
 import {
   KafkaWorkerEventLog,
   KafkaWorkerEventProjector,
-} from "@agent-dock/runtime-core/worker-event-log";
-import { LiveTerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
+} from "@pi-cloud/runtime-core/worker-event-log";
+import { LiveTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 import { pathToFileURL } from "node:url";
 import { EventGateway } from "./event-gateway.ts";
 import { repairLiveEventsIfNeeded } from "./live-event-rebuild.ts";
@@ -19,13 +19,13 @@ import { loadEventGatewayProductionConfig } from "./production-config.ts";
 export async function startEventGateway(): Promise<void> {
   const config = await loadEventGatewayProductionConfig();
   const observability = await startServiceObservability({
-    serviceName: "agent-dock-event-gateway",
+    serviceName: "pi-cloud-event-gateway",
     defaultMetricsPort: 9467,
   });
   const database = createDatabase({ connectionString: config.databaseUrl, maxConnections: 20 });
   const notifications = new PostgresSessionEventNotifications({
     connectionString: config.databaseNotificationUrl,
-    applicationName: "agent-dock-event-gateway",
+    applicationName: "pi-cloud-event-gateway",
   });
   const authenticationDefaults = {
     database,
@@ -135,7 +135,7 @@ export async function startEventGateway(): Promise<void> {
           },
         });
         operationalLog({
-          service: "agent-dock-event-gateway",
+          service: "pi-cloud-event-gateway",
           level: "info",
           event: "live_event_repair_complete",
           attributes: report,
@@ -147,7 +147,7 @@ export async function startEventGateway(): Promise<void> {
     await projector?.start();
     await gateway.listen(config.port, config.host);
     process.stdout.write(
-      `AgentDock Event Gateway listening on ${config.host}:${String(config.port)}\n`,
+      `PiCloud Event Gateway listening on ${config.host}:${String(config.port)}\n`,
     );
   } catch (error: unknown) {
     await close().catch(() => undefined);
@@ -162,7 +162,7 @@ if (entrypoint && import.meta.url === pathToFileURL(entrypoint).href) {
       error instanceof Error
         ? { name: error.name, message: error.message }
         : { name: "UnknownError", message: "Unknown Event Gateway startup failure" };
-    process.stderr.write(`AgentDock Event Gateway failed to start ${JSON.stringify(failure)}\n`);
+    process.stderr.write(`PiCloud Event Gateway failed to start ${JSON.stringify(failure)}\n`);
     process.exitCode = 1;
   });
 }

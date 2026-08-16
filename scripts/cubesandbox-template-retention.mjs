@@ -1,5 +1,5 @@
-export const AGENT_DOCK_CUBE_TEMPLATE_IMAGE_PREFIX =
-  "agent-dock-cube-template-registry.cube-system.svc.cluster.local:5000/agent-dock/cubesandbox-tool@";
+export const PI_CLOUD_CUBE_TEMPLATE_IMAGE_PREFIX =
+  "pi-cloud-cube-template-registry.cube-system.svc.cluster.local:5000/pi-cloud/cubesandbox-tool@";
 
 const terminalStatuses = new Set(["FAILED", "ERROR", "CANCELLED"]);
 
@@ -17,7 +17,7 @@ function agentDockTemplate(value) {
     value !== null &&
     /^tpl-[a-z0-9]{24}$/.test(value.template_id ?? "") &&
     typeof value.image_info === "string" &&
-    value.image_info.startsWith(AGENT_DOCK_CUBE_TEMPLATE_IMAGE_PREFIX)
+    value.image_info.startsWith(PI_CLOUD_CUBE_TEMPLATE_IMAGE_PREFIX)
   );
 }
 

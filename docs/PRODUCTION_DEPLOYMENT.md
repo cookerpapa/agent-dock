@@ -53,7 +53,7 @@ PostgreSQL backup.
 npm run production:check
 npm run production:worker-pool-check
 npm run production:control-plane-restart-check
-AGENT_DOCK_LIVE_LONG_CONTEXT_CHECK=1 npm run production:long-context-check
+PI_CLOUD_LIVE_LONG_CONTEXT_CHECK=1 npm run production:long-context-check
 ```
 
 The first command requires explicit live-model/Cube acknowledgement and consumes

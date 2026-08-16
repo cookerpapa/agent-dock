@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 
-export const DEFAULT_PROVIDER_RELAY_SOCKET = "/run/agent-dock-provider-relay/provider-egress.sock";
+export const DEFAULT_PROVIDER_RELAY_SOCKET = "/run/pi-cloud-provider-relay/provider-egress.sock";
 
 export type ProviderEgressRelayConfig =
   | Readonly<{
@@ -19,7 +19,7 @@ export type ProviderEgressRelayConfig =
 function socketPath(value: string | undefined): string {
   const path = value ?? DEFAULT_PROVIDER_RELAY_SOCKET;
   if (!isAbsolute(path) || path.length > 4_096 || path.includes("\0")) {
-    throw new TypeError("AGENT_DOCK_PROVIDER_RELAY_SOCKET is invalid");
+    throw new TypeError("PI_CLOUD_PROVIDER_RELAY_SOCKET is invalid");
   }
   return path;
 }
@@ -38,7 +38,7 @@ function allowedHosts(value: string | undefined): readonly string[] {
         ),
     )
   ) {
-    throw new TypeError("AGENT_DOCK_PROVIDER_RELAY_ALLOWED_HOSTS is invalid");
+    throw new TypeError("PI_CLOUD_PROVIDER_RELAY_ALLOWED_HOSTS is invalid");
   }
   return hosts;
 }
@@ -46,7 +46,7 @@ function allowedHosts(value: string | undefined): readonly string[] {
 function upstreamProxyUrl(value: string | undefined): URL | undefined {
   if (value === undefined || value.length === 0) return undefined;
   if (value.length > 4_096 || value.includes("\0")) {
-    throw new TypeError("AGENT_DOCK_PROVIDER_RELAY_UPSTREAM_PROXY is invalid");
+    throw new TypeError("PI_CLOUD_PROVIDER_RELAY_UPSTREAM_PROXY is invalid");
   }
   const url = new URL(value);
   if (
@@ -56,7 +56,7 @@ function upstreamProxyUrl(value: string | undefined): URL | undefined {
     url.search.length > 0 ||
     url.hash.length > 0
   ) {
-    throw new TypeError("AGENT_DOCK_PROVIDER_RELAY_UPSTREAM_PROXY is invalid");
+    throw new TypeError("PI_CLOUD_PROVIDER_RELAY_UPSTREAM_PROXY is invalid");
   }
   return url;
 }
@@ -64,7 +64,7 @@ function upstreamProxyUrl(value: string | undefined): URL | undefined {
 function port(value: string | undefined): number {
   const parsed = Number(value ?? "3129");
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 65_535) {
-    throw new TypeError("AGENT_DOCK_PROVIDER_RELAY_PORT is invalid");
+    throw new TypeError("PI_CLOUD_PROVIDER_RELAY_PORT is invalid");
   }
   return parsed;
 }
@@ -72,28 +72,28 @@ function port(value: string | undefined): number {
 export function loadProviderEgressRelayConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): ProviderEgressRelayConfig {
-  const mode = environment.AGENT_DOCK_PROVIDER_RELAY_MODE;
-  const path = socketPath(environment.AGENT_DOCK_PROVIDER_RELAY_SOCKET);
+  const mode = environment.PI_CLOUD_PROVIDER_RELAY_MODE;
+  const path = socketPath(environment.PI_CLOUD_PROVIDER_RELAY_SOCKET);
   if (mode === "host") {
-    const upstream = upstreamProxyUrl(environment.AGENT_DOCK_PROVIDER_RELAY_UPSTREAM_PROXY);
+    const upstream = upstreamProxyUrl(environment.PI_CLOUD_PROVIDER_RELAY_UPSTREAM_PROXY);
     return {
       mode,
       socketPath: path,
-      allowedHosts: allowedHosts(environment.AGENT_DOCK_PROVIDER_RELAY_ALLOWED_HOSTS),
+      allowedHosts: allowedHosts(environment.PI_CLOUD_PROVIDER_RELAY_ALLOWED_HOSTS),
       ...(upstream === undefined ? {} : { upstreamProxyUrl: upstream }),
     };
   }
   if (mode === "bridge") {
-    const host = environment.AGENT_DOCK_PROVIDER_RELAY_HOST ?? "0.0.0.0";
+    const host = environment.PI_CLOUD_PROVIDER_RELAY_HOST ?? "0.0.0.0";
     if (host !== "0.0.0.0" && host !== "127.0.0.1") {
-      throw new TypeError("AGENT_DOCK_PROVIDER_RELAY_HOST is invalid");
+      throw new TypeError("PI_CLOUD_PROVIDER_RELAY_HOST is invalid");
     }
     return {
       mode,
       socketPath: path,
       host,
-      port: port(environment.AGENT_DOCK_PROVIDER_RELAY_PORT),
+      port: port(environment.PI_CLOUD_PROVIDER_RELAY_PORT),
     };
   }
-  throw new TypeError("AGENT_DOCK_PROVIDER_RELAY_MODE must be host or bridge");
+  throw new TypeError("PI_CLOUD_PROVIDER_RELAY_MODE must be host or bridge");
 }

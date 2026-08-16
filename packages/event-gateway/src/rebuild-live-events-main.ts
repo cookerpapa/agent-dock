@@ -1,5 +1,5 @@
-import { createDatabase } from "@agent-dock/database";
-import { ValkeyLiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
+import { createDatabase } from "@pi-cloud/database";
+import { ValkeyLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
 import { loadEventGatewayProductionConfig } from "./production-config.ts";
 import { rebuildLiveEventsFromKafka } from "./live-event-rebuild.ts";
 
@@ -32,6 +32,6 @@ async function rebuildLiveEvents(): Promise<void> {
 }
 
 rebuildLiveEvents().catch(() => {
-  process.stderr.write("AgentDock live-event rebuild failed\n");
+  process.stderr.write("PiCloud live-event rebuild failed\n");
   process.exitCode = 1;
 });

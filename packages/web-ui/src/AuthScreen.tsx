@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
-import type { TenantIdentityResource } from "@agent-dock/protocol";
-import type { AgentDockApi } from "./api.ts";
+import type { TenantIdentityResource } from "@pi-cloud/protocol";
+import type { PiCloudApi } from "./api.ts";
 import { errorMessage } from "./ui-errors.ts";
 
 type AuthMode = "login" | "register";
@@ -9,7 +9,7 @@ export function AuthScreen({
   api,
   onAuthenticated,
 }: {
-  api: AgentDockApi;
+  api: PiCloudApi;
   onAuthenticated: (identity: TenantIdentityResource) => void;
 }) {
   const [mode, setMode] = useState<AuthMode>("login");
@@ -43,7 +43,7 @@ export function AuthScreen({
         <div className="product-logo product-logo-large" aria-hidden="true">
           A
         </div>
-        <h1>AgentDock</h1>
+        <h1>PiCloud</h1>
         <p>你的云端 Coding Agent</p>
       </section>
       <form className="product-auth-card" onSubmit={(event) => void submit(event)}>

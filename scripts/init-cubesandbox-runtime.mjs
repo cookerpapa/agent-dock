@@ -10,7 +10,7 @@ const defaultRuntimeDirectory = resolve(repositoryRoot, "deploy/production/runti
 const maximumFileBytes = 16 * 1_024;
 
 function runtimeDirectory() {
-  const configured = process.env.AGENT_DOCK_RUNTIME_DIRECTORY;
+  const configured = process.env.PI_CLOUD_RUNTIME_DIRECTORY;
   const value = resolve(repositoryRoot, configured ?? defaultRuntimeDirectory);
   if (value.includes("\0") || /\r|\n/.test(value)) {
     throw new Error("CubeSandbox runtime directory is invalid");

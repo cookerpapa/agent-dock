@@ -2,7 +2,7 @@
 
 ## Scope
 
-AgentDock is a self-hosted multi-tenant Coding Agent for controlled enterprise
+PiCloud is a self-hosted multi-tenant Coding Agent for controlled enterprise
 or private deployments. Model-generated commands and repository code are
 untrusted. Platform operators, trusted Worker images and external durable
 services are inside the administrative trust boundary.
@@ -58,7 +58,7 @@ a data-loss-prevention system. Enterprise deployments should add explicit
 destination allowlists and audit.
 
 Workspace Web Terminal access does not expose SSH or Cube envd to the public;
-the AgentDock image does not run envd at all. It uses the logged-in user's
+the PiCloud image does not run envd at all. It uses the logged-in user's
 tenant role, the fenced Cube Tool Service, a separate Control
 Plane-to-Tool-Broker credential and bounded WebSocket frames. Terminal output
 is intentionally not a durable conversation record; ordinary Workspace file

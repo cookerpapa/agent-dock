@@ -8,7 +8,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`
     update execution_cells
        set supervisor_management_url_template =
-         'http://{supervisorId}.agent-dock-pi-worker-primary-v1.agent-dock-system.svc.cluster.local:4100'
+         'http://{supervisorId}.pi-cloud-pi-worker-primary-v1.pi-cloud-system.svc.cluster.local:4100'
      where supervisor_management_url_template is null
   `.execute(db);
   await db.schema

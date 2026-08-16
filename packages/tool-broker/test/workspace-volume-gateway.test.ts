@@ -14,7 +14,7 @@ import {
 const roots: string[] = [];
 
 async function root(): Promise<string> {
-  const value = await mkdtemp(join(tmpdir(), "agent-dock-volume-"));
+  const value = await mkdtemp(join(tmpdir(), "pi-cloud-volume-"));
   roots.push(value);
   return value;
 }
@@ -47,7 +47,7 @@ describe("PersistentVolumeWorkspaceVolumeGateway", () => {
     const first = identity("session-a");
 
     await expect(mover.prepare(first)).resolves.toEqual({ attached: false });
-    const volumeRoot = join(workspaceRoot, `agentdock-posix-${first.volumeId}`);
+    const volumeRoot = join(workspaceRoot, `picloud-posix-${first.volumeId}`);
     const workspace = join(volumeRoot, "workspace");
     await mkdir(join(workspace, "src"), { recursive: true });
     await writeFile(join(workspace, "src", "answer.txt"), "one\n");
@@ -96,7 +96,7 @@ describe("PersistentVolumeWorkspaceVolumeGateway", () => {
     const mover = new PersistentVolumeWorkspaceVolumeGateway({ workspaceRoot });
     const first = identity("session-delete");
     await mover.prepare(first);
-    const volumeRoot = join(workspaceRoot, `agentdock-posix-${first.volumeId}`);
+    const volumeRoot = join(workspaceRoot, `picloud-posix-${first.volumeId}`);
     await writeFile(join(volumeRoot, "workspace", "private.txt"), "delete me\n");
 
     await expect(mover.delete(first)).resolves.toEqual({ deleted: true });

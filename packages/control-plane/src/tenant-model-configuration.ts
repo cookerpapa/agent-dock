@@ -1,13 +1,13 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type {
   ModelConfigurationResource,
   ReplaceModelConfigurationRequest,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { Kysely, Transaction } from "kysely";
 import {
   TenantModelCredentialVault,
   tenantModelCredentialDigest,
-} from "@agent-dock/runtime-core/model-credential-runtime";
+} from "@pi-cloud/runtime-core/model-credential-runtime";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 
 export class TenantModelConfigurationError extends Error {
@@ -106,11 +106,11 @@ export class TenantModelConfigurationService {
     }
     const credentialVersion = positiveVersion(row.credentialVersion);
     const updatedAt = timestamp(row.updatedAt);
-    if (row.provider === "agent-dock-fake" && row.modelId === "agent-dock-fake") {
+    if (row.provider === "pi-cloud-fake" && row.modelId === "pi-cloud-fake") {
       return {
         mode: "deterministic",
-        provider: "agent-dock-fake",
-        modelId: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        modelId: "pi-cloud-fake",
         configured: false,
         credentialVersion,
         updatedAt,

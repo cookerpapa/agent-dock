@@ -5,7 +5,7 @@ Status: accepted
 ## Context
 
 Pi 0.84 stores a Session as immutable entries linked by `parentId`, with a
-lane pointing at the active leaf. AgentDock already persists that model in
+lane pointing at the active leaf. PiCloud already persists that model in
 PostgreSQL through Pi's public `SessionStorage` interface, but the product UI
 only exposes a flat list of Sessions and a flat list of user prompts.
 
@@ -16,7 +16,7 @@ branches, and it must not add the full tree to the model context.
 
 ## Decision
 
-AgentDock adopts Pi's `/fork` product semantics:
+PiCloud adopts Pi's `/fork` product semantics:
 
 - a fork starts at a settled, final assistant entry;
 - it creates a new product Session and a new Pi Session;
@@ -29,7 +29,7 @@ AgentDock adopts Pi's `/fork` product semantics:
 - Workspace serialization and Tool fencing remain unchanged.
 
 Product Sessions record their parent Session, fork Turn and fork Pi entry. A
-tree endpoint returns an AgentDock-owned, bounded projection of user and final
+tree endpoint returns an PiCloud-owned, bounded projection of user and final
 assistant nodes. It supports a current-branch view and a whole-family view.
 Pi entry payloads remain an internal storage detail.
 

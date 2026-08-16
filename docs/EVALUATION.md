@@ -1,6 +1,6 @@
 # Evaluation
 
-AgentDock keeps infrastructure correctness separate from model intelligence.
+PiCloud keeps infrastructure correctness separate from model intelligence.
 All checked-in `latest` reports are machine-readable JSON plus a short Markdown
 rendering and include the methodology and exclusions.
 
@@ -71,7 +71,7 @@ functional check, not an HA or broker-failover claim.
 For the end-to-end Control Plane boundary, deploy the current revision and run:
 
 ```bash
-AGENT_DOCK_LIVE_CONTROL_PLANE_RESTART_CHECK=1 \
+PI_CLOUD_LIVE_CONTROL_PLANE_RESTART_CHECK=1 \
   npm run production:control-plane-restart-check
 ```
 
@@ -84,8 +84,8 @@ sequence 126 and completed the original Attempt in 16.199 seconds.
 The multi-tenant functional stream check is separate from a saturation test:
 
 ```bash
-AGENT_DOCK_LIVE_MULTI_TENANT_LOAD=1 \
-  AGENT_DOCK_LIVE_MULTI_TENANT_COUNT=6 \
+PI_CLOUD_LIVE_MULTI_TENANT_LOAD=1 \
+  PI_CLOUD_LIVE_MULTI_TENANT_COUNT=6 \
   npm run production:multi-tenant-model-load
 ```
 
@@ -99,7 +99,7 @@ a claim that six tenants saturate PostgreSQL.
 ## Long-context compaction
 
 ```bash
-AGENT_DOCK_LIVE_LONG_CONTEXT_CHECK=1 \
+PI_CLOUD_LIVE_LONG_CONTEXT_CHECK=1 \
   npm run production:long-context-check
 ```
 

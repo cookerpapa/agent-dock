@@ -1,11 +1,11 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
-  parseAgentDockEvent,
+  parsePiCloudEvent,
   parseConversationTurnTranscriptResource,
-  type AgentDockEvent,
-  type AgentDockEventBody,
+  type PiCloudEvent,
+  type PiCloudEventBody,
   type ConversationTurnTranscriptResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { Kysely } from "kysely";
 import { projectConversationTurnTranscript } from "./conversation-turn-projection.ts";
 import type { LiveSessionEventStore } from "./live-session-event-store.ts";
@@ -13,7 +13,7 @@ import type { LiveSessionEventStore } from "./live-session-event-store.ts";
 export const TERMINAL_TURN_PROJECTION_PATH = "/internal/v1/terminal-turn-projections";
 
 type TerminalEventBody = Extract<
-  AgentDockEventBody,
+  PiCloudEventBody,
   { type: "turn.completed" | "turn.failed" | "turn.cancelled" }
 >;
 
@@ -31,7 +31,7 @@ export type PrepareTerminalTurnProjectionInput = Readonly<{
 export type PreparedTerminalTurnProjection = Readonly<{
   schemaVersion: 1;
   previousSequence: number;
-  terminalEvent: AgentDockEvent;
+  terminalEvent: PiCloudEvent;
   sourceEventCount: number;
   transcript: ConversationTurnTranscriptResource;
 }>;
@@ -66,7 +66,7 @@ export function parsePrepareTerminalTurnProjectionInput(
   if (typeof candidate.body !== "object" || candidate.body === null) {
     throw new TypeError("Terminal Turn projection body is invalid");
   }
-  const event = parseAgentDockEvent({
+  const event = parsePiCloudEvent({
     schemaVersion: 1,
     eventId: candidate.eventId,
     sessionId: candidate.sessionId,
@@ -123,7 +123,7 @@ export function parsePreparedTerminalTurnProjection(
   if (sourceEventCount < 1) {
     throw new TypeError("Prepared terminal Turn projection has no source events");
   }
-  const terminalEvent = parseAgentDockEvent(candidate.terminalEvent);
+  const terminalEvent = parsePiCloudEvent(candidate.terminalEvent);
   if (
     terminalEvent.type !== "turn.completed" &&
     terminalEvent.type !== "turn.failed" &&
@@ -203,7 +203,7 @@ export class LiveTerminalTurnProjectionSource implements TerminalTurnProjectionS
             Number(previousTerminal.sequence),
             "Previous terminal Turn sequence",
           );
-    const terminalEvent = parseAgentDockEvent({
+    const terminalEvent = parsePiCloudEvent({
       schemaVersion: 1,
       eventId: input.eventId,
       sessionId: input.sessionId,
@@ -213,7 +213,7 @@ export class LiveTerminalTurnProjectionSource implements TerminalTurnProjectionS
       occurredAt: input.occurredAt,
       ...input.body,
     });
-    const events: AgentDockEvent[] = [];
+    const events: PiCloudEvent[] = [];
     let cursor = turnRangeStart;
     while (cursor < previousSequence) {
       const page = await this.#liveEvents.readPage(

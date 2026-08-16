@@ -1,4 +1,4 @@
-import { MAX_WORKSPACE_SNAPSHOT_BYTES, type SandboxCheckpointBlob } from "@agent-dock/protocol";
+import { MAX_WORKSPACE_SNAPSHOT_BYTES, type SandboxCheckpointBlob } from "@pi-cloud/protocol";
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import { chmod, mkdir, open, readdir, rm, writeFile } from "node:fs/promises";
@@ -22,7 +22,7 @@ type WorkspaceSnapshotFile = {
 };
 
 type WorkspaceSnapshotManifest = {
-  format: "agent-dock.workspace-manifest.v1";
+  format: "pi-cloud.workspace-manifest.v1";
   files: WorkspaceSnapshotFile[];
 };
 
@@ -153,7 +153,7 @@ export async function captureWorkspaceSnapshot(workspaceDirectory: string): Prom
     comparePaths(left.path, right.path),
   );
   const manifest: WorkspaceSnapshotManifest = {
-    format: "agent-dock.workspace-manifest.v1",
+    format: "pi-cloud.workspace-manifest.v1",
     files,
   };
   const encoded = Buffer.from(`${JSON.stringify(manifest)}\n`, "utf8");
@@ -180,7 +180,7 @@ export function parseWorkspaceSnapshot(snapshot: Uint8Array): WorkspaceSnapshotF
   if (
     !isRecord(parsed) ||
     !hasExactKeys(parsed, ["format", "files"]) ||
-    parsed.format !== "agent-dock.workspace-manifest.v1" ||
+    parsed.format !== "pi-cloud.workspace-manifest.v1" ||
     !Array.isArray(parsed.files) ||
     parsed.files.length > MAX_WORKSPACE_SNAPSHOT_FILES
   ) {
@@ -263,7 +263,7 @@ export function createWorkspaceSnapshot(
     }
   }
   const encoded = Buffer.from(
-    `${JSON.stringify({ format: "agent-dock.workspace-manifest.v1", files: entries })}\n`,
+    `${JSON.stringify({ format: "pi-cloud.workspace-manifest.v1", files: entries })}\n`,
     "utf8",
   );
   if (encoded.byteLength > MAX_PORTABLE_WORKSPACE_MANIFEST_BYTES) {

@@ -44,7 +44,7 @@ Copy the example outside the repository and replace endpoints, images, UUIDs
 and CIDRs:
 
 ```bash
-cp deploy/helm/agent-dock-platform/values.distributed.example.yaml values.yaml
+cp deploy/helm/pi-cloud-platform/values.distributed.example.yaml values.yaml
 npm run kubernetes:distributed:render -- --values values.yaml
 npm run kubernetes:distributed:preflight -- --values values.yaml
 npm run kubernetes:distributed:deploy -- --values values.yaml

@@ -1,8 +1,4 @@
-import {
-  parseAgentDockEvent,
-  type AgentDockEvent,
-  type EventPublishMessage,
-} from "@agent-dock/protocol";
+import { parsePiCloudEvent, type PiCloudEvent, type EventPublishMessage } from "@pi-cloud/protocol";
 import { Cluster, Valkey } from "iovalkey";
 import { createHash } from "node:crypto";
 
@@ -103,14 +99,14 @@ export interface LiveSessionEventStore {
     afterSequence: number,
     throughSequence: number,
     limit?: number,
-  ): Promise<readonly AgentDockEvent[]>;
+  ): Promise<readonly PiCloudEvent[]>;
   readTurn(
     tenantId: string,
     sessionId: string,
     turnId: string,
     afterSequence: number,
     throughSequence: number,
-  ): Promise<readonly AgentDockEvent[]>;
+  ): Promise<readonly PiCloudEvent[]>;
   trimThrough(tenantId: string, sessionId: string, throughSequence: number): Promise<void>;
   resetSession(tenantId: string, sessionId: string): Promise<void>;
   checkHealth?(): Promise<void>;
@@ -157,8 +153,8 @@ function boundedIdentity(value: string, name: string): string {
 function keys(sessionId: string): readonly [string, string] {
   const identity = boundedIdentity(sessionId, "sessionId");
   return [
-    `agent-dock:live-events:{${identity}}:stream`,
-    `agent-dock:live-events:{${identity}}:metadata`,
+    `pi-cloud:live-events:{${identity}}:stream`,
+    `pi-cloud:live-events:{${identity}}:metadata`,
   ];
 }
 
@@ -166,7 +162,7 @@ function publicationDigest(message: EventPublishMessage): string {
   return createHash("sha256").update(JSON.stringify(message)).digest("hex");
 }
 
-function parseFields(fields: readonly string[]): AgentDockEvent {
+function parseFields(fields: readonly string[]): PiCloudEvent {
   let raw: string | undefined;
   for (let index = 0; index < fields.length; index += 2) {
     if (fields[index] === "event") raw = fields[index + 1];
@@ -175,7 +171,7 @@ function parseFields(fields: readonly string[]): AgentDockEvent {
     throw new LiveSessionEventStoreError("corrupt_event", "Live event payload is missing");
   }
   try {
-    return parseAgentDockEvent(JSON.parse(raw));
+    return parsePiCloudEvent(JSON.parse(raw));
   } catch {
     throw new LiveSessionEventStoreError("corrupt_event", "Live event payload is invalid");
   }
@@ -308,7 +304,7 @@ export class ValkeyLiveSessionEventStore implements LiveSessionEventStore {
     afterSequence: number,
     throughSequence: number,
     limit = DEFAULT_PAGE_SIZE,
-  ): Promise<readonly AgentDockEvent[]> {
+  ): Promise<readonly PiCloudEvent[]> {
     nonNegative(afterSequence, "afterSequence");
     nonNegative(throughSequence, "throughSequence");
     positive(limit, "limit");
@@ -336,8 +332,8 @@ export class ValkeyLiveSessionEventStore implements LiveSessionEventStore {
     turnId: string,
     afterSequence: number,
     throughSequence: number,
-  ): Promise<readonly AgentDockEvent[]> {
-    const events: AgentDockEvent[] = [];
+  ): Promise<readonly PiCloudEvent[]> {
+    const events: PiCloudEvent[] = [];
     let cursor = afterSequence;
     while (cursor < throughSequence) {
       const page = await this.readPage(
@@ -450,7 +446,7 @@ export class MemoryLiveSessionEventStore implements LiveSessionEventStore {
     afterSequence: number,
     throughSequence: number,
     limit = DEFAULT_PAGE_SIZE,
-  ): Promise<readonly AgentDockEvent[]> {
+  ): Promise<readonly PiCloudEvent[]> {
     const stream = this.#streams.get(sessionId);
     if (stream === undefined) return [];
     if (stream.tenantId !== tenantId) {
@@ -469,7 +465,7 @@ export class MemoryLiveSessionEventStore implements LiveSessionEventStore {
     turnId: string,
     afterSequence: number,
     throughSequence: number,
-  ): Promise<readonly AgentDockEvent[]> {
+  ): Promise<readonly PiCloudEvent[]> {
     const events = await this.readPage(
       tenantId,
       sessionId,

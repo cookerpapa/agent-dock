@@ -2,7 +2,7 @@ import {
   parseSupervisorToControlMessage,
   type EventAckMessage,
   type EventPublishMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { resolve } from "node:path";

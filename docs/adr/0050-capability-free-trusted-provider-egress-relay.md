@@ -21,7 +21,7 @@ topology and preserve a direct-egress network alongside the proxy.
 The reviewed `maidangzhu/cloud-agent-platform` design reinforces a useful
 separation: Agent code should receive short-lived access to trusted proxy
 services, while outbound provider authority remains in a narrow trusted
-boundary. AgentDock already has a request-scoped Model Gateway capability. It
+boundary. PiCloud already has a request-scoped Model Gateway capability. It
 also needs a transport-only path that does not expose host networking to the
 Runner.
 

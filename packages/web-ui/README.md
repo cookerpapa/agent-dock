@@ -1,4 +1,4 @@
-# AgentDock Web UI
+# PiCloud Web UI
 
 This workspace contains the Phase 1 Pi-`/export`-inspired React session page. It
 uses only the public control-plane REST and SSE contracts; it never reads Pi
@@ -26,7 +26,7 @@ provider credential.
 - supports conversation archive/delete and active Pi steer through idempotent
   public API operations.
 
-All API resources and events are validated with `@agent-dock/protocol`. Markdown
+All API resources and events are validated with `@pi-cloud/protocol`. Markdown
 raw HTML is disabled by default, remote images are replaced with inert labels,
 unknown tool values are rendered as bounded text, and Workspace/Artifact
 preview is escaped UTF-8 text capped at 256 KiB. Binary content is labelled and
@@ -47,15 +47,15 @@ lower-security or browser-owned Agent runtime.
 For frontend-only work, start a compatible API on `127.0.0.1:3100` and run:
 
 ```bash
-npm run dev --workspace @agent-dock/web-ui
+npm run dev --workspace @pi-cloud/web-ui
 ```
 
 The production bundle, strict type check, and deterministic tests are:
 
 ```bash
-npm run build --workspace @agent-dock/web-ui
-npm run typecheck --workspace @agent-dock/web-ui
-npm run test --workspace @agent-dock/web-ui
+npm run build --workspace @pi-cloud/web-ui
+npm run typecheck --workspace @pi-cloud/web-ui
+npm run test --workspace @pi-cloud/web-ui
 ```
 
 PostgreSQL SessionStorage permits later turns on the same Session while

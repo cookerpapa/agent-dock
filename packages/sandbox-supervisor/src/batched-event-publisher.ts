@@ -3,7 +3,7 @@ import {
   type EventAckMessage,
   type EventPublishBatchMessage,
   type EventPublishMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { SupervisorEventSpool } from "./in-memory-event-spool.ts";
 
 export type SupervisorEventPublication = EventPublishMessage | EventPublishBatchMessage;

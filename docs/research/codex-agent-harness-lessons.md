@@ -150,7 +150,7 @@ Codex 使用 append-only Rollout 保存 ResponseItem、生命周期事件和 Wor
 按记录重放。Compaction 不是从 UI 文本重新拼装 `messages[]`，而是安装一份明确的
 replacement history，再继续保留后续尾部记录和 World State 基线。
 
-AgentDock 不应复制这个格式，因为 Pi 原生 Session JSONL 已经是 Agent 上下文的权威
+PiCloud 不应复制这个格式，因为 Pi 原生 Session JSONL 已经是 Agent 上下文的权威
 表示。但 Codex 的不变量值得保留：
 
 - 对话恢复必须使用 Agent Runtime 的原生记录；
@@ -162,9 +162,9 @@ AgentDock 不应复制这个格式，因为 Pi 原生 Session JSONL 已经是 Ag
 [rollout_reconstruction.rs](https://github.com/openai/codex/blob/2b5bdcf67547860f2e5c5a605009a70026796b2b/codex-rs/core/src/session/rollout_reconstruction.rs)、
 [compact.rs](https://github.com/openai/codex/blob/2b5bdcf67547860f2e5c5a605009a70026796b2b/codex-rs/core/src/compact.rs)。
 
-## 3. 对 AgentDock 的映射
+## 3. 对 PiCloud 的映射
 
-| Harness 能力 | AgentDock 当前状态 | 判断 |
+| Harness 能力 | PiCloud 当前状态 | 判断 |
 | --- | --- | --- |
 | 单 Session 串行与 Active Run 所有权 | Temporal + PostgreSQL Run/Attempt/Lease/Fence | 已具备，云端边界比本地 Task 更复杂但合理 |
 | 中断模型可见 | Pi 原生 `<turn_aborted>` checkpoint + hard-crash bridge | 已具备 |
@@ -222,11 +222,11 @@ AgentDock 不应复制这个格式，因为 Pi 原生 Session JSONL 已经是 Ag
 
 ## 5. 不应照搬 Codex 的部分
 
-- 不复制 Codex Rollout；AgentDock 的 PostgreSQL 事件是 UI/审计权威，Pi JSONL 是
+- 不复制 Codex Rollout；PiCloud 的 PostgreSQL 事件是 UI/审计权威，Pi JSONL 是
   模型上下文权威。
 - 不复制 Codex Compactor；Pi 原生 Compaction 必须继续作为真实会话语义。
 - 不假设本地 unified-exec 进程能在 Worker/Cube 崩溃后继续存在。
-- 不因为 Codex 有本地权限升级而重新引入 AgentDock 已明确暂缓的审批产品面。
+- 不因为 Codex 有本地权限升级而重新引入 PiCloud 已明确暂缓的审批产品面。
 - 不把每个 Codex 内部事件都跨网络持久化；只保留恢复、安全和用户可见性所需语义。
 - 不把“Harness”实现成新的大型服务；它应主要体现为 Runtime 边界、状态机和合同测试。
 

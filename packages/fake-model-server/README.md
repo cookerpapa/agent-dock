@@ -1,11 +1,11 @@
-# AgentDock deterministic fake model server
+# PiCloud deterministic fake model server
 
 This package is a loopback-only, OpenAI Chat Completions compatible test server.
 It makes model streams and provider failures reproducible without spending
 tokens or putting provider credentials into test fixtures.
 
 The server implements `POST /v1/chat/completions` with `stream=true`. Select a
-scenario through the `x-agent-dock-scenario` request header:
+scenario through the `x-pi-cloud-scenario` request header:
 
 | Scenario | Deterministic behavior |
 | --- | --- |
@@ -29,14 +29,14 @@ npm run fake-model:start
 ```
 
 The default endpoint is `http://127.0.0.1:4010/v1` and the fixed local-only API
-key is `agent-dock-test-key`. The server rejects non-loopback bind addresses.
+key is `pi-cloud-test-key`. The server rejects non-loopback bind addresses.
 This credential has no value outside the fake server and must never be reused
 for a real provider.
 
 ## Verify the Pi contract
 
 ```bash
-npm test --workspace @agent-dock/fake-model-server
+npm test --workspace @pi-cloud/fake-model-server
 ```
 
 The contract suite sends real HTTP/SSE requests through the pinned Pi `0.84.1`

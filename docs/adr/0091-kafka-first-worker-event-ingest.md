@@ -38,7 +38,7 @@ Worker local WAL
   -> resumable SSE
 ```
 
-1. Pi Workers call an AgentDock-owned HTTPS ingest contract. Only Event Gateway
+1. Pi Workers call an PiCloud-owned HTTPS ingest contract. Only Event Gateway
    receives the topic-scoped Kafka producer/consumer credential.
 2. The ingest transaction retains only bounded Session sequence/fence cursors.
    It holds the relevant cursor lock until Kafka acknowledges the append, then

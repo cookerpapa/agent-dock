@@ -1,5 +1,5 @@
 {
-  "name": "@agent-dock/github-gateway",
+  "name": "@pi-cloud/github-gateway",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
     "test": "vitest --run"
   },
   "dependencies": {
-    "@agent-dock/workspace-runtime": "0.1.0",
+    "@pi-cloud/workspace-runtime": "0.1.0",
     "fastify": "5.10.0",
     "tsx": "4.23.1"
   }

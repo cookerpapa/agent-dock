@@ -4,7 +4,7 @@ export const CUBESANDBOX_TOOL_SERVICE_PORT = 49_984;
 const MAXIMUM_TERMINAL_FRAME_BYTES = 256 * 1_024;
 
 /**
- * Cube evaluates explicit allow entries before deny entries, so AgentDock
+ * Cube evaluates explicit allow entries before deny entries, so PiCloud
  * never supplies an allow list in full-public mode. Keep every non-public or
  * infrastructure-relevant IPv4 class explicit even when Cube also installs
  * part of this list as a built-in protection.
@@ -327,9 +327,9 @@ function authorityHeaders(
   authority: CubeSandboxHandoffAuthority,
 ): Readonly<Record<string, string>> {
   return {
-    "x-agent-dock-handoff-secret": authority.handoffSecret,
-    "x-agent-dock-fencing-token": String(authority.fencingToken),
-    "x-agent-dock-binding-sha256": authority.bindingSha256,
+    "x-pi-cloud-handoff-secret": authority.handoffSecret,
+    "x-pi-cloud-fencing-token": String(authority.fencingToken),
+    "x-pi-cloud-binding-sha256": authority.bindingSha256,
   };
 }
 
@@ -451,7 +451,7 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
           allowOut: [`${this.#egressProxyIp}/32`],
           denyOut: ["0.0.0.0/0"],
         },
-        // AgentDock owns the shorter Session warm TTL and explicit destroy.
+        // PiCloud owns the shorter Session warm TTL and explicit destroy.
         // Cube's timeout is only the fail-safe orphan reaper. A timed-out VM
         // must not become an untracked paused guest because this provider no
         // longer reconnects physical runtimes across manager loss.
@@ -526,9 +526,9 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
         ...(input.authority === undefined
           ? {}
           : {
-              "x-agent-dock-handoff-secret": input.authority.handoffSecret,
-              "x-agent-dock-fencing-token": String(input.authority.fencingToken),
-              "x-agent-dock-binding-sha256": input.authority.bindingSha256,
+              "x-pi-cloud-handoff-secret": input.authority.handoffSecret,
+              "x-pi-cloud-fencing-token": String(input.authority.fencingToken),
+              "x-pi-cloud-binding-sha256": input.authority.bindingSha256,
             }),
         ...(input.body === undefined ? {} : { "content-type": "application/json" }),
       },

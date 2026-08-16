@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import { createSessionBackendConformance } from "@earendil-works/pi-agent-core/session/testing";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, it } from "vitest";
@@ -9,7 +9,7 @@ import { PostgresPiSessionRepository } from "../src/index.ts";
 let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
 let database: Kysely<Database>;
-const externalDatabaseUrl = process.env.AGENT_DOCK_PI_SESSION_CONFORMANCE_DATABASE_URL;
+const externalDatabaseUrl = process.env.PI_CLOUD_PI_SESSION_CONFORMANCE_DATABASE_URL;
 
 beforeAll(async () => {
   if (externalDatabaseUrl !== undefined) {

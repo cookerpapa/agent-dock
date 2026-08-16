@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type { Transaction } from "kysely";
 
 export type SessionEventNotification = {

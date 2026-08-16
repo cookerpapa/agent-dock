@@ -1,8 +1,8 @@
 import {
-  createAgentDockEventFactory,
+  createPiCloudEventFactory,
   parseControlToSupervisorMessage,
   type EventPublishMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -16,7 +16,7 @@ const SENT_AT = "2026-07-19T08:00:00.000Z";
 const roots: string[] = [];
 
 async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(resolve(tmpdir(), "agent-dock-event-spool-test-"));
+  const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-event-spool-test-"));
   roots.push(root);
   return root;
 }
@@ -28,7 +28,7 @@ afterEach(async () => {
 function fixture(initialSequence = 0) {
   let eventNumber = 0;
   let messageNumber = 0;
-  const events = createAgentDockEventFactory(
+  const events = createPiCloudEventFactory(
     { sessionId: "session-1", turnId: "turn-1", agentId: "root" },
     {
       initialSequence,
@@ -155,7 +155,7 @@ describe("WalEventSpoolStore", () => {
     await spool.append(event);
     const [wal] = await readdir(root);
     if (wal === undefined) throw new Error("Expected a spool WAL");
-    await appendFile(resolve(root, wal), '{"format":"agent-dock.event-spool-wal.v1"');
+    await appendFile(resolve(root, wal), '{"format":"pi-cloud.event-spool-wal.v1"');
 
     const replayed: EventPublishMessage[] = [];
     await expect(
@@ -224,7 +224,7 @@ describe("WalEventSpoolStore", () => {
           },
       );
     expect(records.at(-1)).toMatchObject({
-      format: "agent-dock.event-spool-wal.v1",
+      format: "pi-cloud.event-spool-wal.v1",
       record: {
         kind: "rejection",
         sessionId: "session-1",

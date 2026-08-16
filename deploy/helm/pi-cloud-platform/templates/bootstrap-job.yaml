@@ -1,0 +1,82 @@
+{{- if and .Values.globalPlaneEnabled .Values.bootstrap.enabled }}
+{{- $name := include "pi-cloud-platform.name" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-database-bootstrap
+  labels:
+    {{- include "pi-cloud-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-bootstrap
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "pi-cloud-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: database-bootstrap
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      {{- with .Values.global.trustedNodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.trustedTolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: database-bootstrap
+          image: {{ include "pi-cloud-platform.image" .Values.images.controlPlane | quote }}
+          imagePullPolicy: {{ .Values.images.controlPlane.pullPolicy }}
+          args: [/app/packages/control-plane/src/bootstrap-main.ts]
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: DATABASE_URL_FILE, value: /run/pi-cloud-secrets/database-url }
+            - { name: PI_CLOUD_API_TOKEN_FILE, value: /run/pi-cloud-secrets/api-token }
+            - { name: PI_CLOUD_TENANT_ID, value: {{ .Values.bootstrap.tenantId | quote }} }
+            - { name: PI_CLOUD_TENANT_SLUG, value: {{ .Values.bootstrap.tenantSlug | quote }} }
+            - { name: PI_CLOUD_USER_ID, value: {{ .Values.bootstrap.userId | quote }} }
+            - { name: PI_CLOUD_API_CREDENTIAL_ID, value: {{ .Values.bootstrap.apiCredentialId | quote }} }
+            - { name: PI_CLOUD_CREDENTIAL_BINDING_ID, value: {{ .Values.bootstrap.credentialBindingId | quote }} }
+            - { name: PI_CLOUD_DEFAULT_MODEL_PROFILE_ID, value: {{ .Values.bootstrap.defaultModelProfileId | quote }} }
+            - { name: PI_CLOUD_MODEL_PROFILE_NAME, value: {{ .Values.bootstrap.modelProfileName | quote }} }
+            - { name: PI_CLOUD_TENANT_MAXIMUM_PROJECTS, value: {{ .Values.bootstrap.maximumProjects | quote }} }
+            - { name: PI_CLOUD_TENANT_MAXIMUM_SESSIONS, value: {{ .Values.bootstrap.maximumSessions | quote }} }
+            - { name: PI_CLOUD_TENANT_MAXIMUM_UNSETTLED_TURNS, value: {{ .Values.bootstrap.maximumUnsettledTurns | quote }} }
+            - { name: PI_CLOUD_TENANT_MAXIMUM_CONCURRENT_TURNS, value: {{ .Values.bootstrap.maximumConcurrentTurns | quote }} }
+            - { name: PI_CLOUD_TENANT_MAXIMUM_ACTIVE_SANDBOXES, value: {{ .Values.bootstrap.maximumActiveSandboxes | quote }} }
+            - { name: PI_CLOUD_SANDBOX_DOMAINS_JSON, value: {{ toJson .Values.sandboxDomains | quote }} }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          volumeMounts:
+            # Migrations need a direct PostgreSQL session; do not run them
+            # through a transaction-pooling PgBouncer endpoint.
+            - { name: secrets, mountPath: /run/pi-cloud-secrets/database-url, subPath: {{ .Values.external.database.notificationSecretKey }}, readOnly: true }
+            - { name: secrets, mountPath: /run/pi-cloud-secrets/api-token, subPath: {{ .Values.external.database.apiTokenSecretKey }}, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: secrets
+          secret: { secretName: {{ .Values.global.existingSecret }}, defaultMode: 288 }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+{{- end }}

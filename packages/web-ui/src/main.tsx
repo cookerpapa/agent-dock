@@ -4,7 +4,7 @@ import ChatApp from "./ChatApp.tsx";
 import "./product.css";
 
 const root = document.getElementById("root");
-if (root === null) throw new Error("AgentDock root element is missing");
+if (root === null) throw new Error("PiCloud root element is missing");
 
 createRoot(root).render(
   <StrictMode>

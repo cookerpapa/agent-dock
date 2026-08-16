@@ -1,4 +1,4 @@
-import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import type { ExecuteTurnCommandMessage } from "@pi-cloud/protocol";
 import { createHash } from "node:crypto";
 import type { SandboxRuntimeIdentity } from "./sandbox-assignment-inventory.ts";
 

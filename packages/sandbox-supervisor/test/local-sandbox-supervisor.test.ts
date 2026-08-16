@@ -5,11 +5,11 @@ import type {
   CancelTurnCommandMessage,
   ExecuteTurnCommandMessage,
   SteerTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -65,8 +65,8 @@ function command(
       sandboxRetention: "ephemeral",
       model: {
         profileId: "profile-1",
-        provider: "agent-dock-fake",
-        modelId: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        modelId: "pi-cloud-fake",
         thinkingLevel: "off",
         credentialBindingId: "credential-1",
         credentialBindingVersion: 1,
@@ -74,7 +74,7 @@ function command(
       environment: {
         environmentVersionId: "10000000-0000-4000-8000-000000000001",
         versionNumber: 1,
-        profileKey: "agent-dock-fullstack",
+        profileKey: "pi-cloud-fullstack",
         profileVersion: "1",
         imageRevision: "development",
         specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -313,7 +313,7 @@ describe("LocalSandboxSupervisor", () => {
   });
 
   it("redelivers a locally durable event through a fresh spool store after the ACK path crashes", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "agent-dock-local-supervisor-spool-"));
+    const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-local-supervisor-spool-"));
     try {
       const durableStore = new WalEventSpoolStore({ rootDirectory: root });
       const event: EventPublishMessage = {

@@ -5,4 +5,4 @@ export {
   captureWorkspaceSnapshot,
   restoreWorkspaceSnapshot,
   validateWorkspaceSnapshot,
-} from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/workspace-runtime";

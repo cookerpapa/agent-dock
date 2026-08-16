@@ -17,7 +17,7 @@ Agent 进程。更准确的目标是：大量逻辑会话以持久状态存在�
 4. 任意 extension 的进程内存、子进程和连接恢复；
 5. 多租户认证、配额、审计和安全升级。
 
-因此 AgentDock 不应复制某一个项目，而应组合三类设计：
+因此 PiCloud 不应复制某一个项目，而应组合三类设计：
 
 - OpenClaw、Microsoft Agent Framework 和 Flink Agents 的逻辑会话与调度；
 - OpenHands 和 agentserver 的 Coding Agent 产品/控制面分层；
@@ -232,9 +232,9 @@ Pi 已提供可移植状态的官方路径：extension 使用 `pi.appendEntry()`
 迁移构成工程上的三角约束：应用状态重建擅长后两项；内存快照擅长前两项，
 但升级兼容弱；长驻进程最兼容，却不能释放空闲内存。
 
-## 6. AgentDock 建议架构
+## 6. PiCloud 建议架构
 
-AgentDock 应让 session 独立于执行进程存在，并提供可插拔执行后端：
+PiCloud 应让 session 独立于执行进程存在，并提供可插拔执行后端：
 
 ```text
 Web / API
@@ -257,7 +257,7 @@ PostgreSQL + workspace/object storage
 历史会话数相关。RPC 后端保留原生 Pi 行为和进程隔离。RAM snapshot 后端
 只作为高兼容模式，不应成为第一阶段的基础设施依赖。
 
-现有 Pi RPC adapter、AgentDock event envelope、wire protocol、fencing 和
+现有 Pi RPC adapter、PiCloud event envelope、wire protocol、fencing 和
 event spool 都可以保留；Pi RPC supervisor 只是一个 ExecutionBackend，
 不再定义整个系统的会话模型。
 
@@ -298,7 +298,7 @@ event spool 都可以保留；Pi RPC supervisor 只是一个 ExecutionBackend，
 实验还发现一个必须进入持久化语义的细节：Pi 即使已经返回
 `sessionFile` 路径，也会刻意等到 session 中出现 assistant message 才真正
 创建 JSONL。这意味着 `sessionFile != undefined` 不是 durable checkpoint；
-AgentDock 只能在 assistant 已落盘的 settled-turn 边界发布稳定 snapshot。
+PiCloud 只能在 assistant 已落盘的 settled-turn 边界发布稳定 snapshot。
 
 因为本实验只执行 extension command，不花模型 token，它为每个新 session
 写入一个明确标记的零 token synthetic assistant message，以触发 Pi 的公开

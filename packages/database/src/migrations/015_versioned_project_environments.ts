@@ -1,6 +1,6 @@
 import { sql, type Kysely } from "kysely";
 
-const defaultProfileKey = "agent-dock-fullstack";
+const defaultProfileKey = "pi-cloud-fullstack";
 const defaultProfileVersion = "1";
 const defaultSpecSha256 = "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630";
 
@@ -40,7 +40,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addCheckConstraint("environment_versions_number_positive", sql`version_number > 0`)
     .addCheckConstraint(
       "environment_versions_profile_key_valid",
-      sql`profile_key = 'agent-dock-fullstack'`,
+      sql`profile_key = 'pi-cloud-fullstack'`,
     )
     .addCheckConstraint("environment_versions_profile_version_valid", sql`profile_version = '1'`)
     .addCheckConstraint(

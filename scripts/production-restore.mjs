@@ -139,10 +139,10 @@ function validateManifest(value) {
       "github-gateway",
       "web-ui",
       "provider-egress-relay",
-    ].map((repository) => `agent-dock/${repository}:${value.imageVersion}`),
-    "agent-dock/cube-api-authorizer:local",
-    "agent-dock/cube-egress-gateway:local",
-    `localhost:5000/agent-dock/cubesandbox-tool:${value.gitCommit}`,
+    ].map((repository) => `pi-cloud/${repository}:${value.imageVersion}`),
+    "pi-cloud/cube-api-authorizer:local",
+    "pi-cloud/cube-egress-gateway:local",
+    `localhost:5000/pi-cloud/cubesandbox-tool:${value.gitCommit}`,
   ]);
   for (const image of value.images) {
     if (typeof image?.reference !== "string" || !expectedImages.delete(image.reference)) {
@@ -176,7 +176,7 @@ async function verifyImages(images) {
   for (const image of images) {
     if (
       typeof image?.reference !== "string" ||
-      !/^(?:agent-dock\/[a-z-]+:[A-Za-z0-9][A-Za-z0-9_.-]*|localhost:5000\/agent-dock\/cubesandbox-tool:[0-9a-f]{40})$/.test(
+      !/^(?:pi-cloud\/[a-z-]+:[A-Za-z0-9][A-Za-z0-9_.-]*|localhost:5000\/pi-cloud\/cubesandbox-tool:[0-9a-f]{40})$/.test(
         image.reference,
       ) ||
       typeof image?.imageId !== "string" ||
@@ -225,9 +225,9 @@ async function rebindRuntime(path) {
   const lines = (await readFile(environmentPath, "utf8")).split(/\r?\n/);
   let replaced = false;
   const rebound = lines.map((line) => {
-    if (!line.startsWith("AGENT_DOCK_RUNTIME_DIRECTORY=")) return line;
+    if (!line.startsWith("PI_CLOUD_RUNTIME_DIRECTORY=")) return line;
     replaced = true;
-    return `AGENT_DOCK_RUNTIME_DIRECTORY=${path}`;
+    return `PI_CLOUD_RUNTIME_DIRECTORY=${path}`;
   });
   if (!replaced) throw new Error("Restored runtime environment has no runtime-directory binding");
   const environment = Object.fromEntries(
@@ -237,8 +237,8 @@ async function rebindRuntime(path) {
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
   );
-  let uid = Number(environment.AGENT_DOCK_APPLICATION_UID);
-  let gid = Number(environment.AGENT_DOCK_APPLICATION_GID);
+  let uid = Number(environment.PI_CLOUD_APPLICATION_UID);
+  let gid = Number(environment.PI_CLOUD_APPLICATION_GID);
   if (!Number.isSafeInteger(uid) || uid < 1 || !Number.isSafeInteger(gid) || gid < 0) {
     const applicationSecret = await lstat(resolve(path, "secrets", "api-token"));
     if (
@@ -254,13 +254,13 @@ async function rebindRuntime(path) {
   }
   const normalizedEnvironment = rebound.filter(
     (line) =>
-      !line.startsWith("AGENT_DOCK_APPLICATION_UID=") &&
-      !line.startsWith("AGENT_DOCK_APPLICATION_GID=") &&
+      !line.startsWith("PI_CLOUD_APPLICATION_UID=") &&
+      !line.startsWith("PI_CLOUD_APPLICATION_GID=") &&
       line.length > 0,
   );
   normalizedEnvironment.push(
-    `AGENT_DOCK_APPLICATION_UID=${String(uid)}`,
-    `AGENT_DOCK_APPLICATION_GID=${String(gid)}`,
+    `PI_CLOUD_APPLICATION_UID=${String(uid)}`,
+    `PI_CLOUD_APPLICATION_GID=${String(gid)}`,
     "",
   );
   await writeFile(environmentPath, normalizedEnvironment.join("\n"), { mode: 0o600 });
@@ -310,7 +310,7 @@ if (await exists(options.runtimeDirectory)) {
 }
 
 const passphrase = await readPassphrase(options.passphraseFile);
-const temporaryDirectory = await mkdtemp(join(tmpdir(), "agent-dock-restore-"));
+const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-cloud-restore-"));
 const createdVolumes = [];
 let runtimePopulated = false;
 try {
@@ -360,7 +360,7 @@ try {
     cwd: repositoryRoot,
     environment: {
       ...process.env,
-      AGENT_DOCK_RUNTIME_DIRECTORY: options.runtimeDirectory,
+      PI_CLOUD_RUNTIME_DIRECTORY: options.runtimeDirectory,
       COMPOSE_PROJECT_NAME: options.projectName,
     },
   });

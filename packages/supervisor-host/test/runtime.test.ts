@@ -1,14 +1,14 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
-import type { AgentTurnScenarioContext } from "@agent-dock/sandbox-supervisor";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
+import type { AgentTurnScenarioContext } from "@pi-cloud/sandbox-supervisor";
 import {
   PostgresSupervisorCredentialAuthorizer,
   SupervisorBootProvisioner,
   SupervisorConnectionManager,
   SupervisorProvisioningGateway,
   SupervisorWebSocketGateway,
-} from "@agent-dock/control-plane";
+} from "@pi-cloud/control-plane";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -139,7 +139,7 @@ describe("SupervisorHostRuntime", () => {
   });
 
   it("provisions a fresh generation, registers after recovery, and never reuses boot identity", async () => {
-    const root = await mkdtemp(join(tmpdir(), "agent-dock-host-runtime-"));
+    const root = await mkdtemp(join(tmpdir(), "pi-cloud-host-runtime-"));
     const server = Fastify({ logger: false });
     const provisioner = new SupervisorBootProvisioner({
       database,

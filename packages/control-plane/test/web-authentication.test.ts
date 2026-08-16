@@ -1,7 +1,7 @@
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import type { AuthSessionResource, ProjectResource } from "@agent-dock/protocol";
+import type { AuthSessionResource, ProjectResource } from "@pi-cloud/protocol";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
 import type { Kysely } from "kysely";
@@ -116,7 +116,7 @@ describe.sequential("product web authentication", () => {
     expect(response.body).not.toContain(PASSWORD);
     const setCookie = response.headers["set-cookie"];
     expect(typeof setCookie).toBe("string");
-    expect(setCookie).toContain("agent_dock_session=ads_");
+    expect(setCookie).toContain("pi_cloud_session=ads_");
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toContain("SameSite=Strict");
     expect(setCookie).not.toContain("Secure");

@@ -75,7 +75,7 @@ export class GitHubAppAuthentication {
           headers: {
             accept: "application/vnd.github+json",
             authorization: `Bearer ${this.appJwt()}`,
-            "user-agent": "agent-dock-github-gateway",
+            "user-agent": "pi-cloud-github-gateway",
             "x-github-api-version": "2022-11-28",
           },
         },

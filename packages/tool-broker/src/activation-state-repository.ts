@@ -3,8 +3,8 @@ import type {
   ToolBrokerActivationState,
   ToolBrokerOperationState,
   WorkspaceTerminalState,
-} from "@agent-dock/database";
-import type { SupervisorRuntimeAssignment, ToolSandboxAssignment } from "@agent-dock/protocol";
+} from "@pi-cloud/database";
+import type { SupervisorRuntimeAssignment, ToolSandboxAssignment } from "@pi-cloud/protocol";
 import type { SandboxHandle } from "./sandbox-provider.ts";
 import { sql, type Kysely, type Transaction } from "kysely";
 

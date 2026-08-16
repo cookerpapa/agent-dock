@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import { sql, type Kysely } from "kysely";
 import {
   workspaceVolumeId,

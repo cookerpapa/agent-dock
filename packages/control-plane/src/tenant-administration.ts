@@ -1,4 +1,4 @@
-import type { Database, TenantApiCredentialRole } from "@agent-dock/database";
+import type { Database, TenantApiCredentialRole } from "@pi-cloud/database";
 import { randomUUID } from "node:crypto";
 import type { Kysely } from "kysely";
 import {
@@ -7,8 +7,8 @@ import {
   revokeTenantApiCredential,
   type GeneratedTenantApiCredential,
 } from "./tenant-identity.ts";
-import type { DeepSeekModelId } from "@agent-dock/protocol";
-import type { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
+import type { DeepSeekModelId } from "@pi-cloud/protocol";
+import type { TenantModelCredentialVault } from "@pi-cloud/runtime-core/model-credential-runtime";
 
 export type TenantQuotaConfiguration = Readonly<{
   maximumProjects: number;
@@ -279,7 +279,7 @@ export async function createPrivateTenant(
         .values({
           id: credentialBindingId,
           tenant_id: tenantId,
-          provider: initialModel?.provider ?? "agent-dock-fake",
+          provider: initialModel?.provider ?? "pi-cloud-fake",
           kind: initialModel === undefined ? "brokered" : "api_key",
           secret_ref:
             initialModel === undefined
@@ -297,8 +297,8 @@ export async function createPrivateTenant(
           id: defaultModelProfileId,
           tenant_id: tenantId,
           name: initialModel === undefined ? "deterministic-java-repair" : "platform-default",
-          provider: initialModel?.provider ?? "agent-dock-fake",
-          model_id: initialModel?.modelId ?? "agent-dock-fake",
+          provider: initialModel?.provider ?? "pi-cloud-fake",
+          model_id: initialModel?.modelId ?? "pi-cloud-fake",
           default_thinking_level: "off",
           allowed_thinking_levels: ["off"],
           credential_binding_id: credentialBindingId,
@@ -328,8 +328,8 @@ export async function createPrivateTenant(
         .insertInto("model_rates")
         .values({
           tenant_id: tenantId,
-          provider: initialModel?.provider ?? "agent-dock-fake",
-          model_id: initialModel?.modelId ?? "agent-dock-fake",
+          provider: initialModel?.provider ?? "pi-cloud-fake",
+          model_id: initialModel?.modelId ?? "pi-cloud-fake",
           created_at: now,
           updated_at: now,
         })

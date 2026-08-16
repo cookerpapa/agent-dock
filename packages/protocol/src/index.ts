@@ -1,19 +1,19 @@
 export {
   ApprovalRequestPayloadSchema,
-  AgentDockEventSchema,
-  AgentDockProtocolError,
+  PiCloudEventSchema,
+  PiCloudProtocolError,
   MAX_WORKSPACE_PATCH_BYTES,
   SessionStateSchema,
   TurnCancellationReasonSchema,
   WorkspacePatchSchema,
-  createAgentDockEventFactory,
-  parseAgentDockEvent,
-  type AgentDockEvent,
-  type AgentDockEventBody,
-  type AgentDockEventFactory,
-  type AgentDockEventFactoryOptions,
-  type AgentDockEventIdentity,
-  type AgentDockEventType,
+  createPiCloudEventFactory,
+  parsePiCloudEvent,
+  type PiCloudEvent,
+  type PiCloudEventBody,
+  type PiCloudEventFactory,
+  type PiCloudEventFactoryOptions,
+  type PiCloudEventIdentity,
+  type PiCloudEventType,
   type SessionState,
   type WorkspacePatch,
 } from "./event-envelope.ts";
@@ -395,7 +395,7 @@ export {
 } from "./control-plane-api.ts";
 
 export {
-  AgentDockWireProtocolError,
+  PiCloudWireProtocolError,
   CancelTurnCommandMessageSchema,
   CommandAckMessageSchema,
   CommandCommitMessageSchema,
@@ -441,7 +441,7 @@ export {
 } from "./supervisor-wire.ts";
 
 export {
-  AgentDockInternalProtocolError,
+  PiCloudInternalProtocolError,
   InternalServiceErrorSchema,
   SupervisorBootProvisionRequestSchema,
   SupervisorBootProvisionResponseSchema,

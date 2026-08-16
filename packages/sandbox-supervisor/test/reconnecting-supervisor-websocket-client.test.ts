@@ -4,7 +4,7 @@ import {
   type EventAckMessage,
   type EventPublishMessage,
   type SupervisorRegisteredMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
 import {
   ReconnectingSupervisorWebSocketClient,
@@ -192,7 +192,7 @@ function reconnecting(options: {
   const connectionRuntimes: SupervisorControlRuntime[] = [];
   const client = new ReconnectingSupervisorWebSocketClient({
     url: "ws://127.0.0.1:65535/internal/v1/supervisor",
-    authorizationHeader: `Bearer agent-dock-${"x".repeat(48)}`,
+    authorizationHeader: `Bearer pi-cloud-${"x".repeat(48)}`,
     registration: { ...IDENTITY, maxConcurrentSessions: 2 },
     runtime: options.runtime ?? runtime(),
     initialReconnectDelayMs: 2,

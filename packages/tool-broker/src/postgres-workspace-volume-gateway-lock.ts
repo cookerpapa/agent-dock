@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import { sql, type Kysely } from "kysely";
 import type { WorkspaceVolumeGatewayLock } from "./workspace-volume-gateway-contract.ts";
 
@@ -11,13 +11,13 @@ export class PostgresWorkspaceVolumeGatewayLock implements WorkspaceVolumeGatewa
 
   async withLock<T>(volumeId: string, run: () => Promise<T>): Promise<T> {
     return this.#database.connection().execute(async (connection) => {
-      await sql`select pg_advisory_lock(hashtextextended(${`agent-dock.workspace.${volumeId}`}, 0))`.execute(
+      await sql`select pg_advisory_lock(hashtextextended(${`pi-cloud.workspace.${volumeId}`}, 0))`.execute(
         connection,
       );
       try {
         return await run();
       } finally {
-        await sql`select pg_advisory_unlock(hashtextextended(${`agent-dock.workspace.${volumeId}`}, 0))`.execute(
+        await sql`select pg_advisory_unlock(hashtextextended(${`pi-cloud.workspace.${volumeId}`}, 0))`.execute(
           connection,
         );
       }

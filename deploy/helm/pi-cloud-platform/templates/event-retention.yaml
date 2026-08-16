@@ -1,0 +1,86 @@
+{{- if and .Values.globalPlaneEnabled .Values.eventRetention.enabled }}
+{{- $name := include "pi-cloud-platform.name" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-event-retention
+  labels:
+    {{- include "pi-cloud-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: event-retention
+spec:
+  replicas: {{ .Values.eventRetention.replicas }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: event-retention }
+  template:
+    metadata:
+      labels:
+        {{- include "pi-cloud-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: event-retention
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      {{- with .Values.global.trustedNodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.trustedTolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: event-retention
+          image: {{ include "pi-cloud-platform.image" .Values.images.controlPlane | quote }}
+          imagePullPolicy: {{ .Values.images.controlPlane.pullPolicy }}
+          command: [/app/packages/control-plane/src/event-retention-main.ts]
+          ports:
+            - { name: metrics, containerPort: 9468 }
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: DATABASE_URL_FILE, value: /run/pi-cloud-secrets/database-url }
+            - { name: PI_CLOUD_LIVE_EVENT_STORE_URL_FILE, value: /run/pi-cloud-secrets/live-event-store-url }
+            - { name: PI_CLOUD_EVENT_RETENTION_INTERVAL_MS, value: {{ .Values.eventRetention.intervalMs | quote }} }
+            - { name: PI_CLOUD_EVENT_RETENTION_BATCH_SIZE, value: {{ .Values.eventRetention.batchSize | quote }} }
+            - { name: PI_CLOUD_METRICS_HOST, value: 0.0.0.0 }
+            - { name: PI_CLOUD_METRICS_PORT, value: "9468" }
+            - { name: PI_CLOUD_METRICS_TOKEN_FILE, value: /run/pi-cloud-secrets/metrics-token }
+            {{- if .Values.external.otlpTracesEndpoint }}
+            - { name: PI_CLOUD_OTLP_TRACES_ENDPOINT, value: {{ .Values.external.otlpTracesEndpoint | quote }} }
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources: {{- toYaml .Values.eventRetention.resources | nindent 12 }}
+          volumeMounts:
+            - name: platform-secrets
+              mountPath: /run/pi-cloud-secrets/database-url
+              subPath: {{ .Values.external.database.secretKey }}
+              readOnly: true
+            - name: platform-secrets
+              mountPath: /run/pi-cloud-secrets/live-event-store-url
+              subPath: {{ .Values.external.liveEventStore.urlSecretKey }}
+              readOnly: true
+            - name: platform-secrets
+              mountPath: /run/pi-cloud-secrets/metrics-token
+              subPath: metrics-token
+              readOnly: true
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: platform-secrets
+          secret: { secretName: {{ .Values.global.existingSecret }}, defaultMode: 288 }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+{{- end }}

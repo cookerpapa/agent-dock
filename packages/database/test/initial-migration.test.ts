@@ -74,7 +74,7 @@ async function seedControlPlane(): Promise<void> {
     IDS.tenant,
     IDS.tenant2,
   ]);
-  await postgres.query(`insert into projects (id, tenant_id, name) values ($1, $2, 'AgentDock')`, [
+  await postgres.query(`insert into projects (id, tenant_id, name) values ($1, $2, 'PiCloud')`, [
     IDS.project,
     IDS.tenant,
   ]);

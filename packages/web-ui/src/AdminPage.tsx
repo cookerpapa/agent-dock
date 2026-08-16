@@ -4,8 +4,8 @@ import type {
   DeepSeekModelId,
   ModelConfigurationResource,
   TenantIdentityResource,
-} from "@agent-dock/protocol";
-import { AgentDockApiError, type AgentDockApi } from "./api.ts";
+} from "@pi-cloud/protocol";
+import { PiCloudApiError, type PiCloudApi } from "./api.ts";
 import { errorMessage } from "./ui-errors.ts";
 
 export function AdminPage({
@@ -13,7 +13,7 @@ export function AdminPage({
   identity,
   onLogout,
 }: {
-  api: AgentDockApi;
+  api: PiCloudApi;
   identity: TenantIdentityResource;
   onLogout: () => void;
 }) {
@@ -42,7 +42,7 @@ export function AdminPage({
       })
       .catch((caught: unknown) => {
         if (cancelled) return;
-        if (caught instanceof AgentDockApiError && caught.status === 403) {
+        if (caught instanceof PiCloudApiError && caught.status === 403) {
           setCubeProxyConfiguration(null);
           setModelConfiguration(null);
           return;
@@ -104,7 +104,7 @@ export function AdminPage({
         <div>
           <div className="product-logo">A</div>
           <div>
-            <strong>AgentDock 管理后台</strong>
+            <strong>PiCloud 管理后台</strong>
             <span>平台运行配置</span>
           </div>
         </div>

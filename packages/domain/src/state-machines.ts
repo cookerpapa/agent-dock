@@ -1,4 +1,4 @@
-import { SessionStateSchema } from "@agent-dock/protocol";
+import { SessionStateSchema } from "@pi-cloud/protocol";
 import { Type, type Static } from "typebox";
 
 export type SessionState = Static<typeof SessionStateSchema>;

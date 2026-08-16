@@ -4,7 +4,7 @@ import {
   parseToolSandboxOperationResponse,
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import type { ProviderHeaders } from "@earendil-works/pi-ai";
@@ -206,7 +206,7 @@ function utf8Tail(value: Buffer, maximumBytes: number): Buffer {
 function modelOutputPreview(value: Buffer, maximumBytes: number, toolCallId: string): Buffer {
   if (value.byteLength <= maximumBytes) return value;
   const marker = Buffer.from(
-    `\n\n[AgentDock omitted the middle of this output from model context. The complete output is preserved as the tool-output artifact for tool call ${toolCallId}. Rerun a focused command with tail, grep, or sed to inspect omitted sections.]\n\n`,
+    `\n\n[PiCloud omitted the middle of this output from model context. The complete output is preserved as the tool-output artifact for tool call ${toolCallId}. Rerun a focused command with tail, grep, or sed to inspect omitted sections.]\n\n`,
     "utf8",
   );
   const bodyBytes = Math.max(0, maximumBytes - marker.byteLength);
@@ -627,7 +627,7 @@ function registerTrustedRemoteTools(
       ? event.systemPrompt.replace(cwdLine, sandboxLine)
       : `${event.systemPrompt}\n\n${sandboxLine}`;
     const platformContext = [
-      "## AgentDock execution context",
+      "## PiCloud execution context",
       "All file and command tools operate in the isolated /workspace Tool Sandbox.",
       "Large tool results are bounded in model context and preserved as tenant-scoped artifacts.",
     ].join("\n");

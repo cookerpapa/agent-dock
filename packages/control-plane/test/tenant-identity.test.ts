@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -45,7 +45,7 @@ beforeAll(async () => {
     .values({
       id: IDS.binding,
       tenant_id: IDS.tenant,
-      provider: "agent-dock-fake",
+      provider: "pi-cloud-fake",
       kind: "brokered",
       secret_ref: "broker://alpha/fixture",
       version: 1,
@@ -58,8 +58,8 @@ beforeAll(async () => {
       id: IDS.profile,
       tenant_id: IDS.tenant,
       name: "default",
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       default_thinking_level: "off",
       allowed_thinking_levels: ["off"],
       credential_binding_id: IDS.binding,

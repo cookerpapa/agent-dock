@@ -2,21 +2,21 @@ import { Module, type DynamicModule } from "@nestjs/common";
 import { ControlPlaneController } from "./control-plane.controller.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
-import { DurableEventStore } from "@agent-dock/runtime-core/durable-event-store";
+import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
 import {
   PublicTenantRegistrationService,
   type PublicTenantRegistrationConfiguration,
 } from "./public-tenant-registration.ts";
-import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
+import { SessionEventHub } from "@pi-cloud/runtime-core/session-event-hub";
 import { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
-import type { SessionEventNotificationTransport } from "@agent-dock/runtime-core/session-event-notifications";
+import type { SessionEventNotificationTransport } from "@pi-cloud/runtime-core/session-event-notifications";
 import {
   SessionEventStream,
   type SessionEventStreamOptions,
-} from "@agent-dock/runtime-core/session-event-stream";
+} from "@pi-cloud/runtime-core/session-event-stream";
 import type { TenantRequestIdentity } from "./tenant-identity.ts";
 import { TenantRequestContext } from "./tenant-request-context.ts";
-import type { TenantModelCredentialVault } from "@agent-dock/runtime-core/model-credential-runtime";
+import type { TenantModelCredentialVault } from "@pi-cloud/runtime-core/model-credential-runtime";
 import { TenantModelConfigurationService } from "./tenant-model-configuration.ts";
 import {
   WorkspaceVersionService,

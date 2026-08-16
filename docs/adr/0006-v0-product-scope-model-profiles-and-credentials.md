@@ -5,7 +5,7 @@
 
 ## Context
 
-AgentDock ultimately targets reliable multi-user coding-agent execution, but a
+PiCloud ultimately targets reliable multi-user coding-agent execution, but a
 first vertical slice cannot validate scheduling, sandboxing, recovery, Web UI,
 multi-tenant authentication, arbitrary provider credentials, and a model
 catalog at the same time. A model picker is visible product surface, but it is
@@ -30,7 +30,7 @@ from the turn that originally ran.
 ### Product boundary
 
 The v0 vertical slice is a **single-user, self-hosted** Pi cloud runtime. One
-owner opens a Web session, submits a turn, observes the AgentDock event stream,
+owner opens a Web session, submits a turn, observes the PiCloud event stream,
 and resumes the same conversation after the prior execution runtime has been
 disposed. Multi-tenant identity, public signup, billing, fair tenant scheduling,
 and a user-facing model picker remain later roadmap work.
@@ -43,7 +43,7 @@ multi-user goal.
 The control plane owns an allowlisted `ModelProfile` concept. A profile contains
 at least:
 
-- an AgentDock profile ID;
+- an PiCloud profile ID;
 - provider and model IDs understood by the pinned Pi version;
 - an allowed/default thinking level;
 - an opaque credential binding ID;

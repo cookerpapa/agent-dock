@@ -3,8 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import type { Socket } from "node:net";
 
-export const FAKE_MODEL_API_KEY = "agent-dock-test-key";
-export const FAKE_MODEL_ID = "agent-dock-fake";
+export const FAKE_MODEL_API_KEY = "pi-cloud-test-key";
+export const FAKE_MODEL_ID = "pi-cloud-fake";
 
 export const fakeModelScenarios = [
   "text",
@@ -377,7 +377,7 @@ function latestUserText(messages: readonly unknown[]): string | undefined {
 }
 
 function codingEvalTask(messages: readonly unknown[]): CodingEvalTask | undefined {
-  const taskId = /^agent-dock-eval:\/\/([a-z0-9-]+)/.exec(latestUserText(messages) ?? "")?.[1];
+  const taskId = /^pi-cloud-eval:\/\/([a-z0-9-]+)/.exec(latestUserText(messages) ?? "")?.[1];
   return codingEvalTasks.find((task) => task.id === taskId);
 }
 
@@ -509,7 +509,7 @@ export class FakeModelServer {
   }
 
   async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const path = new URL(request.url ?? "/", "http://agent-dock.local").pathname;
+    const path = new URL(request.url ?? "/", "http://pi-cloud.local").pathname;
     if (request.method === "GET" && path === "/healthz") {
       sendJson(response, 200, {
         status: "ok",
@@ -533,9 +533,9 @@ export class FakeModelServer {
       sendError(response, 401, "Fake model authentication failed", "invalid_api_key");
       return;
     }
-    const scenarioHeader = request.headers["x-agent-dock-scenario"];
+    const scenarioHeader = request.headers["x-pi-cloud-scenario"];
     if (Array.isArray(scenarioHeader)) {
-      throw new SafeHttpError(400, "x-agent-dock-scenario must have one value");
+      throw new SafeHttpError(400, "x-pi-cloud-scenario must have one value");
     }
     const scenario =
       scenarioHeader === undefined
@@ -547,7 +547,7 @@ export class FakeModelServer {
 
     const payload = parseChatCompletionRequest(await readJsonBody(request, this.#maxRequestBytes));
     const sequence = ++this.#requestSequence;
-    const requestId = `chatcmpl-agentdock-${String(sequence).padStart(4, "0")}`;
+    const requestId = `chatcmpl-picloud-${String(sequence).padStart(4, "0")}`;
     const developerMessageCount = payload.messages.filter(
       (message) => isRecord(message) && message.role === "developer",
     ).length;
@@ -582,7 +582,7 @@ export class FakeModelServer {
 
     if (scenario === "rate_limit") {
       response.setHeader("retry-after", "1");
-      sendError(response, 429, "AgentDock deterministic rate limit", "rate_limit_exceeded");
+      sendError(response, 429, "PiCloud deterministic rate limit", "rate_limit_exceeded");
       return;
     }
     if (scenario === "timeout") {
@@ -612,7 +612,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          "call_agentdock_java_test_before",
+          "call_picloud_java_test_before",
           "bash",
           { command: "bash ./test.sh" },
         );
@@ -624,7 +624,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          "call_agentdock_java_edit",
+          "call_picloud_java_edit",
           "edit",
           {
             path: "src/Calculator.java",
@@ -644,7 +644,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          "call_agentdock_java_test_after",
+          "call_picloud_java_test_after",
           "bash",
           { command: "bash ./test.sh" },
         );
@@ -659,7 +659,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          "call_agentdock_java_followup",
+          "call_picloud_java_followup",
           "bash",
           {
             command: restoredConversation
@@ -688,7 +688,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          "call_agentdock_eval_invalid",
+          "call_picloud_eval_invalid",
           "bash",
           { command: "printf 'unknown coding eval task\\n' >&2; exit 2" },
         );
@@ -701,7 +701,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          `call_agentdock_eval_${task.id}_before`,
+          `call_picloud_eval_${task.id}_before`,
           "bash",
           { command: `bash eval/test.sh ${task.id}` },
         );
@@ -713,7 +713,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          `call_agentdock_eval_${task.id}_edit`,
+          `call_picloud_eval_${task.id}_edit`,
           "edit",
           {
             path: task.path,
@@ -728,7 +728,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          `call_agentdock_eval_${task.id}_after`,
+          `call_picloud_eval_${task.id}_after`,
           "bash",
           { command: `bash eval/test.sh ${task.id}` },
         );
@@ -754,7 +754,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          "call_agentdock_settlement_write",
+          "call_picloud_settlement_write",
           "write",
           { path: "settlement.txt", content: "changed\n" },
         );
@@ -766,7 +766,7 @@ export class FakeModelServer {
           requestId,
           sequence,
           payload.model,
-          "call_agentdock_settlement_verify",
+          "call_picloud_settlement_verify",
           "bash",
           { command: "npm test" },
         );
@@ -787,7 +787,7 @@ export class FakeModelServer {
         requestId,
         sequence,
         payload.model,
-        "call_agentdock_cancellation_hold",
+        "call_picloud_cancellation_hold",
         "bash",
         { command: "exec sleep 300", timeout: 300 },
       );
@@ -800,7 +800,7 @@ export class FakeModelServer {
           ? "Cancellation hold unexpectedly completed."
           : scenario === "java_repair"
             ? "Java repair verified."
-            : "AgentDock fake stream OK.";
+            : "PiCloud fake stream OK.";
     await this.#streamText(response, requestId, sequence, payload.model, text);
   }
 
@@ -845,7 +845,7 @@ export class FakeModelServer {
       requestId,
       sequence,
       model,
-      "call_agentdock_001",
+      "call_picloud_001",
       "inspect_workspace",
       { path: "src" },
     );

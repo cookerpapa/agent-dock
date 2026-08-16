@@ -69,10 +69,10 @@ function internalUrl(value: string): string {
 export async function loadGitHubGatewayConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<GitHubGatewayConfig> {
-  const serviceToken = await secretFile(environment, "AGENT_DOCK_GITHUB_GATEWAY_TOKEN");
-  const webhookSecret = await secretFile(environment, "AGENT_DOCK_GITHUB_WEBHOOK_SECRET");
-  const appIdValue = environment.AGENT_DOCK_GITHUB_APP_ID?.trim() || undefined;
-  const privateKeyFile = environment.AGENT_DOCK_GITHUB_APP_PRIVATE_KEY_FILE;
+  const serviceToken = await secretFile(environment, "PI_CLOUD_GITHUB_GATEWAY_TOKEN");
+  const webhookSecret = await secretFile(environment, "PI_CLOUD_GITHUB_WEBHOOK_SECRET");
+  const appIdValue = environment.PI_CLOUD_GITHUB_APP_ID?.trim() || undefined;
+  const privateKeyFile = environment.PI_CLOUD_GITHUB_APP_PRIVATE_KEY_FILE;
   if (appIdValue !== undefined && privateKeyFile === undefined) {
     throw new TypeError("GitHub App private key must be configured with the App ID");
   }
@@ -81,14 +81,14 @@ export async function loadGitHubGatewayConfig(
     port: integer(environment.PORT, 4400, "PORT", 1, 65_535),
     serviceToken,
     webhookSecret,
-    ...(environment.AGENT_DOCK_CONTROL_PLANE_URL === undefined
+    ...(environment.PI_CLOUD_CONTROL_PLANE_URL === undefined
       ? {}
-      : { controlPlaneBaseUrl: internalUrl(environment.AGENT_DOCK_CONTROL_PLANE_URL) }),
+      : { controlPlaneBaseUrl: internalUrl(environment.PI_CLOUD_CONTROL_PLANE_URL) }),
     ...(appIdValue === undefined
       ? {}
       : {
-          appId: integer(appIdValue, 0, "AGENT_DOCK_GITHUB_APP_ID", 1, Number.MAX_SAFE_INTEGER),
-          privateKeyPem: await secretFile(environment, "AGENT_DOCK_GITHUB_APP_PRIVATE_KEY", true),
+          appId: integer(appIdValue, 0, "PI_CLOUD_GITHUB_APP_ID", 1, Number.MAX_SAFE_INTEGER),
+          privateKeyPem: await secretFile(environment, "PI_CLOUD_GITHUB_APP_PRIVATE_KEY", true),
         }),
   };
 }

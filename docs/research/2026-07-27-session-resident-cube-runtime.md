@@ -4,7 +4,7 @@ Date: 2026-07-27
 
 ## Question
 
-How should AgentDock preserve an interactive coding environment after a Run
+How should PiCloud preserve an interactive coding environment after a Run
 without giving a stale Pi Worker continuing Tool authority, losing background
 processes, or making Cube and PostgreSQL competing state authorities?
 
@@ -25,7 +25,7 @@ off-node disaster recovery by itself.
 Source:
 <https://github.com/TencentCloud/CubeSandbox/blob/v0.6.0/docs/guide/volume-plugin.md>
 
-### Cube native snapshots cannot include the AgentDock Volume topology
+### Cube native snapshots cannot include the PiCloud Volume topology
 
 Cube documents `create_snapshot()` as a complete memory-and-filesystem
 snapshot. That is true for a supported CubeCoW Sandbox:
@@ -40,7 +40,7 @@ However, the v0.6 Cubelet implementation validates the target before
 - `sandbox_path` directory/shared-bind mounts.
 
 The Volume Plugin attaches `/workspace` through exactly such an external
-hostPath/virtiofs dependency. Consequently, an AgentDock Sandbox with a
+hostPath/virtiofs dependency. Consequently, an PiCloud Sandbox with a
 persistent plugin-backed Workspace cannot use Cube's native complete snapshot.
 This is an enforced implementation constraint, not merely a missing SDK
 option.
@@ -53,7 +53,7 @@ The alternatives are therefore:
 1. put the Workspace inside CubeCoW and use a node-local complete snapshot; or
 2. keep the Workspace on an external Volume and version it independently.
 
-AgentDock chooses the second option because Workspace durability and
+PiCloud chooses the second option because Workspace durability and
 multi-node recovery matter more than hibernating process memory after the idle
 window.
 
@@ -82,7 +82,7 @@ background processes survived.
 
 ### Live storage and immutable checkpoints have different jobs
 
-AgentDock keeps three non-overlapping responsibilities:
+PiCloud keeps three non-overlapping responsibilities:
 
 | Layer | Responsibility |
 | --- | --- |
@@ -102,7 +102,7 @@ Sources:
 - <https://kopia.io/docs/advanced/consistency/>
 
 CephFS can create immutable filesystem and subvolume snapshots. It is a valid
-future provider when AgentDock is deployed on a real Ceph cluster, but
+future provider when PiCloud is deployed on a real Ceph cluster, but
 requiring a Ceph cluster for the single-node development product would add
 MON/MGR/MDS/OSD operations solely to replace an already working checkpoint
 engine.
@@ -147,8 +147,8 @@ without allowing a stale Volume to override a rollback.
 
 ## Removed design
 
-AgentDock no longer reads or produces
-`agent-dock.workspace-cube-snapshot.v1`. The native Cube snapshot recovery
+PiCloud no longer reads or produces
+`pi-cloud.workspace-cube-snapshot.v1`. The native Cube snapshot recovery
 authority, materializer and reference-aware Cube snapshot garbage collector
 were compatibility machinery for a topology that is now invalid. Development
 data that references that format is deleted during cutover instead of migrated.

@@ -3,31 +3,31 @@ global:
   evaluation_interval: 10s
 
 scrape_configs:
-  - job_name: agent-dock-control-plane
-    bearer_token_file: /run/agent-dock-secrets/metrics-token
+  - job_name: pi-cloud-control-plane
+    bearer_token_file: /run/pi-cloud-secrets/metrics-token
     static_configs:
       - targets: [control-plane:9464]
-  - job_name: agent-dock-trusted-runner
-    bearer_token_file: /run/agent-dock-secrets/metrics-token
+  - job_name: pi-cloud-trusted-runner
+    bearer_token_file: /run/pi-cloud-secrets/metrics-token
     static_configs:
       - targets:
           - supervisor-host:9465
           - supervisor-host-1:9465
-          - agent-dock-pi-worker-local-v1-0.metrics.workers.agent-dock.local:80
-          - agent-dock-pi-worker-local-v1-1.metrics.workers.agent-dock.local:80
-  - job_name: agent-dock-tool-broker
-    bearer_token_file: /run/agent-dock-secrets/metrics-token
+          - pi-cloud-pi-worker-local-v1-0.metrics.workers.pi-cloud.local:80
+          - pi-cloud-pi-worker-local-v1-1.metrics.workers.pi-cloud.local:80
+  - job_name: pi-cloud-tool-broker
+    bearer_token_file: /run/pi-cloud-secrets/metrics-token
     static_configs:
       - targets: [tool-broker:9466]
-  - job_name: agent-dock-event-gateway
-    bearer_token_file: /run/agent-dock-secrets/metrics-token
+  - job_name: pi-cloud-event-gateway
+    bearer_token_file: /run/pi-cloud-secrets/metrics-token
     static_configs:
       - targets: [event-gateway:9467]
-  - job_name: agent-dock-event-retention
-    bearer_token_file: /run/agent-dock-secrets/metrics-token
+  - job_name: pi-cloud-event-retention
+    bearer_token_file: /run/pi-cloud-secrets/metrics-token
     static_configs:
       - targets: [event-retention:9468]
-  - job_name: agent-dock-workspace-volume-gateway
-    bearer_token_file: /run/agent-dock-secrets/metrics-token
+  - job_name: pi-cloud-workspace-volume-gateway
+    bearer_token_file: /run/pi-cloud-secrets/metrics-token
     static_configs:
       - targets: [workspace-volume-gateway:9469]

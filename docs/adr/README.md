@@ -52,7 +52,7 @@ are available in Git history rather than presented as current choices.
   forks without making tree control model-visible.
 - [ADR-0105](0105-pi-session-backend-conformance.md) makes the tenant-scoped
   PostgreSQL Session repository conform to Pi's published backend contract
-  while retaining AgentDock's transaction-scoped execution authority.
+  while retaining PiCloud's transaction-scoped execution authority.
 - [ADR-0106](0106-workspace-web-terminal.md) adds a brokered Workspace Web
   Terminal with a separate human lease, exclusive writer admission and Cube
   PTY execution without exposing runtime credentials to the browser.
@@ -63,6 +63,9 @@ are available in Git history rather than presented as current choices.
 - [ADR-0109](0109-postgres-session-reference-checkpoints.md) removes the old Pi
   JSONL pipeline and synthetic Artifact bridge now that PostgreSQL
   SessionStorage is the sole conversation authority.
+- [ADR-0110](0110-pi-cloud-product-identity.md) establishes one clean Pi Cloud
+  identity across code, deployment protocols and the repository without a
+  legacy naming compatibility layer.
 
 ## Optional modules
 

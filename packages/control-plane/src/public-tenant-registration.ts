@@ -1,8 +1,8 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import type {
   CreateTenantRegistrationRequest,
   TenantRegistrationResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import type { Kysely } from "kysely";
 import {
   createPrivateTenant,

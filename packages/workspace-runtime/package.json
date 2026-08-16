@@ -1,5 +1,5 @@
 {
-  "name": "@agent-dock/workspace-runtime",
+  "name": "@pi-cloud/workspace-runtime",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,6 +11,6 @@
     "test": "vitest --run"
   },
   "dependencies": {
-    "@agent-dock/protocol": "0.1.0"
+    "@pi-cloud/protocol": "0.1.0"
   }
 }

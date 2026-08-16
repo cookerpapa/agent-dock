@@ -2,7 +2,7 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   type ExecuteTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
 import {
   createCloudAttemptContext,
@@ -33,8 +33,8 @@ const command: ExecuteTurnCommandMessage = {
     sandboxRetention: "ephemeral",
     model: {
       profileId: "profile-step",
-      provider: "agent-dock-fake",
-      modelId: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      modelId: "pi-cloud-fake",
       thinkingLevel: "off",
       credentialBindingId: "binding-step",
       credentialBindingVersion: 3,
@@ -42,7 +42,7 @@ const command: ExecuteTurnCommandMessage = {
     environment: {
       environmentVersionId: "10000000-0000-4000-8000-000000000006",
       versionNumber: 2,
-      profileKey: "agent-dock-fullstack",
+      profileKey: "pi-cloud-fullstack",
       profileVersion: "1",
       imageRevision: "development",
       specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",

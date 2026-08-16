@@ -51,7 +51,7 @@ boundaries without the sampling identity that connected them.
   multiplying Step/world-state entries.
 - Cancellation can stop retry backoff without changing the Tool replay
   contract.
-- A Run can contain multiple native Pi subturns. AgentDock emits one public
+- A Run can contain multiple native Pi subturns. PiCloud emits one public
   `turn.started` boundary and accepts later non-overlapping `agent_start` /
   `agent_end` pairs until `agent_settled`.
 - Historical model-request rows remain readable with a null sampling identity;

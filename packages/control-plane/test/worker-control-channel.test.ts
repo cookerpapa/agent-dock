@@ -1,12 +1,12 @@
 import {
   TWO_PHASE_COMMAND_CAPABILITY,
   PI_STEER_CAPABILITY,
-  createAgentDockEventFactory,
+  createPiCloudEventFactory,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
   type EventPublishMessage,
   type SteerTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
 import { WorkerControlChannelRouter, type WorkerControlConnection } from "../src/index.ts";
 
@@ -56,7 +56,7 @@ function command(): SteerTurnCommandMessage {
 }
 
 function event(commandMessage = command()): EventPublishMessage {
-  const factory = createAgentDockEventFactory(
+  const factory = createPiCloudEventFactory(
     {
       sessionId: commandMessage.payload.sessionId,
       turnId: commandMessage.payload.turnId,

@@ -1,10 +1,10 @@
-# Cursor Cloud Agent lessons and AgentDock adoption map
+# Cursor Cloud Agent lessons and PiCloud adoption map
 
 - Date: 2026-07-22
 - Scope: official Cursor engineering material only
 - Purpose: turn useful product and infrastructure lessons into testable
-  AgentDock work, without copying proprietary implementation details or
-  weakening AgentDock's fail-closed security boundary.
+  PiCloud work, without copying proprietary implementation details or
+  weakening PiCloud's fail-closed security boundary.
 
 ## Sources
 
@@ -17,11 +17,11 @@
 - [The third era of AI software development](https://cursor.com/blog/third-era).
 
 The observations below are paraphrases of those sources. Performance numbers
-published by Cursor describe Cursor's system and are not AgentDock evidence.
+published by Cursor describe Cursor's system and are not PiCloud evidence.
 
-## What AgentDock already has
+## What PiCloud already has
 
-| Cursor lesson | Existing AgentDock implementation |
+| Cursor lesson | Existing PiCloud implementation |
 | --- | --- |
 | Full development environment materially affects output quality | Append-only Project environment versions, immutable Run snapshots, in-gVisor toolchain validation, and exact-environment warm reuse under ADR-0042 |
 | Agent, machine, and conversation state must be independent | Pi JSONL, immutable Workspace versions, and demand-activated gVisor Pods have independent lifecycles under ADR-0011/0032/0040 |
@@ -128,7 +128,7 @@ from rendering a chart.
 
 ### Temporal migration
 
-Cursor reports that Temporal solved failures in its system. AgentDock already
+Cursor reports that Temporal solved failures in its system. PiCloud already
 implements the required task-scoped durable semantics through PostgreSQL
 RunAttempts, leases, fencing, an outbox, a crash-safe spool, reconciliation,
 and fault tests. Replacing this with Temporal now would duplicate state
@@ -136,7 +136,7 @@ ownership and invalidate proven failure semantics without a measured need.
 
 ### Silent fallback to a base environment
 
-Cursor describes a fallback environment when custom setup fails. AgentDock
+Cursor describes a fallback environment when custom setup fails. PiCloud
 rejects that behavior: an accepted Run snapshots an exact environment identity,
 so silently running another image would make results irreproducible and could
 bypass policy. Validation failure remains visible and fail-closed.

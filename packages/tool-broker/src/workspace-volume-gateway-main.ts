@@ -5,8 +5,8 @@ import {
   PersistentVolumeWorkspaceVolumeGateway,
   WorkspaceVolumeGatewayServer,
 } from "./workspace-volume-gateway.ts";
-import { createDatabase } from "@agent-dock/database";
-import { startServiceObservability } from "@agent-dock/observability";
+import { createDatabase } from "@pi-cloud/database";
+import { startServiceObservability } from "@pi-cloud/observability";
 import { PostgresWorkspaceVolumeGatewayLock } from "./postgres-workspace-volume-gateway-lock.ts";
 import { WorkspaceVolumeDeletionReaper } from "./workspace-volume-deletion-reaper.ts";
 
@@ -44,32 +44,32 @@ const database = createDatabase({
   maxConnections: 4,
 });
 const observability = await startServiceObservability({
-  serviceName: "agent-dock-workspace-volume-gateway",
+  serviceName: "pi-cloud-workspace-volume-gateway",
   defaultMetricsPort: 9_469,
 });
 const gateway = new PersistentVolumeWorkspaceVolumeGateway({
-  workspaceRoot: required("AGENT_DOCK_WORKSPACE_POSIX_ROOT"),
+  workspaceRoot: required("PI_CLOUD_WORKSPACE_POSIX_ROOT"),
   lock: new PostgresWorkspaceVolumeGatewayLock(database),
 });
 const server = new WorkspaceVolumeGatewayServer({
-  host: process.env.AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_HOST ?? "127.0.0.1",
-  port: integer("AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_PORT", 4_500, 1, 65_535),
-  serviceToken: await secret(required("AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE")),
+  host: process.env.PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_HOST ?? "127.0.0.1",
+  port: integer("PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_PORT", 4_500, 1, 65_535),
+  serviceToken: await secret(required("PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE")),
   gateway,
   maximumConcurrentOperations: integer(
-    "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS",
+    "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_CONCURRENT_OPERATIONS",
     2,
     1,
     64,
   ),
   maximumQueuedOperations: integer(
-    "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS",
+    "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_MAXIMUM_QUEUED_OPERATIONS",
     32,
     0,
     4_096,
   ),
   queueWaitTimeoutMs: integer(
-    "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS",
+    "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS",
     30_000,
     1,
     600_000,
@@ -79,8 +79,8 @@ const server = new WorkspaceVolumeGatewayServer({
 const deletionReaper = new WorkspaceVolumeDeletionReaper({
   database,
   gateway,
-  intervalMs: integer("AGENT_DOCK_WORKSPACE_DELETION_REAPER_INTERVAL_MS", 30_000, 1_000, 3_600_000),
-  batchSize: integer("AGENT_DOCK_WORKSPACE_DELETION_REAPER_BATCH_SIZE", 16, 1, 256),
+  intervalMs: integer("PI_CLOUD_WORKSPACE_DELETION_REAPER_INTERVAL_MS", 30_000, 1_000, 3_600_000),
+  batchSize: integer("PI_CLOUD_WORKSPACE_DELETION_REAPER_BATCH_SIZE", 16, 1, 256),
 });
 try {
   await server.listen();
@@ -94,7 +94,7 @@ try {
   ]);
   throw error;
 }
-process.stdout.write("AgentDock Workspace Volume Gateway ready\n");
+process.stdout.write("PiCloud Workspace Volume Gateway ready\n");
 
 let closing: Promise<void> | undefined;
 const closeService = (): Promise<void> =>

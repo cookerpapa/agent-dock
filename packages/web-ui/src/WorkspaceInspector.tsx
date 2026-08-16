@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { WorkspaceFileResource, WorkspaceVersionResource } from "@agent-dock/protocol";
-import { AgentDockApi, AgentDockApiError } from "./api.ts";
+import type { WorkspaceFileResource, WorkspaceVersionResource } from "@pi-cloud/protocol";
+import { PiCloudApi, PiCloudApiError } from "./api.ts";
 
 const WorkspaceTerminal = lazy(async () => {
   const module = await import("./WorkspaceTerminal.tsx");
@@ -20,7 +20,7 @@ export type DirectoryEntry =
     }>;
 
 function message(error: unknown): string {
-  if (error instanceof AgentDockApiError) return error.message;
+  if (error instanceof PiCloudApiError) return error.message;
   if (error instanceof Error && error.message.trim().length > 0) {
     return `Workspace 目录读取失败：${error.message}`;
   }
@@ -112,7 +112,7 @@ export function WorkspaceInspector({
   sessionId,
   workspaceName,
 }: {
-  api: AgentDockApi;
+  api: PiCloudApi;
   onClose: () => void;
   onError: (message: string) => void;
   refreshSignal: number;

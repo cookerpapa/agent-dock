@@ -1,4 +1,4 @@
-# AgentDock collaboration instructions
+# PiCloud collaboration instructions
 
 ## Mission
 
@@ -23,7 +23,7 @@ protocol, record the decision under `docs/adr/` before implementation.
 
 - Keep Pi-specific runtime events inside the trusted
   runner/sandbox-supervisor adapter; the public API and durable domain model
-  must use AgentDock-owned schemas.
+  must use PiCloud-owned schemas.
 - Run the fixed Pi core only in the trusted Agent Runner, never in the API/control-plane
   process. Route every untrusted file or shell operation to a separate Tool Sandbox.
 - Load only code-owned trusted infrastructure tools in the Agent Runner.
@@ -63,14 +63,14 @@ system, policy engine, telemetry pipeline, or storage protocol:
 1. Survey actively maintained open-source implementations using official
    documentation, source, releases, license, and failure semantics.
 2. Prefer a well-supported project from an established company, standards body,
-   or neutral foundation when it satisfies AgentDock's measured requirements.
+   or neutral foundation when it satisfies PiCloud's measured requirements.
    Fit, security boundaries, operational cost, and exit strategy matter more
    than GitHub stars or vendor reputation alone.
 3. Record build-versus-adopt evidence in a research note or ADR. A custom
    implementation is allowed only when no candidate preserves the required
    invariants, or when integration would create more correctness and
    operational risk than the bounded code being retained.
-4. Put adopted infrastructure behind an AgentDock-owned port/adapter, pin its
+4. Put adopted infrastructure behind an PiCloud-owned port/adapter, pin its
    version or image digest, add contract and failure tests, and document
    rollback/export. Do not leak a vendor SDK into the public API or core domain.
 5. Assign exactly one durable authority to each concern. Never run a framework

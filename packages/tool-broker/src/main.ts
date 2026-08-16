@@ -1,6 +1,6 @@
 import { loadToolBrokerConfig } from "./tool-broker-config.ts";
-import { createDatabase } from "@agent-dock/database";
-import { startServiceObservability } from "@agent-dock/observability";
+import { createDatabase } from "@pi-cloud/database";
+import { startServiceObservability } from "@pi-cloud/observability";
 import { CubeSandboxProvider } from "./cubesandbox-sandbox-provider.ts";
 import { ToolBrokerServer } from "./tool-broker-server.ts";
 import { ToolBroker } from "./tool-broker.ts";
@@ -20,7 +20,7 @@ const activationState = new PostgresSandboxActivationStateRepository({
 });
 await activationState.start();
 const observability = await startServiceObservability({
-  serviceName: "agent-dock-tool-broker",
+  serviceName: "pi-cloud-tool-broker",
   defaultMetricsPort: 9466,
 });
 const cube = config.cubeSandbox;
@@ -69,7 +69,7 @@ const server = new ToolBrokerServer({
 });
 
 await server.listen();
-process.stdout.write("AgentDock Tool Broker ready\n");
+process.stdout.write("PiCloud Tool Broker ready\n");
 
 let closing: Promise<void> | undefined;
 const close = (): Promise<void> => {

@@ -29,7 +29,7 @@ hard boundary for hostile public customers.
 
 1. Add exactly one anonymous mutation: `POST /v1/registrations`. The production
    HTTP gateway bypasses bearer authentication only for that exact method and
-   path when `AGENT_DOCK_PUBLIC_REGISTRATION_ENABLED=true`. The secure default
+   path when `PI_CLOUD_PUBLIC_REGISTRATION_ENABLED=true`. The secure default
    is disabled; a disabled deployment returns `404` and every other `/v1`
    operation continues to require a valid bearer.
 2. A registration accepts only a bounded tenant slug and owner display name.

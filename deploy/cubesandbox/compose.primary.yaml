@@ -6,20 +6,20 @@ services:
       cube-proxy-relay:
         condition: service_healthy
     environment:
-      AGENT_DOCK_CUBESANDBOX_API_URL: http://cube-api-relay:3000
-      AGENT_DOCK_CUBESANDBOX_API_KEY_FILE: /run/agent-dock-secrets/cubesandbox-api-key
-      AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID: ${AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID:?set the READY Cube template ID}
-      AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP: cube-proxy-relay
-      AGENT_DOCK_CUBESANDBOX_PROXY_PORT: "8080"
-      AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME: http
-      AGENT_DOCK_CUBESANDBOX_DOMAIN: ${AGENT_DOCK_CUBESANDBOX_DOMAIN:?set the CubeProxy sandbox domain}
-      AGENT_DOCK_CUBESANDBOX_REQUEST_TIMEOUT_MS: "30000"
-      AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_HOST: "10.255.255.254"
-      AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_PORT: "3128"
+      PI_CLOUD_CUBESANDBOX_API_URL: http://cube-api-relay:3000
+      PI_CLOUD_CUBESANDBOX_API_KEY_FILE: /run/pi-cloud-secrets/cubesandbox-api-key
+      PI_CLOUD_CUBESANDBOX_TEMPLATE_ID: ${PI_CLOUD_CUBESANDBOX_TEMPLATE_ID:?set the READY Cube template ID}
+      PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP: cube-proxy-relay
+      PI_CLOUD_CUBESANDBOX_PROXY_PORT: "8080"
+      PI_CLOUD_CUBESANDBOX_PROXY_SCHEME: http
+      PI_CLOUD_CUBESANDBOX_DOMAIN: ${PI_CLOUD_CUBESANDBOX_DOMAIN:?set the CubeProxy sandbox domain}
+      PI_CLOUD_CUBESANDBOX_REQUEST_TIMEOUT_MS: "30000"
+      PI_CLOUD_CUBESANDBOX_EGRESS_PROXY_HOST: "10.255.255.254"
+      PI_CLOUD_CUBESANDBOX_EGRESS_PROXY_PORT: "3128"
     volumes:
       - type: bind
-        source: ${AGENT_DOCK_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/cubesandbox-api-key
-        target: /run/agent-dock-secrets/cubesandbox-api-key
+        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/cubesandbox-api-key
+        target: /run/pi-cloud-secrets/cubesandbox-api-key
         read_only: true
     networks:
       - sandbox-control
@@ -27,15 +27,15 @@ services:
       - cube-control
 
   cube-api-relay:
-    image: agent-dock/tool-broker:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/tool-broker:${PI_CLOUD_IMAGE_VERSION:-production}
     restart: unless-stopped
     command: [/app/packages/tool-broker/src/fixed-tcp-relay.ts]
     environment:
-      AGENT_DOCK_FIXED_RELAY_LISTEN_PORT: "3000"
-      AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST: ${AGENT_DOCK_CUBESANDBOX_API_NODE_IP:?set the private CubeAPI node IP}
-      AGENT_DOCK_FIXED_RELAY_UPSTREAM_PORT: ${AGENT_DOCK_CUBESANDBOX_API_NODE_PORT:-3000}
-      AGENT_DOCK_FIXED_RELAY_MAXIMUM_CONNECTIONS: "64"
-      AGENT_DOCK_FIXED_RELAY_IDLE_TIMEOUT_MS: "300000"
+      PI_CLOUD_FIXED_RELAY_LISTEN_PORT: "3000"
+      PI_CLOUD_FIXED_RELAY_UPSTREAM_HOST: ${PI_CLOUD_CUBESANDBOX_API_NODE_IP:?set the private CubeAPI node IP}
+      PI_CLOUD_FIXED_RELAY_UPSTREAM_PORT: ${PI_CLOUD_CUBESANDBOX_API_NODE_PORT:-3000}
+      PI_CLOUD_FIXED_RELAY_MAXIMUM_CONNECTIONS: "64"
+      PI_CLOUD_FIXED_RELAY_IDLE_TIMEOUT_MS: "300000"
     networks:
       - cube-control
       - cube-host-egress
@@ -51,28 +51,28 @@ services:
       timeout: 3s
       retries: 20
       start_period: 5s
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     read_only: true
     init: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 64
     mem_limit: 64m
     cpus: 0.25
     stop_grace_period: 10s
 
   cube-proxy-relay:
-    image: agent-dock/tool-broker:${AGENT_DOCK_IMAGE_VERSION:-production}
+    image: pi-cloud/tool-broker:${PI_CLOUD_IMAGE_VERSION:-production}
     restart: unless-stopped
     command: [/app/packages/tool-broker/src/fixed-tcp-relay.ts]
     environment:
-      AGENT_DOCK_FIXED_RELAY_LISTEN_PORT: "8080"
-      AGENT_DOCK_FIXED_RELAY_UPSTREAM_HOST: ${AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP:?set the private CubeProxy node IP}
-      AGENT_DOCK_FIXED_RELAY_UPSTREAM_PORT: ${AGENT_DOCK_CUBESANDBOX_PROXY_NODE_PORT:-80}
-      AGENT_DOCK_FIXED_RELAY_MAXIMUM_CONNECTIONS: "128"
-      AGENT_DOCK_FIXED_RELAY_IDLE_TIMEOUT_MS: "300000"
+      PI_CLOUD_FIXED_RELAY_LISTEN_PORT: "8080"
+      PI_CLOUD_FIXED_RELAY_UPSTREAM_HOST: ${PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP:?set the private CubeProxy node IP}
+      PI_CLOUD_FIXED_RELAY_UPSTREAM_PORT: ${PI_CLOUD_CUBESANDBOX_PROXY_NODE_PORT:-80}
+      PI_CLOUD_FIXED_RELAY_MAXIMUM_CONNECTIONS: "128"
+      PI_CLOUD_FIXED_RELAY_IDLE_TIMEOUT_MS: "300000"
     networks:
       - cube-control
       - cube-host-egress
@@ -88,13 +88,13 @@ services:
       timeout: 3s
       retries: 20
       start_period: 5s
-    user: "${AGENT_DOCK_APPLICATION_UID:-1000}:${AGENT_DOCK_APPLICATION_GID:-1000}"
+    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     read_only: true
     init: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${AGENT_DOCK_APPLICATION_UID:-1000},gid=${AGENT_DOCK_APPLICATION_GID:-1000}
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 64
     mem_limit: 64m
     cpus: 0.25

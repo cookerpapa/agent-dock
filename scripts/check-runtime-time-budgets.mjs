@@ -79,11 +79,11 @@ const composeStop = /stop_grace_period:\s*(\S+)/.exec(composeWorker)?.[1];
 assert.ok(composeStop, "Compose Pi Worker stop grace is missing");
 validateWorkerPolicy(
   {
-    toolBrokerRequestMs: composeInteger("AGENT_DOCK_TOOL_BROKER_REQUEST_TIMEOUT_MS"),
-    modelCapabilityTtlMs: composeInteger("AGENT_DOCK_MODEL_GATEWAY_CAPABILITY_TTL_MS"),
-    modelUpstreamRequestMs: composeInteger("AGENT_DOCK_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS"),
-    modelRequestMs: composeInteger("AGENT_DOCK_PI_MODEL_REQUEST_TIMEOUT_MS"),
-    turnMs: composeInteger("AGENT_DOCK_PI_TURN_TIMEOUT_MS"),
+    toolBrokerRequestMs: composeInteger("PI_CLOUD_TOOL_BROKER_REQUEST_TIMEOUT_MS"),
+    modelCapabilityTtlMs: composeInteger("PI_CLOUD_MODEL_GATEWAY_CAPABILITY_TTL_MS"),
+    modelUpstreamRequestMs: composeInteger("PI_CLOUD_MODEL_GATEWAY_UPSTREAM_REQUEST_TIMEOUT_MS"),
+    modelRequestMs: composeInteger("PI_CLOUD_PI_MODEL_REQUEST_TIMEOUT_MS"),
+    turnMs: composeInteger("PI_CLOUD_PI_TURN_TIMEOUT_MS"),
     terminationGraceMs: durationMs(composeStop, "Compose Pi Worker stop grace"),
   },
   "Compose Pi Worker",
@@ -110,11 +110,11 @@ validateWorkspaceVolumeGatewayPolicy(
   {
     queueWaitMs: composeDefaultInteger(
       composeDataMover,
-      "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS",
+      "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_QUEUE_WAIT_TIMEOUT_MS",
     ),
     requestMs: composeDefaultInteger(
       composeToolBroker,
-      "AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS",
+      "PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_REQUEST_TIMEOUT_MS",
     ),
     terminationGraceMs: durationMs(
       composeDataMoverStop,
@@ -130,7 +130,7 @@ function yaml(path) {
   return document.toJSON();
 }
 
-const workerValues = yaml("deploy/helm/agent-dock-pi-worker-pool/values.yaml");
+const workerValues = yaml("deploy/helm/pi-cloud-pi-worker-pool/values.yaml");
 validateWorkerPolicy(
   {
     ...workerValues.runtime.timeouts,
@@ -138,7 +138,7 @@ validateWorkerPolicy(
   },
   "Pi Worker Helm chart",
 );
-const platformValues = yaml("deploy/helm/agent-dock-platform/values.yaml");
+const platformValues = yaml("deploy/helm/pi-cloud-platform/values.yaml");
 validateWorkerPolicy(
   {
     ...platformValues["pi-workers"].runtime.timeouts,
@@ -157,7 +157,7 @@ validateWorkspaceVolumeGatewayPolicy(
 );
 
 const composeKafkaRetention =
-  /retention_ms=\$\{AGENT_DOCK_WORKER_EVENT_RETENTION_MS:-([0-9]+)\}/.exec(composeText)?.[1];
+  /retention_ms=\$\{PI_CLOUD_WORKER_EVENT_RETENTION_MS:-([0-9]+)\}/.exec(composeText)?.[1];
 assert.ok(composeKafkaRetention, "Compose Kafka retention default is missing");
 assert.ok(
   integer(composeKafkaRetention, "Compose Kafka retention") > LIVE_STREAM_RETENTION_MS,
@@ -170,7 +170,7 @@ const enterpriseKafka = parseAllDocuments(
   .map((document) => document.toJSON())
   .find(
     (resource) =>
-      resource?.kind === "KafkaTopic" && resource.metadata?.name === "agent-dock-worker-events-v1",
+      resource?.kind === "KafkaTopic" && resource.metadata?.name === "pi-cloud-worker-events-v1",
   );
 assert.ok(enterpriseKafka, "Enterprise Worker-event Kafka topic is missing");
 assert.ok(

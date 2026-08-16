@@ -5,7 +5,7 @@
 
 ## Context
 
-AgentDock assigns every active turn an opaque lease ID and monotonically
+PiCloud assigns every active turn an opaque lease ID and monotonically
 increasing fencing token. The current lease has a fixed expiry. A turn longer
 than that duration eventually loses the ability to publish events or commit a
 checkpoint even when its supervisor is healthy. Conversely, an expired row

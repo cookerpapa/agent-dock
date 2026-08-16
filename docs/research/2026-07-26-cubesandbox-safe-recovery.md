@@ -2,7 +2,7 @@
 
 ## Scope
 
-This note records the upstream behavior that AgentDock relies on before using
+This note records the upstream behavior that PiCloud relies on before using
 Cube pause/resume across Runs. The evaluated source is the immutable
 `TencentCloud/CubeSandbox` tag `v0.6.0`, commit
 `8721dd151971ce3c2966482bbd32904ad98f378e`.
@@ -46,17 +46,17 @@ Cube lifecycle coordination answers:
 
 It does not answer:
 
-> Which AgentDock RunAttempt and fencing token is currently allowed to mutate
+> Which PiCloud RunAttempt and fencing token is currently allowed to mutate
 > this Workspace?
 
 Redis lifecycle state, Cube metadata and a Cube traffic token are therefore not
-business fencing tokens. AgentDock must seal the guest before pause, revoke the
+business fencing tokens. PiCloud must seal the guest before pause, revoke the
 old Tool capability, and require a strictly higher writer fence before the
 resumed guest accepts another Tool operation.
 
-## Selected AgentDock recovery profile
+## Selected PiCloud recovery profile
 
-AgentDock uses the explicit upstream pause/connect API, not transparent
+PiCloud uses the explicit upstream pause/connect API, not transparent
 request-triggered auto-resume:
 
 ```text
@@ -73,12 +73,12 @@ capture committed Workspace
 ```
 
 Transparent auto-resume is deliberately disabled because a data request must
-not wake a VM before AgentDock has validated the new lease and fencing token.
+not wake a VM before PiCloud has validated the new lease and fencing token.
 Cube remains the physical lifecycle authority; PostgreSQL remains the business
 state authority.
 
 If pause, connect, identity verification or rebind has an ambiguous result,
-AgentDock destroys the microVM and recreates it from the latest committed
+PiCloud destroys the microVM and recreates it from the latest committed
 content checkpoint. Warm recovery is an optimization, never the only durable
 copy.
 
@@ -92,10 +92,10 @@ database for an optimization.
 
 Cube supports deny-all Internet, CIDR/domain allow lists and CubeEgress L7
 rules. In v0.6.0, DNS-learned addresses enter the same allow map as static
-addresses and are checked before deny rules. AgentDock therefore does not use
+addresses and are checked before deny rules. PiCloud therefore does not use
 native domain learning as the hostile-tenant dependency boundary.
 
-Dependency setup continues through AgentDock's existing Ed25519 capability
+Dependency setup continues through PiCloud's existing Ed25519 capability
 proxy:
 
 ```text
@@ -115,7 +115,7 @@ Internet access. General interactive Bash networking remains unsupported.
 - Paused-resource release can make resume fail admission on a full node.
 - A pause/resume timeout is not proof that the operation did not apply; state
   must be re-read before deciding.
-- Native Cube snapshots are useful for execution optimization, but AgentDock's
+- Native Cube snapshots are useful for execution optimization, but PiCloud's
   object-store content checkpoint remains the portable commit.
 - A networked guest snapshot must never be repurposed as an offline guest
   identity.

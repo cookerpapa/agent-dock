@@ -17,7 +17,7 @@ function argument(name, fallback) {
 const manifest = JSON.parse(
   await readFile(resolve(repositoryRoot, "eval/fault-cases.json"), "utf8"),
 );
-if (manifest.format !== "agent-dock.fault-eval.v1" || !Array.isArray(manifest.cases)) {
+if (manifest.format !== "pi-cloud.fault-eval.v1" || !Array.isArray(manifest.cases)) {
   throw new Error("Fault evaluation manifest is invalid");
 }
 const outputJson = resolve(
@@ -87,7 +87,7 @@ const durations = results.map((result) => result.durationMs).sort((left, right) 
 const percentile = (fraction) => durations[Math.max(0, Math.ceil(durations.length * fraction) - 1)];
 const successful = results.filter((result) => result.success).length;
 const report = {
-  format: "agent-dock.fault-eval-report.v1",
+  format: "pi-cloud.fault-eval-report.v1",
   generatedAt: new Date().toISOString(),
   methodology: "deterministic_targeted_fault_injection",
   liveChaosExperiment: false,
@@ -99,7 +99,7 @@ const report = {
   results,
 };
 const markdown =
-  `# AgentDock deterministic fault evaluation\n\n` +
+  `# PiCloud deterministic fault evaluation\n\n` +
   `Generated: ${report.generatedAt}\n\n` +
   `These are targeted, deterministic fault injections against the durable execution protocol. ` +
   `They complement the production smoke test's live container restart; they are not presented as a distributed chaos benchmark.\n\n` +

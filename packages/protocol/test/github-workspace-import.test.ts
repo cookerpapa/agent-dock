@@ -46,7 +46,7 @@ describe("GitHub workspace importer protocol", () => {
         workspaceImportProtocolVersion: 1,
         type: "workspace.import.result",
         importId: IMPORT_ID,
-        snapshot: blob('{"format":"agent-dock.workspace-manifest.v1","files":[]}\n'),
+        snapshot: blob('{"format":"pi-cloud.workspace-manifest.v1","files":[]}\n'),
       }),
     ).toMatchObject({ type: "workspace.import.result", importId: IMPORT_ID });
   });

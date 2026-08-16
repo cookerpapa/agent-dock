@@ -18,13 +18,13 @@ import {
   type ToolSandboxOperationResponse,
   type ToolWebProxyBootstrap,
   type ToolWorkerOutput,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   captureWorkspaceSnapshot,
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   restoreWorkspaceSnapshot,
-} from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/workspace-runtime";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -47,8 +47,8 @@ import { isIPv4 } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 
 const TOOL_WORKSPACE_DIRECTORY = "/workspace";
-const SAMPLE_JAVA_FIXTURE = "/opt/agent-dock/sample-java-repair";
-const TOOL_IMAGE_REVISION_FILE = "/opt/agent-dock/image-revision";
+const SAMPLE_JAVA_FIXTURE = "/opt/pi-cloud/sample-java-repair";
+const TOOL_IMAGE_REVISION_FILE = "/opt/pi-cloud/image-revision";
 
 export class ToolWorkerError extends Error {
   readonly code: string;
@@ -524,7 +524,7 @@ export function safeToolEnvironment(
         false,
       );
     }
-    const proxy = `http://agent-dock:${encodeURIComponent(dependencyProxy.capability)}@${dependencyProxy.host}:${String(dependencyProxy.port)}`;
+    const proxy = `http://pi-cloud:${encodeURIComponent(dependencyProxy.capability)}@${dependencyProxy.host}:${String(dependencyProxy.port)}`;
     proxyEnvironment = {
       HTTP_PROXY: proxy,
       HTTPS_PROXY: proxy,
@@ -560,7 +560,7 @@ export function safeToolEnvironment(
   }
   return {
     PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    HOME: "/tmp/agent-dock-tool-home",
+    HOME: "/tmp/pi-cloud-tool-home",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
     GIT_CONFIG_NOSYSTEM: "1",
@@ -842,7 +842,7 @@ export async function writeWorkspaceFile(
     if (isMissing(error)) return undefined;
     throw error;
   });
-  const temporary = join(parent, `.agent-dock-${randomUUID()}.tmp`);
+  const temporary = join(parent, `.pi-cloud-${randomUUID()}.tmp`);
   let handle;
   try {
     handle = await open(

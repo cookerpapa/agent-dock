@@ -1,5 +1,5 @@
-import type { Database } from "@agent-dock/database";
-import type { SandboxAssignmentInventory } from "@agent-dock/sandbox-supervisor/sandbox-assignment-inventory";
+import type { Database } from "@pi-cloud/database";
+import type { SandboxAssignmentInventory } from "@pi-cloud/sandbox-supervisor/sandbox-assignment-inventory";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { Kysely } from "kysely";
 
@@ -11,13 +11,13 @@ import { AssignmentReconciler } from "./assignment-reconciler.ts";
 import {
   DurableEventStore,
   type DurableEventGroupIngestor,
-} from "@agent-dock/runtime-core/durable-event-store";
-import { GroupedDurableEventIngestor } from "@agent-dock/runtime-core/grouped-durable-event-ingestor";
+} from "@pi-cloud/runtime-core/durable-event-store";
+import { GroupedDurableEventIngestor } from "@pi-cloud/runtime-core/grouped-durable-event-ingestor";
 import {
   SupervisorMaintenanceRuntime,
   type SupervisorMaintenanceRuntimeOptions,
 } from "./supervisor-maintenance-runtime.ts";
-import { SessionEventHub } from "@agent-dock/runtime-core/session-event-hub";
+import { SessionEventHub } from "@pi-cloud/runtime-core/session-event-hub";
 import {
   WorkerControlChannelRouter,
   type WorkerControlChannelRouterOptions,
@@ -35,7 +35,7 @@ import {
 } from "./supervisor-websocket-gateway.ts";
 import type { SupervisorProvisioningGateway } from "./supervisor-boot-provisioner.ts";
 import type { ProductionHttpGateway } from "./production-http-gateway.ts";
-import type { TerminalTurnProjectionSource } from "@agent-dock/runtime-core/terminal-turn-projection";
+import type { TerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 
 type ConnectionManagerConfiguration = Omit<
   SupervisorConnectionManagerOptions,

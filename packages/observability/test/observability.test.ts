@@ -2,7 +2,7 @@ import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-tr
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  AgentDockMetrics,
+  PiCloudMetrics,
   activeTraceCarrier,
   operationalLog,
   parseTraceCarrier,
@@ -17,7 +17,7 @@ const provider = new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcess
 beforeAll(() => provider.register());
 afterAll(async () => provider.shutdown());
 
-describe("AgentDock observability primitives", () => {
+describe("PiCloud observability primitives", () => {
   it("propagates one W3C trace across nested service spans", async () => {
     const root = virtualRunTraceCarrier("1".repeat(32), "2".repeat(16));
     let childCarrier;
@@ -42,7 +42,7 @@ describe("AgentDock observability primitives", () => {
   });
 
   it("exports authenticated Prometheus metrics without tenant labels", async () => {
-    const metrics = new AgentDockMetrics("test-service");
+    const metrics = new PiCloudMetrics("test-service");
     metrics.runs.inc({ outcome: "completed" });
     metrics.turnAdmissionDuration.labels("accepted").observe(0.012);
     metrics.tenantAdmissionLockWait.observe(0.003);
@@ -64,21 +64,21 @@ describe("AgentDock observability primitives", () => {
       });
       const body = await response.text();
       expect(response.status).toBe(200);
-      expect(body).toContain('agent_dock_runs_total{outcome="completed",service="test-service"} 1');
+      expect(body).toContain('pi_cloud_runs_total{outcome="completed",service="test-service"} 1');
       expect(body).toContain(
-        'agent_dock_turn_admission_seconds_count{service="test-service",outcome="accepted"} 1',
+        'pi_cloud_turn_admission_seconds_count{service="test-service",outcome="accepted"} 1',
       );
       expect(body).toContain(
-        'agent_dock_tenant_admission_lock_wait_seconds_count{service="test-service"} 1',
+        'pi_cloud_tenant_admission_lock_wait_seconds_count{service="test-service"} 1',
       );
       expect(body).toContain(
-        'agent_dock_event_durability_seconds_count{service="test-service",boundary="kafka",outcome="success"} 1',
+        'pi_cloud_event_durability_seconds_count{service="test-service",boundary="kafka",outcome="success"} 1',
       );
       expect(body).toContain(
-        'agent_dock_event_durability_group_events_count{service="test-service",boundary="kafka"} 1',
+        'pi_cloud_event_durability_group_events_count{service="test-service",boundary="kafka"} 1',
       );
       expect(body).toContain(
-        'agent_dock_event_projection_seconds_count{service="test-service",outcome="success"} 1',
+        'pi_cloud_event_projection_seconds_count{service="test-service",outcome="success"} 1',
       );
       expect(body).not.toContain("tenant_id");
     } finally {

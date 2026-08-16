@@ -1,11 +1,11 @@
-import type { Database } from "@agent-dock/database";
-import type { ExecuteTurnCommandMessage } from "@agent-dock/protocol";
+import type { Database } from "@pi-cloud/database";
+import type { ExecuteTurnCommandMessage } from "@pi-cloud/protocol";
 import {
   MAX_TOOL_OUTPUT_BYTES,
   MAX_WORKSPACE_PATCH_BYTES,
   MAX_WORKSPACE_SNAPSHOT_BYTES,
   parseEnvironmentValidationReport,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   type CapturedEnvironmentSandboxCheckpoint,
   type CapturedToolOutput,
@@ -13,11 +13,11 @@ import {
   type SandboxCheckpointStore,
   type SavedSandboxCheckpoint,
   type SavedToolOutputArtifact,
-} from "@agent-dock/sandbox-supervisor/sandbox-checkpoint";
-import { PiTurnError } from "@agent-dock/sandbox-supervisor/pi-turn-runtime";
-import { validateWorkspaceSnapshot } from "@agent-dock/sandbox-supervisor/workspace-snapshot";
+} from "@pi-cloud/sandbox-supervisor/sandbox-checkpoint";
+import { PiTurnError } from "@pi-cloud/sandbox-supervisor/pi-turn-runtime";
+import { validateWorkspaceSnapshot } from "@pi-cloud/sandbox-supervisor/workspace-snapshot";
 import { createHash, randomUUID } from "node:crypto";
-import { workspaceSnapshotFileCount } from "@agent-dock/workspace-runtime";
+import { workspaceSnapshotFileCount } from "@pi-cloud/workspace-runtime";
 import { lstat, link, mkdir, open, readFile, rm } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { sql, type Kysely, type Transaction } from "kysely";
@@ -90,7 +90,7 @@ function safeSize(value: string | number | bigint, maximum: number, description:
 
 function revisionFor(workspaceKey: string): string {
   return createHash("sha256")
-    .update("agent-dock.workspace-checkpoint-revision.v1\0")
+    .update("pi-cloud.workspace-checkpoint-revision.v1\0")
     .update(workspaceKey)
     .digest("hex");
 }
@@ -395,7 +395,7 @@ export class PostgresSandboxCheckpointStore implements SandboxCheckpointStore {
             sha256: workspaceReference.sha256,
             size_bytes: workspaceReference.sizeBytes,
             file_name: "workspace.json",
-            media_type: "application/vnd.agent-dock.workspace+json",
+            media_type: "application/vnd.pi-cloud.workspace+json",
           },
           ...(patchReference === undefined || patchArtifactId === undefined
             ? []

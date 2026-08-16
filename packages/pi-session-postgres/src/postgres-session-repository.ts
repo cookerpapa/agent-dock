@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   Session,
   SessionError,
@@ -12,7 +12,7 @@ import { sql, type Kysely, type Transaction } from "kysely";
 import type { ExecutionAuthority } from "./execution-authority.ts";
 import {
   PostgresPiSessionStorage,
-  type AgentDockPiSessionMetadata,
+  type PiCloudPiSessionMetadata,
 } from "./postgres-session-storage.ts";
 
 export type PostgresPiSessionRepositoryOptions = {
@@ -53,7 +53,7 @@ function completeEntry(row: StoredEntryRow, sequence: number): Entry {
 
 /** Tenant-scoped implementation of Pi 0.84.1's public SessionRepo port. */
 export class PostgresPiSessionRepository implements SessionRepo<
-  AgentDockPiSessionMetadata,
+  PiCloudPiSessionMetadata,
   PostgresPiSessionCreateOptions,
   void
 > {
@@ -69,7 +69,7 @@ export class PostgresPiSessionRepository implements SessionRepo<
 
   async create(
     options: PostgresPiSessionCreateOptions = {},
-  ): Promise<Session<AgentDockPiSessionMetadata>> {
+  ): Promise<Session<PiCloudPiSessionMetadata>> {
     const storage = await PostgresPiSessionStorage.create({
       database: this.#database,
       tenantId: this.#tenantId,
@@ -82,14 +82,14 @@ export class PostgresPiSessionRepository implements SessionRepo<
     return storage.asSession();
   }
 
-  async open(metadata: AgentDockPiSessionMetadata): Promise<Session<AgentDockPiSessionMetadata>> {
+  async open(metadata: PiCloudPiSessionMetadata): Promise<Session<PiCloudPiSessionMetadata>> {
     this.#requireTenant(metadata);
     const storage = this.#storage(metadata.id);
     await storage.getMetadata();
     return storage.asSession();
   }
 
-  async openById(sessionId: string): Promise<Session<AgentDockPiSessionMetadata>> {
+  async openById(sessionId: string): Promise<Session<PiCloudPiSessionMetadata>> {
     const storage = this.#storage(sessionId);
     await storage.getMetadata();
     return storage.asSession();
@@ -97,7 +97,7 @@ export class PostgresPiSessionRepository implements SessionRepo<
 
   async openOrCreate(
     options: PostgresPiSessionCreateOptions,
-  ): Promise<Session<AgentDockPiSessionMetadata>> {
+  ): Promise<Session<PiCloudPiSessionMetadata>> {
     if (options.id === undefined) return this.create(options);
     try {
       return await this.openById(options.id);
@@ -112,7 +112,7 @@ export class PostgresPiSessionRepository implements SessionRepo<
     }
   }
 
-  async list(): Promise<AgentDockPiSessionMetadata[]> {
+  async list(): Promise<PiCloudPiSessionMetadata[]> {
     const rows = await this.#database
       .selectFrom("pi_sessions")
       .select(["id", "tenant_id", "created_at_ms", "parent_session_id"])
@@ -128,7 +128,7 @@ export class PostgresPiSessionRepository implements SessionRepo<
     }));
   }
 
-  async delete(metadata: AgentDockPiSessionMetadata): Promise<void> {
+  async delete(metadata: PiCloudPiSessionMetadata): Promise<void> {
     this.#requireTenant(metadata);
     await this.#database.transaction().execute(async (transaction) => {
       await this.#authority?.assertCurrent(transaction);
@@ -141,9 +141,9 @@ export class PostgresPiSessionRepository implements SessionRepo<
   }
 
   async fork(
-    source: AgentDockPiSessionMetadata,
+    source: PiCloudPiSessionMetadata,
     options: ForkOptions & PostgresPiSessionCreateOptions,
-  ): Promise<Session<AgentDockPiSessionMetadata>> {
+  ): Promise<Session<PiCloudPiSessionMetadata>> {
     this.#requireTenant(source);
     const destinationId = options.id ?? uuidv7();
     await this.#database.transaction().execute(async (transaction) => {
@@ -162,7 +162,7 @@ export class PostgresPiSessionRepository implements SessionRepo<
     });
   }
 
-  #requireTenant(metadata: AgentDockPiSessionMetadata): void {
+  #requireTenant(metadata: PiCloudPiSessionMetadata): void {
     if (metadata.tenantId !== this.#tenantId) {
       throw new SessionError("not_found", `Pi Session was not found: ${metadata.id}`);
     }

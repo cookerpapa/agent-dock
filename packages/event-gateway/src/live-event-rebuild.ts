@@ -1,6 +1,6 @@
-import type { Database } from "@agent-dock/database";
-import type { LiveSessionEventStore } from "@agent-dock/runtime-core/live-session-event-store";
-import { parseWorkerEventLogEnvelope } from "@agent-dock/runtime-core/worker-event-envelope";
+import type { Database } from "@pi-cloud/database";
+import type { LiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
+import { parseWorkerEventLogEnvelope } from "@pi-cloud/runtime-core/worker-event-envelope";
 import { KafkaJS } from "@confluentinc/kafka-javascript";
 import { sql, type Kysely } from "kysely";
 import {
@@ -66,7 +66,7 @@ export async function rebuildLiveEventsFromKafka(
   const kafka = kafkaClient(options.kafka);
   const admin = kafka.admin();
   const consumer = kafka.consumer({
-    "group.id": `agent-dock-live-rebuild-${globalThis.crypto.randomUUID()}`,
+    "group.id": `pi-cloud-live-rebuild-${globalThis.crypto.randomUUID()}`,
     "allow.auto.create.topics": false,
     "auto.offset.reset": "earliest",
     "enable.auto.commit": false,
@@ -183,7 +183,7 @@ export async function repairLiveEventsIfNeeded(
   options: LiveEventRebuildOptions,
 ): Promise<LiveEventRepairReport> {
   return options.database.connection().execute(async (connection) => {
-    await sql`select pg_advisory_lock(hashtext('agent-dock'), hashtext('live-event-repair-v1'))`.execute(
+    await sql`select pg_advisory_lock(hashtext('pi-cloud'), hashtext('live-event-repair-v1'))`.execute(
       connection,
     );
     try {
@@ -201,7 +201,7 @@ export async function repairLiveEventsIfNeeded(
       }
       return { repaired: true, missingSessions: missing.length, rebuild };
     } finally {
-      await sql`select pg_advisory_unlock(hashtext('agent-dock'), hashtext('live-event-repair-v1'))`.execute(
+      await sql`select pg_advisory_unlock(hashtext('pi-cloud'), hashtext('live-event-repair-v1'))`.execute(
         connection,
       );
     }

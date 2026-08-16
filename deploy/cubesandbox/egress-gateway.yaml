@@ -1,30 +1,30 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: agent-dock-cube-egress-gateway
+  name: pi-cloud-cube-egress-gateway
   namespace: cube-system
 automountServiceAccountToken: false
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: agent-dock-cube-egress-gateway
+  name: pi-cloud-cube-egress-gateway
   namespace: cube-system
   labels:
-    app.kubernetes.io/name: agent-dock-cube-egress-gateway
-    app.kubernetes.io/part-of: agent-dock
+    app.kubernetes.io/name: pi-cloud-cube-egress-gateway
+    app.kubernetes.io/part-of: pi-cloud
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: agent-dock-cube-egress-gateway
+      app.kubernetes.io/name: pi-cloud-cube-egress-gateway
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: agent-dock-cube-egress-gateway
-        app.kubernetes.io/part-of: agent-dock
+        app.kubernetes.io/name: pi-cloud-cube-egress-gateway
+        app.kubernetes.io/part-of: pi-cloud
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
@@ -33,7 +33,7 @@ spec:
       hostPID: false
       dnsPolicy: Default
       restartPolicy: Always
-      serviceAccountName: agent-dock-cube-egress-gateway
+      serviceAccountName: pi-cloud-cube-egress-gateway
       terminationGracePeriodSeconds: 10
       nodeSelector:
         cube.tencent.com/cube-node: "true"
@@ -46,18 +46,18 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gateway
-          image: agent-dock/cube-egress-gateway:local
+          image: pi-cloud/cube-egress-gateway:local
           imagePullPolicy: Never
           env:
-            - name: AGENT_DOCK_CUBE_EGRESS_HOST
+            - name: PI_CLOUD_CUBE_EGRESS_HOST
               value: 10.255.255.254
-            - name: AGENT_DOCK_CUBE_EGRESS_PORT
+            - name: PI_CLOUD_CUBE_EGRESS_PORT
               value: "3128"
-            - name: AGENT_DOCK_CUBE_EGRESS_CONTROL_PLANE_URL
+            - name: PI_CLOUD_CUBE_EGRESS_CONTROL_PLANE_URL
               value: http://127.0.0.1:8080/v1/internal/cube-egress-configuration
-            - name: AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE
-              value: /run/agent-dock-secrets/config-token
-            - name: AGENT_DOCK_CUBE_EGRESS_POLL_INTERVAL_MS
+            - name: PI_CLOUD_CUBE_EGRESS_CONFIG_TOKEN_FILE
+              value: /run/pi-cloud-secrets/config-token
+            - name: PI_CLOUD_CUBE_EGRESS_POLL_INTERVAL_MS
               value: "1000"
           ports:
             - name: proxy
@@ -92,7 +92,7 @@ spec:
               drop: [ALL]
           volumeMounts:
             - name: config-token
-              mountPath: /run/agent-dock-secrets/config-token
+              mountPath: /run/pi-cloud-secrets/config-token
               subPath: config-token
               readOnly: true
             - name: tmp
@@ -100,7 +100,7 @@ spec:
       volumes:
         - name: config-token
           secret:
-            secretName: agent-dock-cube-egress-config
+            secretName: pi-cloud-cube-egress-config
             defaultMode: 0440
         - name: tmp
           emptyDir:

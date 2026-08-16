@@ -1,15 +1,15 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import type {
   EnvironmentRuntimeSnapshot,
   EnvironmentValidationReport,
   ExecuteTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -47,7 +47,7 @@ const IDS = {
 const ENVIRONMENT: EnvironmentRuntimeSnapshot = {
   environmentVersionId: IDS.environment,
   versionNumber: 1,
-  profileKey: "agent-dock-fullstack",
+  profileKey: "pi-cloud-fullstack",
   profileVersion: "1",
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -56,7 +56,7 @@ const ENVIRONMENT: EnvironmentRuntimeSnapshot = {
 };
 
 const ENVIRONMENT_VALIDATION: EnvironmentValidationReport = {
-  profileKey: "agent-dock-fullstack",
+  profileKey: "pi-cloud-fullstack",
   profileVersion: "1",
   imageRevision: "development",
   specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -104,8 +104,8 @@ function command(turn: 1 | 2): ExecuteTurnCommandMessage {
       sandboxRetention: "ephemeral",
       model: {
         profileId: IDS.profile,
-        provider: "agent-dock-fake",
-        modelId: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        modelId: "pi-cloud-fake",
         thinkingLevel: "off",
         credentialBindingId: IDS.credential,
         credentialBindingVersion: 1,
@@ -120,7 +120,7 @@ function workspace(label: string): Uint8Array {
   const fileHash = createHash("sha256").update(label).digest("hex");
   return Buffer.from(
     `${JSON.stringify({
-      format: "agent-dock.workspace-manifest.v1",
+      format: "pi-cloud.workspace-manifest.v1",
       files: [
         {
           path: "state.txt",
@@ -160,7 +160,7 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
       tenant_id: IDS.tenant,
       project_id: IDS.project,
       version_number: 1,
-      profile_key: "agent-dock-fullstack",
+      profile_key: "pi-cloud-fullstack",
       profile_version: "1",
       image_revision: "development",
       spec_sha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -174,7 +174,7 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
     .values({
       id: IDS.credential,
       tenant_id: IDS.tenant,
-      provider: "agent-dock-fake",
+      provider: "pi-cloud-fake",
       kind: "api_key",
       secret_ref: "test://checkpoint",
       version: 1,
@@ -187,8 +187,8 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
       id: IDS.profile,
       tenant_id: IDS.tenant,
       name: "checkpoint-profile",
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       default_thinking_level: "off",
       allowed_thinking_levels: ["off"],
       credential_binding_id: IDS.credential,
@@ -223,8 +223,8 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
         input_kind: "prompt",
         input_text: "turn one",
         model_profile_id: IDS.profile,
-        provider: "agent-dock-fake",
-        model_id: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        model_id: "pi-cloud-fake",
         thinking_level: "off",
         credential_binding_id: IDS.credential,
         credential_binding_version: 1,
@@ -237,8 +237,8 @@ async function seed(targetDatabase: Kysely<Database> = database): Promise<void> 
         input_kind: "prompt",
         input_text: "turn two",
         model_profile_id: IDS.profile,
-        provider: "agent-dock-fake",
-        model_id: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        model_id: "pi-cloud-fake",
         thinking_level: "off",
         credential_binding_id: IDS.credential,
         credential_binding_version: 1,
@@ -388,7 +388,7 @@ async function insertCompletedEvent(
     .execute();
 }
 
-const s3Only = process.env.AGENT_DOCK_TEST_S3_ONLY === "true";
+const s3Only = process.env.PI_CLOUD_TEST_S3_ONLY === "true";
 
 beforeAll(async () => {
   if (s3Only) return;
@@ -400,7 +400,7 @@ beforeAll(async () => {
     maxConnections: 2,
   });
   await runMigrations(database, "up");
-  objectRoot = await mkdtemp(resolve(tmpdir(), "agent-dock-checkpoint-store-test-"));
+  objectRoot = await mkdtemp(resolve(tmpdir(), "pi-cloud-checkpoint-store-test-"));
   await seed();
 }, 30_000);
 

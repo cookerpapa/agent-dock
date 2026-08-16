@@ -5,7 +5,7 @@ Date: 2026-07-26
 ## Problem
 
 The production Tool checkpoint path still serializes every regular Workspace
-file into one `agent-dock.workspace-manifest.v1` JSON document. The format is
+file into one `pi-cloud.workspace-manifest.v1` JSON document. The format is
 intentionally bounded to 512 files, 512 KiB per file and 2 MiB total. A real
 Cube Run cloned `temporalio/temporal`, completed its model calls and Tool
 operations, then failed during checkpoint capture because the repository was
@@ -49,20 +49,20 @@ behind an adapter: Velero's
 the Kopia uploader and repository modules and creates a separate repository
 prefix per namespace.
 
-It is not the best first authority for AgentDock:
+It is not the best first authority for PiCloud:
 
 - it adds a second repository format, server, user lifecycle, repository
   password, cache, maintenance and garbage-collection plane beside MinIO and
   Cube;
 - the untrusted guest would need a scoped repository credential and a network
   route, or a privileged data mover would need filesystem access to the guest;
-- Kopia's snapshot publication does not replace AgentDock's RunAttempt fence,
+- Kopia's snapshot publication does not replace PiCloud's RunAttempt fence,
   Workspace-version CAS or PostgreSQL commit;
 - adopting Velero's node-agent topology would require a host/PVC mount and in
   some deployments privileged access, while Cube's Workspace lives inside a
   microVM disk.
 
-Kopia remains the preferred future portable backup uploader if AgentDock adds a
+Kopia remains the preferred future portable backup uploader if PiCloud adds a
 trusted Cube volume export/data-mover API or a multi-node object-backed Cube
 snapshot store.
 
@@ -77,7 +77,7 @@ locks.
 
 It has the same guest-credential/data-mover mismatch as Kopia, introduces
 repository locks and maintenance into the Run critical path, and offers no
-AgentDock fencing or Workspace-head CAS. It is therefore rejected for the
+PiCloud fencing or Workspace-head CAS. It is therefore rejected for the
 ordinary interactive checkpoint path.
 
 ### Remote Execution API CAS
@@ -90,7 +90,7 @@ blobs can be queried before upload, and large bytes use streaming APIs.
 NativeLink, Buildbarn and Buildfarm are mature implementation options.
 
 This is the best model for a future provider-neutral, portable Workspace CAS,
-but a full REAPI service is broader than AgentDock currently needs. Adding it
+but a full REAPI service is broader than PiCloud currently needs. Adding it
 now would duplicate the existing S3 object plane and still require a streaming
 bridge from the Cube guest. The useful design constraints are retained:
 immutable data, bounded references in control messages, digest verification,
@@ -98,14 +98,14 @@ and an external transactional head.
 
 ### CubeSandbox native snapshots
 
-AgentDock already pins and operates
+PiCloud already pins and operates
 [TencentCloud/CubeSandbox](https://github.com/TencentCloud/CubeSandbox).
 Cube v0.6.0 documents
 [snapshot, clone and rollback](https://github.com/TencentCloud/CubeSandbox/blob/v0.6.0/docs/guide/snapshot-rollback-clone.md).
 `create_snapshot()` persists the complete filesystem and memory independently
 of the source Sandbox, and a snapshot ID can be supplied as the template for a
 new Sandbox. Cube's CoW/reflink implementation avoids serializing the
-Workspace through AgentDock's JSON control protocol.
+Workspace through PiCloud's JSON control protocol.
 
 This is the closest fit for the current primary Provider:
 
@@ -131,7 +131,7 @@ file/PR behavior for existing small Workspaces while removing the
 large-repository settlement bottleneck.
 
 The checkpoint artifact stored in MinIO is a small
-`agent-dock.workspace-cube-snapshot.v1` reference containing:
+`pi-cloud.workspace-cube-snapshot.v1` reference containing:
 
 - exact tenant/Workspace and environment bindings;
 - Cube snapshot/source identities;
@@ -156,7 +156,7 @@ PostgreSQL remains the application authority. Creating a Cube snapshot may
 leave an orphan after a failed/stale commit, but cannot advance the Workspace
 head. Only the existing fenced checkpoint transaction can do that.
 
-Legacy `agent-dock.workspace-manifest.v1` checkpoints remain read-compatible
+Legacy `pi-cloud.workspace-manifest.v1` checkpoints remain read-compatible
 and writable for small ordinary Workspaces, migration, imports and the gVisor
 regression Provider.
 

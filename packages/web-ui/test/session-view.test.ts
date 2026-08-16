@@ -1,14 +1,14 @@
 import type {
   AcceptedTurnResource,
-  AgentDockEvent,
+  PiCloudEvent,
   ConversationDetailResource,
   ProjectResource,
   SessionResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
 import {
   activeTurn,
@@ -30,7 +30,7 @@ const project: ProjectResource = {
   environment: {
     environmentVersionId: "30000000-0000-4000-8000-000000000002",
     versionNumber: 1,
-    profileKey: "agent-dock-fullstack",
+    profileKey: "pi-cloud-fullstack",
     profileVersion: "1",
     imageRevision: "development",
     specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -64,14 +64,14 @@ const accepted: AcceptedTurnResource = {
   replayed: false,
 };
 
-function envelope<Event extends AgentDockEvent>(
+function envelope<Event extends PiCloudEvent>(
   sequence: number,
   value: Omit<
     Event,
     "schemaVersion" | "eventId" | "sessionId" | "turnId" | "agentId" | "seq" | "occurredAt"
   > &
     Partial<Pick<Event, "turnId">>,
-): AgentDockEvent {
+): PiCloudEvent {
   return {
     schemaVersion: 1,
     eventId: `70000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
@@ -82,7 +82,7 @@ function envelope<Event extends AgentDockEvent>(
     occurredAt: CREATED_AT,
     type: value.type,
     payload: value.payload,
-  } as AgentDockEvent;
+  } as PiCloudEvent;
 }
 
 function preparedState(): SessionViewState {
@@ -343,7 +343,7 @@ describe("session transcript reducer", () => {
   });
 
   it("keeps ordered text/tool lifecycle and the final bounded patch", () => {
-    const events: AgentDockEvent[] = [
+    const events: PiCloudEvent[] = [
       envelope(1, { type: "turn.started", payload: { inputKind: "prompt" } }),
       envelope(2, { type: "assistant.text.delta", payload: { text: "Inspecting " } }),
       envelope(3, { type: "assistant.text.delta", payload: { text: "tests." } }),
@@ -397,12 +397,12 @@ describe("session transcript reducer", () => {
       }),
     ]);
     expect(
-      sessionViewReducer(state, { type: "stream.event", event: events[5] as AgentDockEvent }),
+      sessionViewReducer(state, { type: "stream.event", event: events[5] as PiCloudEvent }),
     ).toBe(state);
   });
 
   it("marks an in-flight Tool unknown when its Run fails", () => {
-    const events: AgentDockEvent[] = [
+    const events: PiCloudEvent[] = [
       envelope(1, { type: "turn.started", payload: { inputKind: "prompt" } }),
       envelope(2, {
         type: "tool.started",
@@ -423,7 +423,7 @@ describe("session transcript reducer", () => {
   });
 
   it("assembles streamed tool input before execution and reconciles it with tool.started", () => {
-    const events: AgentDockEvent[] = [
+    const events: PiCloudEvent[] = [
       envelope(1, { type: "turn.started", payload: { inputKind: "prompt" } }),
       envelope(2, {
         type: "tool.input.delta",
@@ -537,7 +537,7 @@ describe("session transcript reducer", () => {
     const lateEvent = {
       ...envelope(1, { type: "assistant.text.delta", payload: { text: "late" } }),
       sessionId: "90000000-0000-4000-8000-000000000001",
-    } as AgentDockEvent;
+    } as PiCloudEvent;
     expect(sessionViewReducer(state, { type: "stream.event", event: lateEvent })).toBe(state);
   });
 });

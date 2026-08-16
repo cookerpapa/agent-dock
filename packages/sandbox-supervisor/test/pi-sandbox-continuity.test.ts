@@ -40,7 +40,7 @@ function messages(manager: SessionManager, customType: string) {
 
 describe("Pi per-Step runtime world-state harness", () => {
   it("emits one minimal reset marker per lost active sandbox", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "agent-dock-pi-sandbox-continuity-"));
+    const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-pi-sandbox-continuity-"));
     try {
       const manager = SessionManager.create("/workspace", root);
 
@@ -95,7 +95,7 @@ describe("Pi per-Step runtime world-state harness", () => {
   });
 
   it("emits a later reset only after a fresh sandbox became active", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "agent-dock-pi-sandbox-generation-"));
+    const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-pi-sandbox-generation-"));
     try {
       const manager = SessionManager.create("/workspace", root);
       const first = new PiStepWorldStateController(
@@ -124,7 +124,7 @@ describe("Pi per-Step runtime world-state harness", () => {
   });
 
   it("projects environment and Tool-policy changes without exposing hashes", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "agent-dock-pi-world-diff-"));
+    const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-pi-world-diff-"));
     try {
       const manager = SessionManager.create("/workspace", root);
       new PiStepWorldStateController(

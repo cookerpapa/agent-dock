@@ -1,5 +1,5 @@
-import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
-import { activeTraceCarrier, withSpan, type AgentDockMetrics } from "@agent-dock/observability";
+import { FAKE_MODEL_API_KEY, FakeModelServer } from "@pi-cloud/fake-model-server";
+import { activeTraceCarrier, withSpan, type PiCloudMetrics } from "@pi-cloud/observability";
 import {
   type ExecuteTurnCommandMessage,
   type ToolSandboxAssignment,
@@ -7,13 +7,13 @@ import {
   type ToolSandboxCreateRequest,
   type ToolSandboxCreateResponse,
   type WorkspacePatch,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   decodeWorkspaceSnapshotBlob,
   encodeWorkspaceSnapshotBlob,
   parsePersistentVolumeReference,
   parseWorkspaceSnapshot,
-} from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/workspace-runtime";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { SupervisorTurnRunner } from "./local-sandbox-supervisor.ts";
@@ -73,7 +73,7 @@ export function projectInstructionsFromSnapshot(
     return undefined;
   }
   if (content.includes("\0") || content.trim().length === 0) return undefined;
-  return `${content}${file.content.byteLength > bounded.byteLength ? "\n[AGENTS.md truncated by AgentDock]" : ""}`;
+  return `${content}${file.content.byteLength > bounded.byteLength ? "\n[AGENTS.md truncated by PiCloud]" : ""}`;
 }
 
 export interface ToolBrokerBoundary {
@@ -107,7 +107,7 @@ export type RemoteToolSandboxTurnRunnerOptions = {
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
   idGenerator?: () => string;
-  metrics?: AgentDockMetrics;
+  metrics?: PiCloudMetrics;
 };
 
 function assignment(
@@ -162,7 +162,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   readonly #requestTimeoutMs: number | undefined;
   readonly #turnTimeoutMs: number | undefined;
   readonly #idGenerator: () => string;
-  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #metrics: PiCloudMetrics | undefined;
   readonly #activePiRunners = new Map<
     string,
     {
@@ -213,15 +213,15 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     const startedAt = performance.now();
     try {
       const result = await withSpan({
-        serviceName: "agent-dock-trusted-runner",
+        serviceName: "pi-cloud-trusted-runner",
         name: "run.execute",
         ...(command.payload.traceContext === undefined
           ? {}
           : { parent: command.payload.traceContext }),
         attributes: {
-          "agent_dock.run.id": command.payload.runId,
-          "agent_dock.attempt.id": command.payload.attemptId,
-          "agent_dock.session.id": command.payload.sessionId,
+          "pi_cloud.run.id": command.payload.runId,
+          "pi_cloud.attempt.id": command.payload.attemptId,
+          "pi_cloud.session.id": command.payload.sessionId,
         },
         run: () => this.#run(command, publishEvent, signal, slot.resolve),
       });
@@ -338,8 +338,8 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     const cloudTurn = createCloudTurnContext(command, loadedCheckpoint?.workspaceRevision);
 
     const usesEmbeddedFake =
-      command.payload.model.provider === "agent-dock-fake" &&
-      command.payload.model.modelId === "agent-dock-fake";
+      command.payload.model.provider === "pi-cloud-fake" &&
+      command.payload.model.modelId === "pi-cloud-fake";
     let modelRuntimeLease: TrustedModelRuntimeLease | undefined;
     if (!usesEmbeddedFake) {
       if (this.#modelRuntimeLeaseResolver === undefined) {

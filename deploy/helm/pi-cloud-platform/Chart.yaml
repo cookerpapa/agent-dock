@@ -1,0 +1,17 @@
+apiVersion: v2
+name: pi-cloud-platform
+description: Distributed trusted control and execution plane for PiCloud
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.30.0-0"
+dependencies:
+  - name: pi-cloud-pi-worker-pool
+    alias: pi-workers
+    version: 0.1.0
+    repository: file://../pi-cloud-pi-worker-pool
+    condition: piWorkersEnabled
+annotations:
+  pi-cloud.io/scheduler: postgresql-run-queue
+  pi-cloud.io/tool-runtime: cubesandbox-kvm
+  pi-cloud.io/state-authority: postgresql-and-persistent-cube-volume

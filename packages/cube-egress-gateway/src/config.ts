@@ -73,18 +73,13 @@ async function serviceToken(path: string | undefined): Promise<string> {
 export async function loadCubeEgressGatewayConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<CubeEgressGatewayConfig> {
-  const host = environment.AGENT_DOCK_CUBE_EGRESS_HOST ?? "10.255.255.254";
-  if (!isIPv4(host)) throw new TypeError("AGENT_DOCK_CUBE_EGRESS_HOST must be IPv4");
+  const host = environment.PI_CLOUD_CUBE_EGRESS_HOST ?? "10.255.255.254";
+  if (!isIPv4(host)) throw new TypeError("PI_CLOUD_CUBE_EGRESS_HOST must be IPv4");
   return {
     host,
-    port: integer(environment.AGENT_DOCK_CUBE_EGRESS_PORT, 3_128, 1, 65_535),
-    controlPlaneUrl: controlPlaneUrl(environment.AGENT_DOCK_CUBE_EGRESS_CONTROL_PLANE_URL),
-    serviceToken: await serviceToken(environment.AGENT_DOCK_CUBE_EGRESS_CONFIG_TOKEN_FILE),
-    pollIntervalMs: integer(
-      environment.AGENT_DOCK_CUBE_EGRESS_POLL_INTERVAL_MS,
-      1_000,
-      250,
-      60_000,
-    ),
+    port: integer(environment.PI_CLOUD_CUBE_EGRESS_PORT, 3_128, 1, 65_535),
+    controlPlaneUrl: controlPlaneUrl(environment.PI_CLOUD_CUBE_EGRESS_CONTROL_PLANE_URL),
+    serviceToken: await serviceToken(environment.PI_CLOUD_CUBE_EGRESS_CONFIG_TOKEN_FILE),
+    pollIntervalMs: integer(environment.PI_CLOUD_CUBE_EGRESS_POLL_INTERVAL_MS, 1_000, 250, 60_000),
   };
 }

@@ -1,4 +1,4 @@
-import { createDatabase, runMigrations, type Database } from "@agent-dock/database";
+import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import type { Kysely } from "kysely";
@@ -33,7 +33,7 @@ async function seedTenant(options: {
     .values({
       id: options.bindingId,
       tenant_id: options.tenantId,
-      provider: "agent-dock-fake",
+      provider: "pi-cloud-fake",
       kind: "brokered",
       secret_ref: `broker://${options.slug}/fake`,
       version: 1,
@@ -46,8 +46,8 @@ async function seedTenant(options: {
       id: options.profileId,
       tenant_id: options.tenantId,
       name: "default",
-      provider: "agent-dock-fake",
-      model_id: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      model_id: "pi-cloud-fake",
       default_thinking_level: "off",
       allowed_thinking_levels: ["off"],
       credential_binding_id: options.bindingId,

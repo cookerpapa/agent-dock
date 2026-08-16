@@ -1,5 +1,5 @@
 {
-  "name": "@agent-dock/protocol",
+  "name": "@pi-cloud/protocol",
   "version": "0.1.0",
   "private": true,
   "type": "module",

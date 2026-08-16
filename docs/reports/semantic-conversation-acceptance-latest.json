@@ -40,7 +40,7 @@
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     },
-    "sandboxRuntimeClass": "agent-dock-gvisor"
+    "sandboxRuntimeClass": "pi-cloud-gvisor"
   },
   "semanticConversation": {
     "projectionCount": 2,

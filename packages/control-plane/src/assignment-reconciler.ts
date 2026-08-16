@@ -1,4 +1,4 @@
-import type { Database } from "@agent-dock/database";
+import type { Database } from "@pi-cloud/database";
 import {
   transitionAgentNode,
   transitionApproval,
@@ -9,20 +9,20 @@ import {
   transitionSession,
   transitionTurn,
   type SandboxState,
-} from "@agent-dock/domain";
+} from "@pi-cloud/domain";
 import type {
   SandboxAssignmentInventory,
   SandboxRuntimeAssignment,
-} from "@agent-dock/sandbox-supervisor/sandbox-assignment-inventory";
+} from "@pi-cloud/sandbox-supervisor/sandbox-assignment-inventory";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
-import { transitionCurrentRunAttempt } from "@agent-dock/runtime-core/run-attempt-state";
-import type { SessionEventNotificationPublisher } from "@agent-dock/runtime-core/session-event-notifications";
-import { commitTerminalTurnEvent } from "@agent-dock/runtime-core/terminal-turn-event";
+import { transitionCurrentRunAttempt } from "@pi-cloud/runtime-core/run-attempt-state";
+import type { SessionEventNotificationPublisher } from "@pi-cloud/runtime-core/session-event-notifications";
+import { commitTerminalTurnEvent } from "@pi-cloud/runtime-core/terminal-turn-event";
 import type {
   PreparedTerminalTurnProjection,
   TerminalTurnProjectionSource,
-} from "@agent-dock/runtime-core/terminal-turn-projection";
+} from "@pi-cloud/runtime-core/terminal-turn-projection";
 
 const ASSIGNMENT_LOST = "assignment_lost";
 const ASSIGNMENT_LOST_MESSAGE =

@@ -2,8 +2,8 @@ import type {
   Database,
   SandboxRetirementReason,
   SupervisorConnectionCloseReason,
-} from "@agent-dock/database";
-import { transitionSandbox, type SandboxState } from "@agent-dock/domain";
+} from "@pi-cloud/database";
+import { transitionSandbox, type SandboxState } from "@pi-cloud/domain";
 import {
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
@@ -11,8 +11,8 @@ import {
   type SupervisorHeartbeatAckMessage,
   type SupervisorRegisterMessage,
   type SupervisorRegisteredMessage,
-} from "@agent-dock/protocol";
-import { PINNED_PI_CODING_AGENT_VERSION } from "@agent-dock/sandbox-supervisor/pi-turn-runtime";
+} from "@pi-cloud/protocol";
+import { PINNED_PI_CODING_AGENT_VERSION } from "@pi-cloud/sandbox-supervisor/pi-turn-runtime";
 import { createHash } from "node:crypto";
 import type { Kysely, Transaction } from "kysely";
 import type { SandboxRetirementResult } from "./assignment-reconciler.ts";
@@ -20,7 +20,7 @@ import {
   SessionLeaseCoordinator,
   SessionLeaseCoordinatorError,
   type SupervisorConnectionGuard,
-} from "@agent-dock/runtime-core/session-lease-coordinator";
+} from "@pi-cloud/runtime-core/session-lease-coordinator";
 
 const DEFAULT_SUPERVISOR_VERSION = "0.1.0";
 const DEFAULT_PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";

@@ -26,7 +26,7 @@ const baseUrl = httpUrl("--base-url", "http://127.0.0.1:8080");
 const prometheusUrl = httpUrl("--prometheus-url", "http://127.0.0.1:9090");
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 const tokenFile = resolve(argument("--token-file", resolve(runtimeDirectory, "secrets/api-token")));
 const outputJson = resolve(
@@ -178,7 +178,7 @@ await new Promise((resolvePromise) => setTimeout(resolvePromise, 16_000));
 const metrics = await prometheusSnapshot();
 const allSummaries = stages.flatMap((stage) => [stage.sessionCreation, stage.conversationRead]);
 const report = {
-  format: "agent-dock.control-plane-load-report.v1",
+  format: "pi-cloud.control-plane-load-report.v1",
   generatedAt: new Date().toISOString(),
   evaluationId,
   methodology: "loopback_http_cold_session_admission_and_tenant_scoped_reads",
@@ -194,7 +194,7 @@ const report = {
   prometheus: metrics,
 };
 const markdown =
-  `# AgentDock control-plane load evaluation\n\n` +
+  `# PiCloud control-plane load evaluation\n\n` +
   `Generated: ${report.generatedAt}\n\n` +
   `This loopback test measures tenant-scoped cold Session admission and conversation reads at 10/50/100 simultaneous HTTP requests. ` +
   `It does **not** claim 100 concurrent model/sandbox Runs; active execution capacity is evaluated separately.\n\n` +

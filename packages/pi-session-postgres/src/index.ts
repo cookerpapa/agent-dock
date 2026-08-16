@@ -1,6 +1,6 @@
 export {
   PostgresPiSessionStorage,
-  type AgentDockPiSessionMetadata,
+  type PiCloudPiSessionMetadata,
   type PostgresPiSessionStorageOptions,
 } from "./postgres-session-storage.ts";
 export type { ActiveExecutionAuthority, ExecutionAuthority } from "./execution-authority.ts";

@@ -1,4 +1,4 @@
-import { createPersistentVolumeReference } from "@agent-dock/workspace-runtime";
+import { createPersistentVolumeReference } from "@pi-cloud/workspace-runtime";
 import { describe, expect, it } from "vitest";
 import { projectInstructionsFromSnapshot } from "../src/remote-tool-sandbox-turn-runner.ts";
 

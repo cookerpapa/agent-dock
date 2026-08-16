@@ -1,11 +1,11 @@
-import { FAKE_MODEL_API_KEY, FakeModelServer } from "@agent-dock/fake-model-server";
+import { FAKE_MODEL_API_KEY, FakeModelServer } from "@pi-cloud/fake-model-server";
 import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
-} from "@agent-dock/protocol";
-import type { CloudAgentExecutionAuthority } from "@agent-dock/pi-session-postgres";
+} from "@pi-cloud/protocol";
+import type { CloudAgentExecutionAuthority } from "@pi-cloud/pi-session-postgres";
 import { InMemorySessionStorage, Session } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import {
@@ -38,8 +38,8 @@ const command: ExecuteTurnCommandMessage = {
     sandboxRetention: "ephemeral",
     model: {
       profileId: "profile-1",
-      provider: "agent-dock-fake",
-      modelId: "agent-dock-fake",
+      provider: "pi-cloud-fake",
+      modelId: "pi-cloud-fake",
       thinkingLevel: "off",
       credentialBindingId: "credential-1",
       credentialBindingVersion: 1,
@@ -47,7 +47,7 @@ const command: ExecuteTurnCommandMessage = {
     environment: {
       environmentVersionId: "66666666-6666-4666-8666-666666666666",
       versionNumber: 1,
-      profileKey: "agent-dock-fullstack",
+      profileKey: "pi-cloud-fullstack",
       profileVersion: "1",
       imageRevision: "development",
       specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -90,8 +90,8 @@ describe("PiCloudTurnRunner integration", () => {
     const sourceEvents: string[] = [];
     const runner = new PiCloudTurnRunner({
       resolveModelRuntime: () => ({
-        provider: "agent-dock-fake",
-        modelId: "agent-dock-fake",
+        provider: "pi-cloud-fake",
+        modelId: "pi-cloud-fake",
         baseUrl: fake.baseUrl,
         api: "openai-completions",
         apiKey: FAKE_MODEL_API_KEY,

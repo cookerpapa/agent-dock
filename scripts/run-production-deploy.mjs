@@ -43,7 +43,7 @@ await run("scripts/production-compose.mjs", ["up", "--detach", "--wait", "--remo
 
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 const environment = Object.fromEntries(
   (await readFile(resolve(runtimeDirectory, ".env"), "utf8"))
@@ -55,13 +55,13 @@ const environment = Object.fromEntries(
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
 );
-const bindAddress = environment.AGENT_DOCK_HTTP_BIND_ADDRESS;
-const port = environment.AGENT_DOCK_HTTP_PORT;
+const bindAddress = environment.PI_CLOUD_HTTP_BIND_ADDRESS;
+const port = environment.PI_CLOUD_HTTP_PORT;
 if (bindAddress === undefined || port === undefined) {
   throw new Error("Production HTTP endpoint configuration is missing");
 }
-if (environment.AGENT_DOCK_PI_WORKER_DEPLOYMENT === "kubernetes") {
+if (environment.PI_CLOUD_PI_WORKER_DEPLOYMENT === "kubernetes") {
   await run("scripts/local-kubernetes-pi-workers.mjs", ["up"]);
 }
 const displayHost = bindAddress.includes(":") ? `[${bindAddress}]` : bindAddress;
-process.stdout.write(`AgentDock production deployment is ready at http://${displayHost}:${port}\n`);
+process.stdout.write(`PiCloud production deployment is ready at http://${displayHost}:${port}\n`);

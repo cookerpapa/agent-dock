@@ -4,7 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import {
   parseWorkspaceTerminalServerFrame,
   type WorkspaceTerminalClientFrame,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type TerminalState = "disconnected" | "connecting" | "ready" | "failed";

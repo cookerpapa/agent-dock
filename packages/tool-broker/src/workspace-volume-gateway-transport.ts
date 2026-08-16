@@ -1,10 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import type { AgentDockMetrics } from "@agent-dock/observability";
-import { MAX_WORKSPACE_PATCH_BYTES, type WorkspacePatch } from "@agent-dock/protocol";
+import type { PiCloudMetrics } from "@pi-cloud/observability";
+import { MAX_WORKSPACE_PATCH_BYTES, type WorkspacePatch } from "@pi-cloud/protocol";
 import {
   validateWorkspaceFileList,
   type WorkspaceSnapshotFileMetadata,
-} from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/workspace-runtime";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import PQueue from "p-queue";
 import { fetch } from "undici";
@@ -37,7 +37,7 @@ export type WorkspaceVolumeGatewayServerOptions = Readonly<{
   maximumConcurrentOperations?: number;
   maximumQueuedOperations?: number;
   queueWaitTimeoutMs?: number;
-  metrics?: AgentDockMetrics;
+  metrics?: PiCloudMetrics;
 }>;
 
 type WorkspaceVolumeGatewayOperation =
@@ -59,7 +59,7 @@ export class WorkspaceVolumeGatewayServer {
   readonly #queue: PQueue;
   readonly #maximumQueuedOperations: number;
   readonly #queueWaitTimeoutMs: number;
-  readonly #metrics: AgentDockMetrics | undefined;
+  readonly #metrics: PiCloudMetrics | undefined;
   readonly #shutdown = new AbortController();
   #accepting = true;
   #address: string | undefined;

@@ -12,8 +12,8 @@ COPY packages/web-ui/index.html packages/web-ui/index.html
 COPY packages/web-ui/src packages/web-ui/src
 COPY packages/web-ui/tsconfig.json packages/web-ui/tsconfig.json
 COPY packages/web-ui/vite.config.ts packages/web-ui/vite.config.ts
-ENV VITE_AGENT_DOCK_AUTH_REQUIRED=true
-RUN npm run build --workspace @agent-dock/web-ui
+ENV VITE_PI_CLOUD_AUTH_REQUIRED=true
+RUN npm run build --workspace @pi-cloud/web-ui
 
 FROM golang:1.26.6-alpine3.23@sha256:5978cc992ad5ef96a7469713c8af849c1433824761ce3be2c56381403cd8d9a3 AS caddy-builder
 
@@ -47,18 +47,18 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     done \
     && test "$downloaded" = 1 \
     && go build -trimpath \
-      -ldflags="-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4-agent-dock" \
+      -ldflags="-s -w -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4-pi-cloud" \
       -o /go/bin/caddy ./cmd/caddy \
-    && /go/bin/caddy version | grep -F "v2.11.4-agent-dock"
+    && /go/bin/caddy version | grep -F "v2.11.4-pi-cloud"
 
 FROM alpine:3.23.5@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
-ARG AGENT_DOCK_VERSION=development
-ARG AGENT_DOCK_REVISION=unknown
-LABEL org.opencontainers.image.title="AgentDock production web ingress" \
+ARG PI_CLOUD_VERSION=development
+ARG PI_CLOUD_REVISION=unknown
+LABEL org.opencontainers.image.title="PiCloud production web ingress" \
       org.opencontainers.image.description="Static authenticated Web UI and narrow /v1 reverse proxy" \
-      org.opencontainers.image.version="${AGENT_DOCK_VERSION}" \
-      org.opencontainers.image.revision="${AGENT_DOCK_REVISION}"
+      org.opencontainers.image.version="${PI_CLOUD_VERSION}" \
+      org.opencontainers.image.revision="${PI_CLOUD_REVISION}"
 
 ENV HOME=/tmp \
     XDG_CONFIG_HOME=/tmp/caddy-config \

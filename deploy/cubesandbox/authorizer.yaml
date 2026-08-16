@@ -1,17 +1,17 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: agent-dock-cube-api-authorizer
+  name: pi-cloud-cube-api-authorizer
   namespace: cube-system
 automountServiceAccountToken: false
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: agent-dock-cube-api-authorizer
+  name: pi-cloud-cube-api-authorizer
   namespace: cube-system
   labels:
-    app.kubernetes.io/name: agent-dock-cube-api-authorizer
+    app.kubernetes.io/name: pi-cloud-cube-api-authorizer
     app.kubernetes.io/component: cube-api-authorizer
 spec:
   replicas: 2
@@ -22,16 +22,16 @@ spec:
       maxSurge: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: agent-dock-cube-api-authorizer
+      app.kubernetes.io/name: pi-cloud-cube-api-authorizer
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: agent-dock-cube-api-authorizer
+        app.kubernetes.io/name: pi-cloud-cube-api-authorizer
         app.kubernetes.io/component: cube-api-authorizer
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
-      serviceAccountName: agent-dock-cube-api-authorizer
+      serviceAccountName: pi-cloud-cube-api-authorizer
       terminationGracePeriodSeconds: 5
       securityContext:
         runAsNonRoot: true
@@ -42,11 +42,11 @@ spec:
           type: RuntimeDefault
       containers:
         - name: authorizer
-          image: agent-dock/cube-api-authorizer:local
+          image: pi-cloud/cube-api-authorizer:local
           imagePullPolicy: Never
           env:
-            - name: AGENT_DOCK_CUBE_API_AUTH_CREDENTIAL_FILE
-              value: /run/agent-dock-secrets/api-key
+            - name: PI_CLOUD_CUBE_API_AUTH_CREDENTIAL_FILE
+              value: /run/pi-cloud-secrets/api-key
           ports:
             - name: http
               containerPort: 8080
@@ -80,7 +80,7 @@ spec:
               memory: 64Mi
           volumeMounts:
             - name: credential
-              mountPath: /run/agent-dock-secrets/api-key
+              mountPath: /run/pi-cloud-secrets/api-key
               subPath: api-key
               readOnly: true
             - name: temporary
@@ -88,7 +88,7 @@ spec:
       volumes:
         - name: credential
           secret:
-            secretName: agent-dock-cube-api-credential
+            secretName: pi-cloud-cube-api-credential
             defaultMode: 288
         - name: temporary
           emptyDir:
@@ -98,12 +98,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: agent-dock-cube-api-authorizer
+  name: pi-cloud-cube-api-authorizer
   namespace: cube-system
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: agent-dock-cube-api-authorizer
+    app.kubernetes.io/name: pi-cloud-cube-api-authorizer
   ports:
     - name: http
       port: 8080
@@ -112,12 +112,12 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: agent-dock-cube-api-authorizer
+  name: pi-cloud-cube-api-authorizer
   namespace: cube-system
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: agent-dock-cube-api-authorizer
+      app.kubernetes.io/name: pi-cloud-cube-api-authorizer
   policyTypes:
     - Ingress
     - Egress

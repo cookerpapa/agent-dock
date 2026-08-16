@@ -211,7 +211,7 @@ export function createProviderHostProxy(options: ProviderHostProxyOptions): Serv
                 `CONNECT ${target.host}:443 HTTP/1.1`,
                 `Host: ${target.host}:443`,
                 "Proxy-Connection: keep-alive",
-                "User-Agent: AgentDock-Provider-Egress/1",
+                "User-Agent: PiCloud-Provider-Egress/1",
                 ...(authorization === undefined ? [] : [`Proxy-Authorization: ${authorization}`]),
                 "",
                 "",
@@ -248,7 +248,7 @@ export function createProviderHostProxy(options: ProviderHostProxyOptions): Serv
         now,
         ...(options.audit === undefined ? {} : { audit: options.audit }),
         onConnected: () => {
-          client.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: AgentDock\r\n\r\n");
+          client.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: PiCloud\r\n\r\n");
         },
       });
     })().catch(() => {

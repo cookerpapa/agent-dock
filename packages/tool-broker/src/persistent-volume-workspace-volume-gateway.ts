@@ -3,8 +3,8 @@ import {
   collectExternalGitWorkspacePatch,
   initializeExternalGitWorkspaceBaseline,
   inspectExternalGitWorkspaceBaseline,
-} from "@agent-dock/workspace-runtime";
-import type { WorkspacePatch } from "@agent-dock/protocol";
+} from "@pi-cloud/workspace-runtime";
+import type { WorkspacePatch } from "@pi-cloud/protocol";
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import {
@@ -176,7 +176,7 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
         collectExternalGitWorkspacePatch(this.#externalGitWorkspace(directory)),
       ]);
       const volumeRevision = createHash("sha256")
-        .update("agent-dock.workspace-volume-revision.v1\0")
+        .update("pi-cloud.workspace-volume-revision.v1\0")
         .update(state.volumeGeneration)
         .update("\0")
         .update(JSON.stringify(index.files))
@@ -326,7 +326,7 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
   }
 
   #volumeDirectory(volumeId: string): string {
-    const directory = resolve(this.#workspaceRoot, `agentdock-posix-${volumeId}`);
+    const directory = resolve(this.#workspaceRoot, `picloud-posix-${volumeId}`);
     if (!directory.startsWith(`${this.#workspaceRoot}${sep}`)) {
       throw new WorkspaceVolumeGatewayError(
         "workspace_volume_path_invalid",

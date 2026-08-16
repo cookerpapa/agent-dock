@@ -48,7 +48,7 @@ export async function loadCubeApiAuthorizerConfig(
   if (host.length < 1 || host.length > 253 || /[\u0000-\u0020\u007f/]/.test(host)) {
     throw new TypeError("Cube API authorizer host is invalid");
   }
-  const path = environment.AGENT_DOCK_CUBE_API_AUTH_CREDENTIAL_FILE;
+  const path = environment.PI_CLOUD_CUBE_API_AUTH_CREDENTIAL_FILE;
   if (path === undefined || path.length === 0) {
     throw new TypeError("Cube API authorizer credential file is missing");
   }

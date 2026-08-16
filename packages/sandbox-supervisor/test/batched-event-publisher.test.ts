@@ -2,7 +2,7 @@ import type {
   EventAckMessage,
   EventPublishBatchMessage,
   EventPublishMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
 import { BatchedEventPublisher, InMemoryEventSpool } from "../src/index.ts";
 

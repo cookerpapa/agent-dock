@@ -5,11 +5,11 @@ import {
   type ToolSandboxCreateRequest,
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   decodeWorkspaceSnapshotBlob,
   parsePersistentVolumeReference,
-} from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/workspace-runtime";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
@@ -25,7 +25,7 @@ import {
   type OfficialCubeSandboxRuntimeClientOptions,
 } from "../src/index.ts";
 
-const enabled = process.env.AGENT_DOCK_CUBESANDBOX_TEST === "1";
+const enabled = process.env.PI_CLOUD_CUBESANDBOX_TEST === "1";
 const STEP_CONTEXT_SHA256 = "a".repeat(64);
 const PERSISTENT_IDLE_TTL_PROOF_MS = 250;
 
@@ -77,7 +77,7 @@ function parseForbiddenEndpoints(
   const endpoints = value.split(",").map((item) => item.trim());
   if (endpoints.length < 2) {
     throw new Error(
-      "AGENT_DOCK_CUBESANDBOX_FORBIDDEN_ENDPOINTS must name at least two real platform endpoints",
+      "PI_CLOUD_CUBESANDBOX_FORBIDDEN_ENDPOINTS must name at least two real platform endpoints",
     );
   }
   return endpoints.map((endpoint) => {
@@ -90,12 +90,12 @@ function parseForbiddenEndpoints(
 }
 
 async function configuration(): Promise<LiveConfiguration> {
-  const apiUrl = new URL(required("AGENT_DOCK_CUBESANDBOX_API_URL"));
+  const apiUrl = new URL(required("PI_CLOUD_CUBESANDBOX_API_URL"));
   if (apiUrl.protocol !== "http:" && apiUrl.protocol !== "https:") {
-    throw new Error("AGENT_DOCK_CUBESANDBOX_API_URL must use HTTP or HTTPS");
+    throw new Error("PI_CLOUD_CUBESANDBOX_API_URL must use HTTP or HTTPS");
   }
   const publicHttpsUrl = new URL(
-    process.env.AGENT_DOCK_CUBESANDBOX_PUBLIC_HTTPS_URL ?? "https://example.com/",
+    process.env.PI_CLOUD_CUBESANDBOX_PUBLIC_HTTPS_URL ?? "https://example.com/",
   );
   if (
     publicHttpsUrl.protocol !== "https:" ||
@@ -103,15 +103,13 @@ async function configuration(): Promise<LiveConfiguration> {
     publicHttpsUrl.password !== "" ||
     publicHttpsUrl.hash !== ""
   ) {
-    throw new Error("AGENT_DOCK_CUBESANDBOX_PUBLIC_HTTPS_URL must be a credential-free HTTPS URL");
+    throw new Error("PI_CLOUD_CUBESANDBOX_PUBLIC_HTTPS_URL must be a credential-free HTTPS URL");
   }
-  const proxyScheme = process.env.AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME ?? "http";
+  const proxyScheme = process.env.PI_CLOUD_CUBESANDBOX_PROXY_SCHEME ?? "http";
   if (proxyScheme !== "http" && proxyScheme !== "https") {
-    throw new Error("AGENT_DOCK_CUBESANDBOX_PROXY_SCHEME was invalid");
+    throw new Error("PI_CLOUD_CUBESANDBOX_PROXY_SCHEME was invalid");
   }
-  const configured = parseForbiddenEndpoints(
-    required("AGENT_DOCK_CUBESANDBOX_FORBIDDEN_ENDPOINTS"),
-  );
+  const configured = parseForbiddenEndpoints(required("PI_CLOUD_CUBESANDBOX_FORBIDDEN_ENDPOINTS"));
   const apiEndpoint = Object.freeze({
     host: apiUrl.hostname,
     port: port(
@@ -119,22 +117,22 @@ async function configuration(): Promise<LiveConfiguration> {
       apiUrl.protocol === "https:" ? 443 : 80,
     ),
   });
-  const egressProxyIp = process.env.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254";
-  const egressProxyPort = port(process.env.AGENT_DOCK_CUBESANDBOX_EGRESS_PROXY_PORT, 3_128);
+  const egressProxyIp = process.env.PI_CLOUD_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254";
+  const egressProxyPort = port(process.env.PI_CLOUD_CUBESANDBOX_EGRESS_PROXY_PORT, 3_128);
   return {
-    templateId: required("AGENT_DOCK_CUBESANDBOX_TEMPLATE_ID"),
-    imageRevision: required("AGENT_DOCK_IMAGE_REVISION"),
+    templateId: required("PI_CLOUD_CUBESANDBOX_TEMPLATE_ID"),
+    imageRevision: required("PI_CLOUD_IMAGE_REVISION"),
     publicHttpsUrl: publicHttpsUrl.toString(),
     runtime: {
       apiUrl: apiUrl.toString(),
-      apiKey: await readPrivateKey(required("AGENT_DOCK_CUBESANDBOX_API_KEY_FILE")),
-      proxyNodeIp: required("AGENT_DOCK_CUBESANDBOX_PROXY_NODE_IP"),
+      apiKey: await readPrivateKey(required("PI_CLOUD_CUBESANDBOX_API_KEY_FILE")),
+      proxyNodeIp: required("PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP"),
       proxyPort: port(
-        process.env.AGENT_DOCK_CUBESANDBOX_PROXY_PORT,
+        process.env.PI_CLOUD_CUBESANDBOX_PROXY_PORT,
         proxyScheme === "https" ? 443 : 80,
       ),
       proxyScheme,
-      sandboxDomain: process.env.AGENT_DOCK_CUBESANDBOX_DOMAIN ?? "cube.app",
+      sandboxDomain: process.env.PI_CLOUD_CUBESANDBOX_DOMAIN ?? "cube.app",
       egressProxyIp,
       requestTimeoutMs: 30_000,
     },
@@ -174,7 +172,7 @@ function createRequest(
     environment: {
       environmentVersionId: randomUUID(),
       versionNumber: 1,
-      profileKey: "agent-dock-fullstack",
+      profileKey: "pi-cloud-fullstack",
       profileVersion: "1",
       imageRevision,
       specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
@@ -276,7 +274,7 @@ async function assertRawPublicHttpsFromTrustedHost(url: string): Promise<void> {
     const request = httpsGet(
       url,
       {
-        headers: { "user-agent": "agent-dock-cube-egress-host-preflight/1" },
+        headers: { "user-agent": "pi-cloud-cube-egress-host-preflight/1" },
         timeout: 5_000,
       },
       (response) => {
@@ -338,7 +336,7 @@ function publicHttpsProbeCommand(url: string): string {
     `process.exit(94)` +
     `};` +
     `const request=https.get(url,{` +
-    `headers:{'user-agent':'agent-dock-cube-egress-check/1'},timeout:5000` +
+    `headers:{'user-agent':'pi-cloud-cube-egress-check/1'},timeout:5000` +
     `},response=>{` +
     `response.resume();` +
     `response.once('end',()=>{` +
@@ -361,12 +359,12 @@ async function waitForNoManagedInstances(
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       const remaining = (await client.list()).filter((instance) =>
-        activationIds.has(instance.metadata["agentdock.activation_id"] ?? ""),
+        activationIds.has(instance.metadata["picloud.activation_id"] ?? ""),
       );
       if (remaining.length === 0) return;
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
     }
-    throw new Error("CubeSandbox live gate found orphaned AgentDock microVMs");
+    throw new Error("CubeSandbox live gate found orphaned PiCloud microVMs");
   } finally {
     await client.close();
   }
@@ -391,9 +389,9 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
         webProxy: config.webProxy,
         runtime: config.runtime,
         workspaceVolumeGateway: new HttpWorkspaceVolumeGateway({
-          baseUrl: required("AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_URL"),
+          baseUrl: required("PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_URL"),
           serviceToken: await readPrivateKey(
-            required("AGENT_DOCK_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE"),
+            required("PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_TOKEN_FILE"),
           ),
         }),
       });
@@ -440,7 +438,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
             return Buffer.concat(chunks).toString("utf8");
           })();
           await terminal.sendInput(
-            Buffer.from("printf '__agentdock_terminal_ok__\\n'; exit\n", "utf8"),
+            Buffer.from("printf '__picloud_terminal_ok__\\n'; exit\n", "utf8"),
           );
           await expect(
             Promise.race([
@@ -452,7 +450,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
                 ).unref(),
               ),
             ]),
-          ).resolves.toContain("__agentdock_terminal_ok__");
+          ).resolves.toContain("__picloud_terminal_ok__");
         } finally {
           await terminal.close().catch(() => undefined);
         }
@@ -642,7 +640,7 @@ describe.skipIf(!enabled)("CubeSandbox KVM Provider live security gate", () => {
               second.capability,
               operation(
                 second.activationId,
-                `nohup node -e ${JSON.stringify(backgroundProgram)} >/tmp/agentdock-preview.log 2>&1 & echo $! > background.pid; sleep 1; kill -0 "$(cat background.pid)"; node -e "fetch('http://127.0.0.1:43123').then(async r=>process.stdout.write(await r.text()))"`,
+                `nohup node -e ${JSON.stringify(backgroundProgram)} >/tmp/picloud-preview.log 2>&1 & echo $! > background.pid; sleep 1; kill -0 "$(cat background.pid)"; node -e "fetch('http://127.0.0.1:43123').then(async r=>process.stdout.write(await r.text()))"`,
                 15_000,
               ),
             ),

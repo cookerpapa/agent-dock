@@ -54,8 +54,8 @@ and then replaying can deliver the same commit twice.
    cumulative ACK. This is the in-process realization of the same transport
    contract; durable supervisor-side spool storage remains a later slice.
 6. The browser API is `GET /v1/sessions/:sessionId/events`. The SSE `id` is the
-   decimal session sequence, `event` is the AgentDock event type, and `data` is
-   the complete versioned AgentDock event JSON. `Last-Event-ID` is absent or a
+   decimal session sequence, `event` is the PiCloud event type, and `data` is
+   the complete versioned PiCloud event JSON. `Last-Event-ID` is absent or a
    canonical non-negative safe integer; a cursor beyond the durable high-water
    mark is rejected.
 7. The stream subscribes to an in-process session event hub before reading the

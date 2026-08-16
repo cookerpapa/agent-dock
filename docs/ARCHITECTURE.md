@@ -3,7 +3,7 @@
 ## Product boundary
 
 Pi owns the Agent Loop, model messages, compaction and Tool selection.
-AgentDock owns durable admission, multi-tenancy, Worker execution authority,
+PiCloud owns durable admission, multi-tenancy, Worker execution authority,
 remote Tool routing, Workspace lifetime, streaming and recovery.
 
 CubeSandbox KVM is the only untrusted execution runtime. PostgreSQL is the only
@@ -43,16 +43,16 @@ Pi Session, calls the model and delegates Tools. Cold Sessions have no process
 or thread.
 
 Pi 0.84's official `SessionStorage` interface is implemented by
-`@agent-dock/pi-session-postgres`. It stores Pi entries, lanes, records, labels
+`@pi-cloud/pi-session-postgres`. It stores Pi entries, lanes, records, labels
 and the append log in PostgreSQL, and bounds an active branch at Pi compaction.
 Every mutation checks an opaque `ExecutionAuthority` inside the same database
 transaction as the write.
 
 The same package implements Pi's tenant-scoped `SessionRepo`; Workers open or
 create Sessions through that repository rather than through a second
-AgentDock-only lifecycle. Pi's pinned, unmodified backend conformance suite
+PiCloud-only lifecycle. Pi's pinned, unmodified backend conformance suite
 defines the baseline CRUD, fork, query, ledger and ordering semantics. Opaque
-Pi identifiers are stored as `text`; AgentDock product UUIDs are one valid
+Pi identifiers are stored as `text`; PiCloud product UUIDs are one valid
 subset. Tenant isolation and execution-authority fencing are additional cloud
 contracts layered around the official port.
 
@@ -114,7 +114,7 @@ to a fenced Run/Attempt. The Control Plane sends the trusted descriptor over a
 dedicated service credential to the Tool Broker, which lazily creates a Cube
 and opens a UID 1000 PTY in `/workspace` through the authenticated Cube Tool
 Service. The image continues to exclude Cube `envd`, so the terminal cannot
-bypass AgentDock's handoff authority and fencing boundary.
+bypass PiCloud's handoff authority and fencing boundary.
 
 Human terminal authority is deliberately separate from Agent Tool capability,
 Run lease and fence. PostgreSQL nevertheless enforces one shared Workspace

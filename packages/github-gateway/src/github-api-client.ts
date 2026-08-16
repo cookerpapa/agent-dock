@@ -2,7 +2,7 @@ import {
   createWorkspaceSnapshot,
   parseWorkspaceSnapshot,
   type WorkspaceSnapshotFileContent,
-} from "@agent-dock/workspace-runtime";
+} from "@pi-cloud/workspace-runtime";
 import { GitHubAppAuthentication } from "./github-app-auth.ts";
 import { GitHubGatewayError, type GitHubInstallation, type GitHubRepository } from "./types.ts";
 
@@ -306,13 +306,13 @@ export class GitHubApiClient {
         { authorization: `Bearer ${token}` },
         "POST",
         {
-          name: "AgentDock delivery",
+          name: "PiCloud delivery",
           head_sha: commitSha,
           status: "completed",
           conclusion: "success",
           external_id: input.deliveryId,
           output: {
-            title: "AgentDock run completed",
+            title: "PiCloud run completed",
             summary: "Workspace checkpoint was delivered through the trusted GitHub Gateway.",
           },
         },
@@ -597,7 +597,7 @@ export class GitHubApiClient {
           accept: "application/vnd.github+json",
           authorization: headers.authorization,
           "content-type": "application/json",
-          "user-agent": "agent-dock-github-gateway",
+          "user-agent": "pi-cloud-github-gateway",
           "x-github-api-version": "2022-11-28",
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),

@@ -37,9 +37,9 @@ function parseArguments(argv) {
   const result = {
     outputDirectory: resolve(repositoryRoot, "dist/release-evidence"),
     cacheDirectory:
-      process.env.AGENT_DOCK_TRIVY_CACHE_DIRECTORY ??
-      resolve(repositoryRoot, ".cache/agent-dock-trivy"),
-    imageVersion: process.env.AGENT_DOCK_IMAGE_VERSION ?? "production",
+      process.env.PI_CLOUD_TRIVY_CACHE_DIRECTORY ??
+      resolve(repositoryRoot, ".cache/pi-cloud-trivy"),
+    imageVersion: process.env.PI_CLOUD_IMAGE_VERSION ?? "production",
     allowDirty: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -245,12 +245,12 @@ if (dirty && !options.allowDirty) {
 await prepareDestination(options.outputDirectory);
 await mkdir(options.cacheDirectory, { recursive: true, mode: 0o700 });
 const destinationParent = dirname(options.outputDirectory);
-const stageDirectory = await mkdtemp(join(destinationParent, ".agent-dock-release-"));
-const temporaryDirectory = await mkdtemp(join(tmpdir(), "agent-dock-release-"));
+const stageDirectory = await mkdtemp(join(destinationParent, ".pi-cloud-release-"));
+const temporaryDirectory = await mkdtemp(join(tmpdir(), "pi-cloud-release-"));
 
 try {
   await mkdir(resolve(stageDirectory, "images"), { mode: 0o700 });
-  const rootSbomPath = resolve(stageDirectory, "agent-dock-root.cdx.json");
+  const rootSbomPath = resolve(stageDirectory, "pi-cloud-root.cdx.json");
   const rootSbom = await capture("npm", ["sbom", "--sbom-format=cyclonedx", "--omit=dev"]);
   JSON.parse(rootSbom);
   await writeFile(rootSbomPath, `${rootSbom}\n`, { mode: 0o600 });
@@ -272,17 +272,17 @@ try {
   const imageDescriptors = [
     ...PRODUCTION_IMAGE_NAMES.map((imageName) => ({
       imageName,
-      reference: `agent-dock/${imageName}:${options.imageVersion}`,
+      reference: `pi-cloud/${imageName}:${options.imageVersion}`,
       labelVersion: options.imageVersion,
     })),
     ...CUBE_PLATFORM_IMAGES.map((imageName) => ({
       imageName,
-      reference: `agent-dock/${imageName}:local`,
+      reference: `pi-cloud/${imageName}:local`,
       labelVersion: "cube-primary",
     })),
     {
       imageName: "cubesandbox-tool",
-      reference: `localhost:5000/agent-dock/cubesandbox-tool:${revision}`,
+      reference: `localhost:5000/pi-cloud/cubesandbox-tool:${revision}`,
       labelVersion: "cube-primary",
     },
   ];
@@ -365,7 +365,7 @@ try {
       image.policyVulnerabilities.CRITICAL.fixable > 0,
   );
   const manifest = {
-    format: "agent-dock.release-evidence.v1",
+    format: "pi-cloud.release-evidence.v1",
     generatedAt: new Date().toISOString(),
     git: { revision, dirty },
     imageVersion: options.imageVersion,
@@ -376,7 +376,7 @@ try {
       maximumFixableFindings: 0,
       exceptionPolicy: await fileEvidence(stageDirectory, ".trivyignore.yaml"),
       packageTypeOverrides: {
-        "localhost:5000/agent-dock/cubesandbox-tool": {
+        "localhost:5000/pi-cloud/cubesandbox-tool": {
           packageTypes: ["os"],
           rationale:
             "Repository npm audit/SBOM covers its application packages; this image scan covers the Cube guest's OS packages without requiring Trivy's optional Java index. CI still performs the unrestricted image scan.",
@@ -390,7 +390,7 @@ try {
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
 
   const evidencePaths = [
-    "agent-dock-root.cdx.json",
+    "pi-cloud-root.cdx.json",
     ".trivyignore.yaml",
     "manifest.json",
     ...images.flatMap((image) => [

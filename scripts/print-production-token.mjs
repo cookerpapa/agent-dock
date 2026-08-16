@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const runtimeDirectory = resolve(
   repositoryRoot,
-  process.env.AGENT_DOCK_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
+  process.env.PI_CLOUD_RUNTIME_DIRECTORY ?? "deploy/production/runtime",
 );
 const tokenPath = resolve(runtimeDirectory, "secrets/api-token");
 const handle = await open(tokenPath, constants.O_RDONLY | constants.O_NOFOLLOW);

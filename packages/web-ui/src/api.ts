@@ -54,15 +54,15 @@ import {
   type WorkspaceSourceRequest,
   type WorkspaceVersionListResource,
   type WorkspaceVersionResource,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 
-export class AgentDockApiError extends Error {
+export class PiCloudApiError extends Error {
   readonly status: number;
   readonly code: string;
 
   constructor(status: number, code: string, message: string) {
     super(message);
-    this.name = "AgentDockApiError";
+    this.name = "PiCloudApiError";
     this.status = status;
     this.code = code;
   }
@@ -74,7 +74,7 @@ async function responseJson(response: Response): Promise<unknown> {
   try {
     return (await response.json()) as unknown;
   } catch {
-    throw new AgentDockApiError(
+    throw new PiCloudApiError(
       response.status,
       "invalid_response",
       "Control plane returned a non-JSON response",
@@ -101,16 +101,16 @@ async function request(
       },
     });
   } catch {
-    throw new AgentDockApiError(0, "network_error", "Control plane is unreachable");
+    throw new PiCloudApiError(0, "network_error", "Control plane is unreachable");
   }
   const body = await responseJson(response);
   if (!response.ok) {
     try {
       const parsed = parseControlPlaneApiError(body);
-      throw new AgentDockApiError(response.status, parsed.error.code, parsed.error.message);
+      throw new PiCloudApiError(response.status, parsed.error.code, parsed.error.message);
     } catch (error: unknown) {
-      if (error instanceof AgentDockApiError) throw error;
-      throw new AgentDockApiError(
+      if (error instanceof PiCloudApiError) throw error;
+      throw new PiCloudApiError(
         response.status,
         "invalid_error_response",
         `Control plane rejected the request with HTTP ${String(response.status)}`,
@@ -135,16 +135,16 @@ async function requestBytes(
         : { headers: { authorization: `Bearer ${authorizationToken}` } }),
     });
   } catch {
-    throw new AgentDockApiError(0, "network_error", "Control plane is unreachable");
+    throw new PiCloudApiError(0, "network_error", "Control plane is unreachable");
   }
   if (!response.ok) {
     const body = await responseJson(response);
     try {
       const parsed = parseControlPlaneApiError(body);
-      throw new AgentDockApiError(response.status, parsed.error.code, parsed.error.message);
+      throw new PiCloudApiError(response.status, parsed.error.code, parsed.error.message);
     } catch (error: unknown) {
-      if (error instanceof AgentDockApiError) throw error;
-      throw new AgentDockApiError(
+      if (error instanceof PiCloudApiError) throw error;
+      throw new PiCloudApiError(
         response.status,
         "invalid_error_response",
         `Control plane rejected the request with HTTP ${String(response.status)}`,
@@ -172,7 +172,7 @@ function jsonRequest(
   };
 }
 
-export class AgentDockApi {
+export class PiCloudApi {
   readonly #fetch: FetchImplementation;
   readonly #authorizationToken: string | undefined;
 

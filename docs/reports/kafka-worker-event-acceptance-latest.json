@@ -1,5 +1,5 @@
 {
-  "format": "agent-dock.kafka-worker-event-acceptance.v1",
+  "format": "pi-cloud.kafka-worker-event-acceptance.v1",
   "generatedAt": "2026-08-10T12:40:34.928Z",
   "revision": "1e829bb301c429bf53c18ec47451573f37db2f70",
   "input": {

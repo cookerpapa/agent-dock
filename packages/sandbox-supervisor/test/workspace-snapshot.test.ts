@@ -26,7 +26,7 @@ afterEach(async () => {
 
 describe("bounded workspace snapshot", () => {
   it("restores regular files and executable bits without replacing the Git baseline", async () => {
-    const source = await temporaryDirectory("agent-dock-workspace-source-");
+    const source = await temporaryDirectory("pi-cloud-workspace-source-");
     await mkdir(resolve(source, ".git"));
     await mkdir(resolve(source, "src"));
     await writeFile(resolve(source, "src/App.java"), "class App {}\n");
@@ -36,7 +36,7 @@ describe("bounded workspace snapshot", () => {
     const snapshot = await captureWorkspaceSnapshot(source);
     validateWorkspaceSnapshot(snapshot);
 
-    const target = await temporaryDirectory("agent-dock-workspace-target-");
+    const target = await temporaryDirectory("pi-cloud-workspace-target-");
     await mkdir(resolve(target, ".git"));
     await writeFile(resolve(target, ".git/HEAD"), "fixture-baseline\n");
     await writeFile(resolve(target, "stale.txt"), "remove me");
@@ -53,7 +53,7 @@ describe("bounded workspace snapshot", () => {
   it("validates every path before mutating the destination", async () => {
     const malicious = Buffer.from(
       `${JSON.stringify({
-        format: "agent-dock.workspace-manifest.v1",
+        format: "pi-cloud.workspace-manifest.v1",
         files: [
           {
             path: "../escape",
@@ -65,7 +65,7 @@ describe("bounded workspace snapshot", () => {
         ],
       })}\n`,
     );
-    const target = await temporaryDirectory("agent-dock-workspace-reject-");
+    const target = await temporaryDirectory("pi-cloud-workspace-reject-");
     await writeFile(resolve(target, "keep.txt"), "still here");
     await expect(restoreWorkspaceSnapshot(target, malicious)).rejects.toThrow(/entry|path/i);
     await expect(readFile(resolve(target, "keep.txt"), "utf8")).resolves.toBe("still here");

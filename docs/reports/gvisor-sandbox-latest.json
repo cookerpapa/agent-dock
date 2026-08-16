@@ -4,7 +4,7 @@
   "commands": [
     "npm run sandbox:check",
     "npm run production:check",
-    "AGENT_DOCK_LIVE_GITHUB_CHECK=1 npm run production:github-check"
+    "PI_CLOUD_LIVE_GITHUB_CHECK=1 npm run production:github-check"
   ],
   "environment": {
     "hostKernel": "6.6.87.2-microsoft-standard-WSL2",

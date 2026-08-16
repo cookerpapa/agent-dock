@@ -8,7 +8,7 @@ with the smaller production `CloudAgentRuntime`; the code described in the
 
 ## Question
 
-Can AgentDock stop restoring a complete `session.jsonl` for every Run, and can
+Can PiCloud stop restoring a complete `session.jsonl` for every Run, and can
 the Run lease/fence become an internal Harness concern instead of application
 plumbing?
 
@@ -30,9 +30,9 @@ durable Harness design also treats arbitrary external hook/Tool effects as an
 application responsibility; a storage writer lease does not by itself fence a
 Cube command that has already crossed the network.
 
-Therefore AgentDock must not claim that Pi already supplies a distributed
+Therefore PiCloud must not claim that Pi already supplies a distributed
 cross-resource lease/fence. Pi supplies the storage model and a concrete
-SQLite single-writer implementation. AgentDock supplies the PostgreSQL Run
+SQLite single-writer implementation. PiCloud supplies the PostgreSQL Run
 authority and extends it to the remote Tool effect boundary.
 
 Primary upstream references:
@@ -100,7 +100,7 @@ execution authority and reviewed remote Tools were retained.
 ## Production outcome
 
 Production now uses the smaller `CloudAgentRuntime`: Pi's public `Agent`,
-PostgreSQL SessionStorage and native compaction primitives plus AgentDock's
+PostgreSQL SessionStorage and native compaction primitives plus PiCloud's
 interruption/world-state projection, Workspace settlement, sampling identity,
 model retry and Kafka/Valkey/SSE event mapping. It no longer downloads or
 rewrites lifetime JSONL conversation snapshots.

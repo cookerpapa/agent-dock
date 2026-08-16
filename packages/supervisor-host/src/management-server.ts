@@ -4,11 +4,11 @@ import {
   type SupervisorManagementResponse,
   type SupervisorRuntimeAssignment,
   type SteerTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   validateCheckpointObjectKey,
   type CheckpointObjectStore,
-} from "@agent-dock/runtime-core/checkpoint-runtime";
+} from "@pi-cloud/runtime-core/checkpoint-runtime";
 import { createHash, timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import {

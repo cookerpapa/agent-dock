@@ -5,17 +5,17 @@ import {
   type SupervisorManagementRequest,
   type SupervisorRuntimeAssignment,
   type SteerTurnCommandMessage,
-} from "@agent-dock/protocol";
+} from "@pi-cloud/protocol";
 import {
   SandboxAssignmentInventoryError,
   type SandboxAssignmentInventory,
   type SandboxRuntimeAssignment,
-} from "@agent-dock/sandbox-supervisor/sandbox-assignment-inventory";
+} from "@pi-cloud/sandbox-supervisor/sandbox-assignment-inventory";
 import type {
   SupervisorBootIdentity,
   SupervisorOwnerBoundary,
 } from "./supervisor-connection-manager.ts";
-import type { SessionLeaseCoordinator } from "@agent-dock/runtime-core/session-lease-coordinator";
+import type { SessionLeaseCoordinator } from "@pi-cloud/runtime-core/session-lease-coordinator";
 import {
   TurnSteerBackendError,
   type TurnSteerBackend,
