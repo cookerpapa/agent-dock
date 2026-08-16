@@ -17,6 +17,20 @@ Temporal, execution Cells, MinIO/S3 conversation checkpoints, Kopia Workspace
 copies and alternate container runtimes are not part of the current product
 path.
 
+### Current scheduling invariant
+
+PiCloud has no user-, Session- or Workspace-to-Worker affinity. All healthy Pi
+Workers compete for one PostgreSQL ready-Run queue, and any later Run may be
+claimed by a different Worker. A `worker_id`/Supervisor identity recorded on a
+RunAttempt means only “this Worker currently owns this leased Attempt”; it is
+cleared or superseded with that Attempt and is not a routing preference.
+
+Older migration files, implementation-log entries and archived discussions
+still contain Temporal, Cell and affinity vocabulary because they preserve the
+pre-production schema's history. They do not describe the migrated schema or
+the maintained deployment. The current sources of truth are this README,
+`docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, and the latest accepted ADRs.
+
 ## Product
 
 - browser registration/login with tenant-isolated conversations and Workspaces;

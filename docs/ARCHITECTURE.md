@@ -9,6 +9,25 @@ remote Tool routing, Workspace lifetime, streaming and recovery.
 CubeSandbox KVM is the only untrusted execution runtime. PostgreSQL is the only
 business/Run-state authority. There is no second workflow scheduler.
 
+## Source-of-truth and terminology guardrail
+
+This document describes the maintained production path. Historical migrations
+must remain executable from an empty database, so their source files still
+show when Temporal, execution Cells and Worker-affinity columns were introduced
+and later removed. `docs/IMPLEMENTATION_LOG.md`, `docs/discussions/` and
+superseded ADRs likewise preserve the reasoning chronology. None of those
+historical names reactivates a component in the current topology.
+
+The current Worker invariant is deliberately precise:
+
+- there is one shared PostgreSQL ready-Run queue;
+- no user, Session or Workspace stores a preferred Worker;
+- any healthy Worker with a free slot may claim the next eligible Run;
+- the Worker/Supervisor identity on a live RunAttempt is ephemeral execution
+  ownership used for heartbeat, cancellation and fencing, not affinity;
+- later Turns restore their bounded Pi context from PostgreSQL and therefore
+  do not depend on the previous Worker remaining alive or warm.
+
 ## Components
 
 ### Web and Control Plane

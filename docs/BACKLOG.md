@@ -8,6 +8,9 @@ retired and remain only in Git history or explicitly superseded ADRs.
 
 - [x] Rename the maintained product and deployment contract to Pi Cloud without
       retaining mixed pre-release runtime identifiers.
+- [x] Make the maintained architecture documents explicitly distinguish
+      ephemeral RunAttempt ownership from the removed Worker-affinity design,
+      and label migrations/discussion logs as historical evidence.
 - [ ] Keep formatting, typecheck, unit/integration, build, Helm and security
       gates green.
 - [ ] Run a clean self-hosted install after every deployment contract change.

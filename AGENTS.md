@@ -15,6 +15,13 @@ Read these files first:
 3. `docs/ROADMAP.md`
 4. `docs/BACKLOG.md`
 
+Those four files describe the maintained architecture. Treat
+`docs/IMPLEMENTATION_LOG.md`, `docs/discussions/`, superseded ADRs and earlier
+database migrations as historical evidence, not as current topology. In
+particular, historical Cell, Temporal and Worker-affinity names must never be
+inferred back into the active runtime without confirming current production
+code and the latest accepted ADR.
+
 Work on one roadmap item or one vertical slice at a time. If a requested change
 alters an architectural invariant, storage ownership, security boundary, or
 protocol, record the decision under `docs/adr/` before implementation.

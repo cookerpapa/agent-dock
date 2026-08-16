@@ -38,6 +38,11 @@ There are no execution Cells or Worker-affinity queues. A Workspace binds to a
 Sandbox Domain for Cube/storage locality; any Pi Worker may execute its next
 Run.
 
+Do not confuse a live RunAttempt's `worker_id` with affinity. It identifies the
+replica that currently heartbeats and executes that one fenced Attempt. It does
+not influence placement of the Session's next Run, and no private Worker queue
+or durable preferred-Worker record exists after the current migrations finish.
+
 ## Deploy
 
 Copy the example outside the repository and replace endpoints, images, UUIDs
