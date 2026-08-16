@@ -1,74 +1,25 @@
-# Architecture decision index
+# Current architecture decisions
 
-Only decisions that constrain the current product or maintained optional
-modules remain here. Superseded Temporal, Cell, affinity and Kopia decisions
-are available in Git history rather than presented as current choices.
+This directory contains only decisions that constrain the maintained Pi Cloud
+product. Superseded experiments and pre-release decisions are intentionally not
+kept beside current ADRs; Git history is their archive.
 
-## Core protocol and trust
+Read the documents in this order:
 
-- ADR-0002 through ADR-0031 define durable events, idempotency, Run/Attempt,
-  leases/fences, cancellation, multi-tenancy, trusted Pi and remote Tools.
-- [ADR-0053](0053-cubesandbox-primary-execution-plane.md) makes CubeSandbox KVM
-  the sole Tool runtime.
-- [ADR-0054](0054-horizontal-pi-worker-pool-and-native-session-checkpoints.md)
-  defines replaceable Pi Workers and Pi-native recovery.
-- [ADR-0063](0063-hot-proxy-mediated-cube-web-egress.md) governs public egress.
-- [ADR-0068](0068-session-resident-cube-and-posix-workspaces.md) separates warm
-  Cube lifetime from durable Workspace lifetime.
-- [ADR-0069](0069-cube-only-runtime-and-workspace-first-conversations.md)
-  defines Workspace-first product behavior.
+1. [ADR-0111](0111-current-production-architecture.md) — current end-to-end
+   architecture, state authorities and scaling boundary.
+2. [ADR-0109](0109-postgres-session-reference-checkpoints.md) — PostgreSQL Pi
+   SessionStorage as the sole conversation authority.
+3. [ADR-0105](0105-pi-session-backend-conformance.md) — compatibility with Pi's
+   public Session backend contract.
+4. [ADR-0104](0104-human-session-tree-and-conversation-forks.md) — human tree
+   navigation and conversation forks.
+5. [ADR-0106](0106-workspace-web-terminal.md) — brokered human terminal access.
+6. [ADR-0107](0107-remove-dormant-advanced-api.md) and
+   [ADR-0108](0108-workspace-api-matches-the-file-browser.md) — deliberately
+   removed product surface.
+7. [ADR-0110](0110-pi-cloud-product-identity.md) — the clean Pi Cloud identity.
 
-## Cloud Agent runtime
-
-- ADR-0070 through ADR-0087 cover terminal atomicity, SDK boundaries, trusted
-  Git metadata, event WAL, steer, interruption semantics, Turn/Attempt/Step
-  contexts, model retry and reconnectable Tool operations.
-- [ADR-0090](0090-session-selected-sandbox-retention.md) defines automatic and
-  persistent Cube retention.
-- [ADR-0094](0094-cross-component-time-and-retention-budgets.md) orders timeout,
-  lease, shutdown and retention budgets.
-- [ADR-0100](0100-bounded-sandbox-and-workspace-admission.md) bounds Sandbox and
-  Workspace control pressure.
-
-## Current distributed architecture
-
-- [ADR-0091](0091-kafka-first-worker-event-ingest.md) makes Kafka append the
-  shared live-event durability boundary.
-- [ADR-0093](0093-kafka-valkey-live-events-and-canonical-conversations.md) keeps
-  live deltas in Kafka/Valkey and terminal Turns in PostgreSQL.
-- [ADR-0095](0095-sandbox-domains-and-cube-control-plane.md) defines the thin
-  Tool Broker and Sandbox Domain.
-- [ADR-0098](0098-self-healing-live-event-read-model.md) repairs Valkey from
-  Kafka before readiness.
-- [ADR-0099](0099-active-turn-catch-up-snapshots.md) defines active SSE catch-up.
-- [ADR-0101](0101-postgres-native-agent-runtime-and-persistent-workspace-volumes.md)
-  removes Temporal/Cells/S3/Kopia and establishes the PostgreSQL queue, Pi
-  SessionStorage and persistent Cube Volume architecture.
-- [ADR-0103](0103-thin-postgres-native-pi-runtime.md) replaces the staged full
-  Harness experiment with the production PostgreSQL-native Pi runtime and one
-  opaque authority across conversation and Cube Tool effects.
-- [ADR-0104](0104-human-session-tree-and-conversation-forks.md) exposes Pi's
-  Session tree to human users and defines transactional conversation-only
-  forks without making tree control model-visible.
-- [ADR-0105](0105-pi-session-backend-conformance.md) makes the tenant-scoped
-  PostgreSQL Session repository conform to Pi's published backend contract
-  while retaining PiCloud's transaction-scoped execution authority.
-- [ADR-0106](0106-workspace-web-terminal.md) adds a brokered Workspace Web
-  Terminal with a separate human lease, exclusive writer admission and Cube
-  PTY execution without exposing runtime credentials to the browser.
-- [ADR-0107](0107-remove-dormant-advanced-api.md) removes backend-only product
-  experiments that had no supported Web workflow.
-- [ADR-0108](0108-workspace-api-matches-the-file-browser.md) narrows the public
-  Workspace API to the file-browser and archive behavior the product exposes.
-- [ADR-0109](0109-postgres-session-reference-checkpoints.md) removes the old Pi
-  JSONL pipeline and synthetic Artifact bridge now that PostgreSQL
-  SessionStorage is the sole conversation authority.
-- [ADR-0110](0110-pi-cloud-product-identity.md) establishes one clean Pi Cloud
-  identity across code, deployment protocols and the repository without a
-  legacy naming compatibility layer.
-
-## Optional modules
-
-Only the separately deployed observability and repository-import helpers remain
-optional. Removed product experiments are retained in Git history, not as
-compiled modules or current architecture choices.
+An ADR absent from this index is not part of the current design. Historical
+migration source may contain retired table or component names solely so a new
+database can replay the ordered migration chain.

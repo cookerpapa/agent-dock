@@ -39,5 +39,6 @@ The production Control Plane has one smaller public surface and successful Run
 settlement performs less work. Reintroducing any removed capability requires a
 complete UI/API workflow, a measured need and a new architecture decision.
 
-ADR-0078's Worker Control Channel decision remains current; its decision to
-retain an optional advanced controller is superseded by this ADR.
+The Worker Control Channel remains limited to registration, heartbeat, durable
+event acknowledgement and active steer. It is not an alternate Run dispatcher
+or a host for optional product controllers.

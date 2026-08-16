@@ -1,150 +1,104 @@
-# CubeSandbox Provider
+# CubeSandbox execution provider
 
-## Role
+## Current role
 
-CubeSandbox is PiCloud's sole untrusted execution plane. Pi and provider
-authentication stay in the trusted Worker. User commands and repository code
-run inside one KVM microVM bound to a tenant/Workspace/Session.
+CubeSandbox KVM is Pi Cloud's only untrusted Tool runtime. The trusted Pi
+Worker owns the Agent Loop and model credential; the Tool Broker owns execution
+admission and Cube lifecycle. The guest owns neither.
 
 ```text
-Pi SDK Tool call
-  → Tool adapter
-  → Tool Broker (Step digest + operation ledger)
-  → Cube API
-  → Cube microVM Tool service
-  → bounded result
-  → Pi Agent Loop
+Pi Tool call
+  -> trusted Tool adapter
+  -> Tool Broker (Run/Attempt/lease/fence/Step validation)
+  -> Cube API
+  -> credential-free Cube KVM Tool service
+  -> bounded result
+  -> Pi Agent Loop
 ```
 
-## Why Cube
+There is no Docker, gVisor, local-process or model-selectable runtime fallback.
+The `SandboxProvider` interface in code is a narrow Cube adapter boundary, not
+a supported production runtime menu.
 
-Cube supplies the capabilities needed by an interactive coding Agent:
+## Identity and authority
 
-- hardware-backed guest kernel boundary;
-- reusable Linux templates;
-- scheduling and lifecycle APIs;
-- volume integration;
-- traffic proxy integration;
-- pause/resume primitives;
-- independent process and filesystem environment.
+The Tool Broker derives tenant, Workspace, Session, Run, Attempt, fence,
+activation and Cloud Step identity from trusted state. The browser, model and
+Tool arguments cannot choose a Sandbox ID, image, mount, resource limit or
+network policy.
 
-PiCloud does not treat Cube lifecycle state as durable conversation state.
-Pi Session checkpoints and Workspace checkpoints remain external and fenced.
+Each operation has an immutable operation ID. A reconnect may attach to the
+same in-flight operation, but conflicting reuse fails closed. A stale Attempt
+cannot start another Tool or advance Workspace state. If a side-effecting Tool
+may have run but its result cannot be proven, the outcome is `UNKNOWN`; it is
+not replayed automatically.
 
-## Template
+The Worker never receives Cube management credentials. Cube receives no model,
+PostgreSQL, Kafka, Valkey, Kubernetes, Volume-gateway or Cube-control
+credential.
 
-The deployment-owned template contains:
+## Workspace and process lifetime
 
-- Debian userland;
-- Node.js 24, Java 17, Python 3 and Git;
-- the PiCloud Tool service;
-- a fixed unprivileged user;
-- `/workspace` volume mount;
-- no deployment secrets.
+One tenant Workspace maps to one stable persistent Cube Volume. Only the
+`workspace/` child of its trusted Volume envelope is mounted into the guest as
+`/workspace`; platform generation and Git-baseline metadata stay outside the
+guest view.
 
-Users cannot submit a template, image, kernel, device, mount, privileged flag
-or network policy.
+At a fenced settlement boundary, the trusted Volume gateway flushes the
+Workspace and records a bounded file/hash/Git revision. PostgreSQL advances the
+Workspace revision with compare-and-swap. This operation does not create a
+second archive of all Workspace bytes.
 
-## Authority handoff
+A Cube activation may remain warm according to the Session retention policy.
+Its processes, sockets and PTYs survive only while that exact activation
+survives. After destruction or failure, a new KVM reattaches the same Volume and
+recovers files, not RAM or process state. Warm retention is an optimization,
+never a conversation or Workspace durability dependency.
 
-An activation starts with a binding hash and random handoff secret known only
-to the trusted Manager and guest Tool service. Every request carries:
+## Tool and terminal channels
 
-- current handoff secret;
-- current fencing token;
-- physical binding hash;
-- frozen logical Turn digest, current Attempt digest, current per-sampling Step
-  digest and one immutable operation ID.
+Agent file and shell Tools use the authenticated private Tool service. The Web
+Terminal uses a separate short-lived human authority through the same Tool
+Broker and guest service:
 
-Warm reuse rotates authority before another Run can execute. A stale Worker may
-still exist, but its old capability and fence are rejected.
+```text
+authenticated browser WebSocket
+  -> Control Plane
+  -> Tool Broker
+  -> Cube Tool service
+  -> unprivileged PTY in /workspace
+```
 
-The Manager and guest Tool service retain bounded process-local operation
-ledgers. A short transport disconnect can reattach to the same exact request;
-it cannot create a second command. If either ledger or the VM disappears, the
-result is `UNKNOWN` and the activation is destroyed rather than replayed.
+A human terminal and an Agent Run cannot write the same Workspace at the same
+time. There is no public SSH port and no second `envd` command channel.
 
-## Workspace
+## Network policy
 
-The Workspace is a Workspace-bound Cube Volume/POSIX directory. It remains
-mounted while the activation is warm. At a commit boundary:
+The guest has no route to platform services. Optional public HTTP/HTTPS egress
+crosses a deployment-owned proxy that resolves targets and rejects loopback,
+private, link-local, metadata, Kubernetes and platform destinations. Proxy
+configuration grants public dependency access, not trusted-network access.
 
-1. stop accepting old-fence Tool operations;
-2. quiesce the Tool mutation boundary;
-3. flush the Workspace;
-4. capture a bounded persistent-Volume revision through the trusted gateway;
-5. CAS the PostgreSQL Workspace head;
-6. return the activation to `IDLE_WARM` or destroy it while retaining the Volume.
+## Template and resource policy
 
-Background processes can remain alive during a warm idle window. They are not
-promised across activation destruction or failure.
+The deployment-owned immutable template supplies the fixed non-root user,
+language toolchain and private Tool service. Users cannot submit a template,
+kernel, device, host mount, privileged flag or network policy. Cube and the
+Tool service enforce bounded CPU, memory, process count, open files, output and
+execution time.
 
-## Interactive terminal
+Template retention deletes only superseded Pi Cloud templates after proving no
+active Sandbox references them. It does not touch tenant Workspace Volumes or
+Pi Session records.
 
-PiCloud allocates a real guest PTY through its fenced Cube Tool Service for
-the Workspace Web Terminal. The browser never connects to Cube or a public port
-directly: authenticated browser WebSocket → Control Plane proxy → Tool Broker →
-authenticated Cube Tool Service → guest PTY. The PTY starts an interactive
-login shell as the fixed unprivileged user in `/workspace` and supports bounded
-input, output and resize frames.
+## Reconciliation and evidence
 
-Cube's general-purpose `envd` remains absent from the PiCloud image.
-Re-enabling it would create a second command channel outside the Tool handoff
-secret and fencing checks. Terminal open, input, resize and close therefore use
-the same private port 49984 and current activation authority as every other
-mutable Tool request.
+PostgreSQL records desired activation identity and fenced ownership. Tool
+Broker periodically reconciles that state with Cube inventory. Destruction is
+qualified by both logical activation and physical runtime identity, so an old
+cleanup request cannot delete a newer KVM.
 
-The Tool Broker gives this human session its own short lease and excludes Agent
-Tool writers for the same Workspace. Closing or losing the terminal destroys
-the Cube activation but not the persistent Volume. This is a development shell,
-not a promise of persistent VM process state and not an SSH service.
-
-## Network
-
-Cube is created with Internet support, while Web traffic is explicitly routed
-through the trusted Cube egress gateway. The gateway:
-
-- accepts only HTTP proxy and HTTPS CONNECT;
-- resolves targets itself;
-- rejects private/link-local/metadata/platform addresses;
-- supports a hot-configured upstream proxy;
-- has no tenant/model/database credential.
-
-Tools that ignore `HTTP_PROXY`/`HTTPS_PROXY` do not gain a secret direct route
-through PiCloud's gateway.
-
-## Runtime evidence
-
-The Provider validates:
-
-- exact template/image revision;
-- guest kernel and hypervisor evidence;
-- UID/GID and `no_new_privs`;
-- effective capabilities;
-- CPU and memory shape;
-- expected Tool service identity;
-- public-proxy/private-denied network mode.
-
-Invalid evidence prevents the activation from serving Tools.
-
-## Reconciliation
-
-Cube inventory metadata records immutable creation identity and every
-fence-qualified assignment. The Manager periodically compares desired
-PostgreSQL state with live inventory.
-
-Cleanup requires both logical identity and physical runtime identity. An old
-cleanup request cannot delete a newer activation with a reused logical name.
-
-## Known limits
-
-- Warm processes survive only while the exact activation remains valid.
-- A cold restore recovers files and Git state, not RAM, sockets or PTYs.
-- Public egress is proxy-aware and policy constrained.
-- The single-node deployment shares one physical host; host/KVM/Cube
-  administrative compromise remains in the trusted computing base.
-
-## Verification
+Verification includes:
 
 ```bash
 npm run cubesandbox:template-check
@@ -152,12 +106,8 @@ npm run cubesandbox:live-check
 npm run production:check
 ```
 
-The Provider live gate starts a real background service inside Cube, releases
-the Run with persistent retention, advances beyond the ordinary warm TTL and
-rebinds the same physical KVM guest under a new Attempt/fence. It requires the
-same PID and service endpoint to remain alive, rejects the old Tool capability,
-then destroys the guest and proves zero orphaned runtimes. The production gate
-also propagates the persistent policy through the public API and Worker path
-and requires conversation archival to reap the retained guest. Live checks
-require a running Cube cluster and explicit acknowledgement when real model
-calls are enabled.
+The live gate is required for claims about guest identity, credentials,
+cross-tenant file isolation, private-network denial, public proxy behavior,
+timeout/cancellation, persistent Volume reattachment and orphan cleanup. The
+one-host profile still shares one physical host and does not claim host or Cube
+administrator compromise tolerance.

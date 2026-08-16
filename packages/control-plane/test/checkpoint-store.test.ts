@@ -388,10 +388,7 @@ async function insertCompletedEvent(
     .execute();
 }
 
-const s3Only = process.env.PI_CLOUD_TEST_S3_ONLY === "true";
-
 beforeAll(async () => {
-  if (s3Only) return;
   pglite = await PGlite.create();
   socketServer = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port: 0 });
   await socketServer.start();
@@ -405,7 +402,6 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  if (s3Only) return;
   await database?.destroy();
   await socketServer?.stop();
   await pglite?.close();

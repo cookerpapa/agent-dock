@@ -13,10 +13,9 @@ business/Run-state authority. There is no second workflow scheduler.
 
 This document describes the maintained production path. Historical migrations
 must remain executable from an empty database, so their source files still
-show when Temporal, execution Cells and Worker-affinity columns were introduced
-and later removed. `docs/IMPLEMENTATION_LOG.md`, `docs/discussions/` and
-superseded ADRs likewise preserve the reasoning chronology. None of those
-historical names reactivates a component in the current topology.
+show when retired columns were introduced and later removed. Superseded ADRs
+are kept only in Git history. Implementation logs, discussions and research are
+background evidence and never reactivate a component in the current topology.
 
 The current Worker invariant is deliberately precise:
 

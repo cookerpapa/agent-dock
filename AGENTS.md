@@ -11,16 +11,17 @@ infrastructure, not merely a chat UI or a collection of framework integrations.
 Read these files first:
 
 1. `README.md`
-2. `docs/ARCHITECTURE.md`
-3. `docs/ROADMAP.md`
-4. `docs/BACKLOG.md`
+2. `docs/README.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/ROADMAP.md`
+5. `docs/BACKLOG.md`
 
-Those four files describe the maintained architecture. Treat
-`docs/IMPLEMENTATION_LOG.md`, `docs/discussions/`, superseded ADRs and earlier
-database migrations as historical evidence, not as current topology. In
-particular, historical Cell, Temporal and Worker-affinity names must never be
-inferred back into the active runtime without confirming current production
-code and the latest accepted ADR.
+Those files and the indexed ADRs describe the maintained architecture. Treat
+the implementation-log history, `docs/discussions/`, research and earlier
+database migrations as historical evidence, not as current topology. In particular,
+historical Cell, Temporal and Worker-affinity names must never be inferred back
+into the active runtime without confirming current production code and the
+current architecture ADR.
 
 Work on one roadmap item or one vertical slice at a time. If a requested change
 alters an architectural invariant, storage ownership, security boundary, or
@@ -40,24 +41,26 @@ protocol, record the decision under `docs/adr/` before implementation.
 - Use idempotency keys, leases, and fencing tokens for distributed mutations.
 - Preserve per-session ordering without dedicating a process or OS thread to a cold session.
 - Treat Pi's PostgreSQL `SessionStorage` as conversation authority and
-  PostgreSQL as the sole Run/control authority. The stable JSONL adapter is a
-  temporary upstream-compatibility boundary backed by PostgreSQL, not S3.
+  PostgreSQL as the sole Run/control authority. Any Pi JSONL compatibility
+  object must remain a bounded PostgreSQL-backed upstream adapter; it is never
+  a lifetime transcript or a second conversation authority.
 - Treat the persistent Cube Volume as the sole Workspace byte authority. Do
   not add a second per-Run archive/checkpoint head without measured recovery
   requirements and a new ADR.
 - Do not claim exactly-once semantics for arbitrary shell commands or external side effects.
 - Do not run untrusted tools in the control-plane or trusted Agent Runner process.
-- Keep activation authorization and identity fencing in the provider-neutral
-  ToolSandboxManager; a SandboxProvider may own runtime mechanics but must not
-  receive Manager bearer credentials or expose its native SDK to the Runner.
-- Provider selection is trusted deployment policy. Do not claim a planned
-  gVisor, microVM, Kubernetes, or managed Provider until its shared acceptance
-  suite passes.
+- Keep activation authorization and identity fencing in Tool Broker; the
+  `SandboxProvider` adapter owns Cube mechanics but must not receive Broker
+  bearer credentials or expose its native SDK to the Worker.
+- CubeSandbox KVM is the only supported Tool runtime. Adding an alternate
+  runtime requires a new current ADR and the same security/recovery acceptance
+  suite; it must not enter as a silent fallback.
 - Do not mount the Docker socket, host home directory, or long-lived provider
   credentials into an agent sandbox.
-- Do not add Kafka, Flink, Redis, Temporal, or Kubernetes merely to make the
-  architecture look larger. Add infrastructure only with a demonstrated need,
-  then apply the adopt-before-build policy below.
+- Do not add a second event broker, cache, workflow scheduler or cluster layer
+  merely to make the architecture look larger. Kafka, Valkey and Kubernetes
+  already have bounded current roles; additions require a demonstrated gap and
+  the adopt-before-build policy below.
 - Pin Pi and other important dependency versions and provide upgrade contract tests.
 - Never commit secrets, generated credentials, session transcripts, or user repositories.
 

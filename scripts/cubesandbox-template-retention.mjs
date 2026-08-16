@@ -11,7 +11,7 @@ export function parseCubeTemplateRetention(value) {
   return retention;
 }
 
-function agentDockTemplate(value) {
+function piCloudTemplate(value) {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -38,7 +38,7 @@ export function selectCubeTemplatesForDeletion({
     throw new Error("Cube template inventory must be an array");
   }
   const limit = parseCubeTemplateRetention(retention);
-  const owned = inventory.filter(agentDockTemplate);
+  const owned = inventory.filter(piCloudTemplate);
   const protectedIds = new Set(
     protectedTemplateIds.filter((value) => /^tpl-[a-z0-9]{24}$/.test(value ?? "")),
   );

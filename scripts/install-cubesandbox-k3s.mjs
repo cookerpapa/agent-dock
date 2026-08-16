@@ -1070,9 +1070,9 @@ async function installTemplateRegistry() {
 if ((await repositoryHead(cubeRepository)) !== CUBE_COMMIT) {
   throw new Error(`CubeSandbox checkout must be pinned to ${CUBE_COMMIT}`);
 }
-const agentDockRevision = await repositoryHead(repositoryRoot);
-const authorizerImage = `${authorizerImageRepository}:${agentDockRevision}`;
-const cubeEgressGatewayImage = `${cubeEgressGatewayImageRepository}:${agentDockRevision}`;
+const piCloudRevision = await repositoryHead(repositoryRoot);
+const authorizerImage = `${authorizerImageRepository}:${piCloudRevision}`;
+const cubeEgressGatewayImage = `${cubeEgressGatewayImageRepository}:${piCloudRevision}`;
 await capture("test", ["-r", kubeconfig]);
 await capture("test", ["-r", credentialPath]);
 await capture("test", ["-r", secretValuesPath]);
@@ -1112,7 +1112,7 @@ await run("docker", [
   "--build-arg",
   `PI_CLOUD_VERSION=cube-primary`,
   "--build-arg",
-  `PI_CLOUD_REVISION=${agentDockRevision}`,
+  `PI_CLOUD_REVISION=${piCloudRevision}`,
   "--tag",
   authorizerImage,
   ".",
@@ -1124,7 +1124,7 @@ await run("docker", [
   "--build-arg",
   "PI_CLOUD_VERSION=cube-primary",
   "--build-arg",
-  `PI_CLOUD_REVISION=${agentDockRevision}`,
+  `PI_CLOUD_REVISION=${piCloudRevision}`,
   "--tag",
   cubeEgressGatewayImage,
   ".",

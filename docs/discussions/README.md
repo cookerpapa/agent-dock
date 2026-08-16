@@ -18,7 +18,7 @@ chronological order and intentionally excludes hidden reasoning, Tool traffic
 and internal metadata. Re-running the command replaces the generated Markdown
 deterministically with the latest shared snapshot.
 
-Current archive:
+Archived design input:
 
-- [2026-08-13 PiCloud architecture review](./2026-08-13-chatgpt-picloud-architecture-review.md)
+- [2026-08-13 PiCloud architecture review](./2026-08-13-chatgpt-pi-cloud-architecture-review.md)
 - [2026-08-14 Streaming durability and thin Pi runtime](./2026-08-14-chatgpt-streaming-and-pi-runtime.md)

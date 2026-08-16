@@ -20,8 +20,9 @@ to restore model context and made pure chat perform unnecessary writes.
 3. Remove synthetic Pi artifacts, `pi_session_snapshot_key`, the Run base Pi
    artifact pointer and the Workspace-version Pi artifact foreign key.
 4. The Workspace checkpoint loader restores only filesystem state.
-5. Keep immutable-object caching only for bounded Workspace and Tool-output
-   objects.
+5. Conversation state never enters the bounded PostgreSQL object rows used for
+   Workspace seeds and oversized Tool output. Those objects are separate from
+   Pi SessionStorage and from the persistent Workspace Volume authority.
 
 ## Consequences
 

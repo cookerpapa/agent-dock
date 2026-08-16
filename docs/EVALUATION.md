@@ -1,100 +1,86 @@
 # Evaluation
 
-PiCloud keeps infrastructure correctness separate from model intelligence.
-All checked-in `latest` reports are machine-readable JSON plus a short Markdown
-rendering and include the methodology and exclusions.
+Pi Cloud separates deterministic protocol checks, live infrastructure
+acceptance and model-quality experiments. A checked-in report is current only
+when its workload exercises the PostgreSQL queue/SessionStorage, Kafka/Valkey
+event path, persistent Cube Volume and CubeSandbox KVM runtime described in the
+current architecture ADR.
 
-## Deterministic coding loop
-
-```bash
-npm run eval:coding -- --register
-```
-
-Ten isolated Calculator repairs exercise durable acceptance, the Pi SDK, streamed
-tool calls, offline Tool Sandboxes, failed-then-passed focused Java tests,
-Workspace checkpoint commit, file restoration, trace identity, and cleanup.
-The fake model emits a fixed action sequence, so this measures the platform's
-Agent Loop, not model reasoning. The latest result is
-`docs/reports/coding-eval-latest.json`.
-
-## Fault injection
+## Deterministic gates
 
 ```bash
+npm run check
 npm run eval:faults
+npm run benchmark:event-spool
 ```
 
-The manifest in `eval/fault-cases.json` targets checkpoint commit failure,
-duplicate delivery, stale fencing, ACK loss, corrupt spool, object-store
-outage, checkpoint corruption/CAS, cancel-complete race, stale dispatch claim,
-orphan-runtime cleanup, a real Worker `SIGKILL` after WAL sync and replacement
-of a `SIGKILL`ed Control Channel server. Each case names the protected
-invariant. The suite distinguishes process-level faults from simulated
-dependency failures; `npm run production:check` adds live container
-restart/reconnect evidence.
+The ordinary test suite covers queue claims, Session ordering, leases/fences,
+Pi SessionStorage, event ordering, cancellation, Tool ambiguity, Workspace
+settlement and tenant isolation without spending model tokens.
 
-## Streaming durability
+`eval:faults` selects named process/protocol failure cases from
+`eval/fault-cases.json`. Every manifest entry must refer to a test that exists
+in the current tree. The suite is deterministic fault injection, not a
+multi-node chaos claim. The latest current-topology run is recorded in the
+[fault evaluation report](reports/fault-eval-latest.md).
 
-Streaming text is coalesced before it enters the Worker WAL, then delivered as
-contiguous batches with cumulative ACK. Both production profiles commit an
-authenticated batch directly to Kafka and project it idempotently into a
-Valkey Stream. PostgreSQL stores sequence/fence cursors, terminal canonical
-Turns and projection offsets, but neither an intermediate payload Outbox nor
-raw token deltas. The integration suite covers mixed redelivery, Kafka-backed
-ACK, Valkey conflict/gap detection and the separate persisted/projected cursor.
-SSE reads only Valkey rows covered by that projected cursor plus PostgreSQL
-terminal rows, and
-Pi recovery tests prove that committed text and Tool facts appear in Pi's
-effective next model context after hard-crash recovery.
+The Worker event benchmark verifies the append-only local WAL, restart replay,
+checksum/gap rejection and cumulative acknowledgement. See
+[the WAL report](reports/event-spool-wal-optimization-2026-07-30.md).
 
-This removes per-token transactions and per-event cursor updates. The measured
-2,000-Session PostgreSQL gate committed 128,000 logical events at 3,223 events/s
-with a 3,592 ms batch-ACK p95, which failed the selected 10,000 events/s and
-500 ms p95 enterprise gate and triggered the Kafka implementation. The Strimzi
-Stage 2 manifests are capacity inputs only; multi-node broker/projector loss and
-sustained Kafka throughput are not yet measured claims.
-
-The local transport acceptance in
-[kafka-worker-event-acceptance-latest.md](reports/kafka-worker-event-acceptance-latest.md)
-uses the production Confluent/librdkafka client against a real Kafka broker. It
-verifies Session-key ordering and end-to-end envelope projection without Node
-24 client warnings. It is deliberately scoped as a transport check rather than
-a multi-broker Stage 2 capacity result.
-
-The end-to-end
-[enterprise event-pipeline acceptance](reports/enterprise-event-pipeline-acceptance-latest.json)
-uses a real PostgreSQL server, Kafka broker and Valkey server. It validates the
-authenticated HTTP ingest boundary, duplicate projection, projector
-stop/restart recovery, contiguous terminal settlement, zero PostgreSQL raw
-stream rows and removal of the old payload Outbox. It remains a single-node
-functional check, not an HA or broker-failover claim.
-
-For the end-to-end Control Plane boundary, deploy the current revision and run:
+## Live-event durability
 
 ```bash
-PI_CLOUD_LIVE_CONTROL_PLANE_RESTART_CHECK=1 \
-  npm run production:control-plane-restart-check
+npm run eval:kafka-events
+npm run eval:enterprise-events
 ```
 
-The check starts one real-model streaming Run, sends `SIGKILL` to the Control
-Plane container after the first committed text event, starts a replacement and
-requires SSE replay plus terminal completion with the original single Attempt.
-The latest run resumed through 12 SSE reconnect attempts, reached terminal
-sequence 126 and completed the original Attempt in 16.199 seconds.
+The production stream is:
 
-The multi-tenant functional stream check is separate from a saturation test:
+```text
+Worker WAL -> Event Gateway -> Kafka -> Valkey projection -> resumable SSE
+```
+
+Kafka acknowledgement precedes visibility. PostgreSQL stores projection
+watermarks, terminal canonical Turns and Run state, not raw token deltas. The
+transport acceptance checks per-Session ordering; the enterprise functional
+check adds real PostgreSQL, authenticated ingest, duplicate delivery,
+projector restart, terminal projection and zero raw-stream rows in PostgreSQL.
+
+Current evidence:
+
+- [Kafka transport acceptance](reports/kafka-worker-event-acceptance-latest.md)
+- [Event-pipeline acceptance](reports/enterprise-event-pipeline-acceptance-latest.md)
+
+Both reports are single-host functional evidence, not multi-broker HA or
+saturation claims.
+
+## Cube and real-model acceptance
 
 ```bash
-PI_CLOUD_LIVE_MULTI_TENANT_LOAD=1 \
-  PI_CLOUD_LIVE_MULTI_TENANT_COUNT=6 \
-  npm run production:multi-tenant-model-load
+npm run cubesandbox:live-check
+npm run production:check
+npm run production:worker-pool-check
 ```
 
-It submits two real-model Runs concurrently for each isolated tenant. The
-second round must recover only that tenant's first-round marker through Pi's
-native Session context. The latest run completed all 12 Runs on two Workers
-with one Attempt each and persisted 255 semantic events, including 207
-coalesced assistant text events. This is functional concurrency evidence, not
-a claim that six tenants saturate PostgreSQL.
+The Cube gate attests real KVM guests, tenant-separated persistent Workspaces,
+credential isolation, egress policy, resource/output bounds, authority
+rotation, cancellation and cleanup. The production gate consumes real model
+tokens and verifies:
+
+- pure chat does not activate Cube;
+- multi-round coding uses fenced remote Tools;
+- a warm Cube may be reused under a newer authority;
+- a fresh Cube can attach the same persistent Workspace Volume;
+- the user Workspace does not contain platform-owned Git metadata;
+- cross-tenant conversation access is denied;
+- retained Cubes are reaped by the declared lifecycle.
+
+Current evidence:
+
+- [Cube KVM acceptance](reports/cubesandbox-kvm-acceptance-latest.md)
+- [Production acceptance](reports/cubesandbox-production-acceptance-latest.md)
+- [Shared Worker-pool acceptance](reports/pi-worker-pool-acceptance-latest.md)
 
 ## Long-context compaction
 
@@ -103,73 +89,16 @@ PI_CLOUD_LIVE_LONG_CONTEXT_CHECK=1 \
   npm run production:long-context-check
 ```
 
-This sustained gate creates one persistent Cube Workspace and asks the real
-model to implement and test successive sorting, searching, tree and graph
-modules. It does not stop at a token estimate: it requires Pi to emit a
-completed native compaction, recalls an invariant from the first coding Turn,
-continues tool-driven coding after compaction, stops the owning Pi Worker and
-requires another Worker to restore the compacted Session while rebinding the
-same persistent Cube runtime.
+This expensive gate performs real coding Turns until Pi completes native
+compaction, then verifies early-context recall, further Tool use and recovery
+on a different Worker. It proves bounded PostgreSQL SessionStorage restoration
+rather than lifetime JSONL download. See
+[the compaction report](reports/long-context-compaction-acceptance-latest.md).
 
-The latest run completed 11 coding Turns before threshold compaction reduced
-the estimated active context from 113,920 to 22,667 tokens in 18.294 seconds.
-It then completed recall, post-compaction coding and cross-Worker coding. The
-run used 165 real model attempts and ended with 524,224 bytes / 347 incremental
-PostgreSQL SessionStorage entries; only 136,471 bytes / 67 entries belonged to
-the final active branch. See
-[the acceptance report](reports/long-context-compaction-acceptance-latest.md).
+## Interpreting evidence
 
-## Sandbox security
-
-```bash
-npm run cubesandbox:live-check
-npm run production:check
-```
-
-The live gate attests the Cube KVM guest and runs the Provider contract plus a
-real Pi remote-tool repair. It validates resources, public-proxy/private-denied
-networking, credential isolation, tenant-separated Workspaces,
-traversal/symlink denial, output bounds, cancellation, checkpoint restore and
-exact resource cleanup. The Provider gate additionally starts a real background
-service, crosses the ordinary idle TTL under persistent retention, rotates the
-Attempt/fence, and requires the same Cube runtime, PID and service endpoint to
-survive before final zero-orphan cleanup. The production gate verifies the
-public Session policy reaches that lifecycle and that archiving the Session
-reaps the retained KVM guest.
-
-## Control Plane load
-
-```bash
-npm run eval:load
-```
-
-The benchmark creates and reads tenant-scoped cold Sessions using 10, 50, and
-100 simultaneous loopback HTTP requests. It samples process RSS, CPU, and event
-loop lag from Prometheus after the run. It deliberately does not claim 100
-simultaneous LLM/Sandbox Runs: active Run capacity is bounded independently by
-tenant policy, Supervisor capacity, memory, provider quota, and latency.
-
-## Current reproduced result
-
-The checked-in reports currently record:
-
-- deterministic coding loop: 10/10 successful, concurrency 2, p50 9.168 s,
-  p95 10.224 s;
-- targeted fault injection (2026-08-08): 15/15 invariants preserved, including
-  real Worker and Control Plane process `SIGKILL` boundaries;
-- real Control Plane replacement: one streaming DeepSeek Run completed with its
-  original Attempt after the container was `SIGKILL`ed; SSE resumed through
-  sequence 126;
-- real multi-tenant stream recovery: 12/12 Runs completed across six isolated
-  tenants, all six follow-up Runs restored the correct private marker, and no
-  cross-tenant marker appeared;
-- Control Plane load: 320/320 successful requests; at 100 simultaneous requests,
-  Session creation was 114.20 requests/s with 831 ms p95, and reads were 236.81
-  requests/s with 408 ms p95;
-- post-load RSS: Control Plane 200,962,048 bytes, Trusted Runner 167,043,072
-  bytes, Tool Broker 119,164,928 bytes;
-- all three Prometheus targets were up and Jaeger contained cross-service traces
-  from all three trusted services.
-
-These numbers describe this single-host Docker Desktop run, not a service-level
-objective or generalized hardware claim.
+Every performance or reliability statement must name the tested commit,
+hardware/topology, workload and exclusions. A report generated by a retired
+Temporal, gVisor, MinIO/S3 or Kopia topology is historical and is deliberately
+not retained as a `latest` report in the current tree. Multi-node failover,
+broker loss and capacity targets remain unproven until run on that topology.

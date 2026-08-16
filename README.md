@@ -25,11 +25,10 @@ claimed by a different Worker. A `worker_id`/Supervisor identity recorded on a
 RunAttempt means only “this Worker currently owns this leased Attempt”; it is
 cleared or superseded with that Attempt and is not a routing preference.
 
-Older migration files, implementation-log entries and archived discussions
-still contain Temporal, Cell and affinity vocabulary because they preserve the
-pre-production schema's history. They do not describe the migrated schema or
-the maintained deployment. The current sources of truth are this README,
-`docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, and the latest accepted ADRs.
+Ordered migration files still contain retired table names so a new database can
+replay the pre-production schema history. They do not describe the migrated
+schema or maintained deployment. The current sources of truth are this README,
+`docs/ARCHITECTURE.md`, `docs/RUN_LIFECYCLE.md` and the indexed current ADRs.
 
 ## Product
 
