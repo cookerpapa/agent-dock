@@ -77,7 +77,18 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
       const state = await this.#readState(directory);
       const generation = await this.#readVolumeGeneration(directory);
       const workspaceValid = await this.#hasValidWorkspaceDirectory(directory);
-      if (state !== undefined || generation !== undefined || workspaceValid) {
+      const entries = await readdir(directory);
+      const pristinePluginWorkspace =
+        state === undefined &&
+        generation === undefined &&
+        workspaceValid &&
+        entries.length === 1 &&
+        entries[0] === VOLUME_WORKSPACE_DIRECTORY &&
+        (await readdir(join(directory, VOLUME_WORKSPACE_DIRECTORY))).length === 0;
+      if (
+        !pristinePluginWorkspace &&
+        (state !== undefined || generation !== undefined || workspaceValid)
+      ) {
         if (
           state === undefined ||
           generation === undefined ||
@@ -95,7 +106,7 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
         }
         return { attached: true };
       }
-      if ((await readdir(directory)).length !== 0) {
+      if (!pristinePluginWorkspace && entries.length !== 0) {
         throw new WorkspaceVolumeGatewayError(
           "workspace_volume_contents_invalid",
           "Uninitialized Workspace Volume was not empty",
@@ -103,7 +114,7 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
         );
       }
       const workspaceDirectory = join(directory, VOLUME_WORKSPACE_DIRECTORY);
-      await mkdir(workspaceDirectory, { mode: 0o700 });
+      if (!workspaceValid) await mkdir(workspaceDirectory, { mode: 0o700 });
       const metadataDirectory = join(directory, VOLUME_METADATA_DIRECTORY);
       await mkdir(metadataDirectory, { mode: 0o700 });
       const volumeGeneration = randomBytes(32).toString("hex");

@@ -81,6 +81,30 @@ describe("PersistentVolumeWorkspaceVolumeGateway", () => {
     await expect(readFile(join(workspace, "src", "answer.txt"), "utf8")).resolves.toBe("two\n");
   });
 
+  it("binds the empty workspace directory created by the Cube Volume Plugin", async () => {
+    const workspaceRoot = await root();
+    const mover = new PersistentVolumeWorkspaceVolumeGateway({ workspaceRoot });
+    const first = identity("session-plugin-created");
+    const volumeRoot = join(workspaceRoot, `picloud-posix-${first.volumeId}`);
+    await mkdir(join(volumeRoot, "workspace"), { recursive: true, mode: 0o700 });
+
+    await expect(mover.prepare(first)).resolves.toEqual({ attached: false });
+    await expect(mover.prepare(first)).resolves.toEqual({ attached: true });
+  });
+
+  it("rejects an unbound Cube workspace that already contains user bytes", async () => {
+    const workspaceRoot = await root();
+    const mover = new PersistentVolumeWorkspaceVolumeGateway({ workspaceRoot });
+    const first = identity("session-plugin-nonempty");
+    const workspace = join(workspaceRoot, `picloud-posix-${first.volumeId}`, "workspace");
+    await mkdir(workspace, { recursive: true, mode: 0o700 });
+    await writeFile(join(workspace, "untrusted.txt"), "not pristine\n");
+
+    await expect(mover.prepare(first)).rejects.toMatchObject({
+      code: "workspace_volume_binding_invalid",
+    });
+  });
+
   it("rejects a volume identity from another tenant", async () => {
     const workspaceRoot = await root();
     const mover = new PersistentVolumeWorkspaceVolumeGateway({ workspaceRoot });
