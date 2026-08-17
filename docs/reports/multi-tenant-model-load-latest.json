@@ -1,0 +1,66 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-08-17T12:57:38.569Z",
+  "tenants": 6,
+  "runs": 12,
+  "model": {
+    "provider": "deepseek",
+    "modelId": "deepseek-v4-flash"
+  },
+  "correctness": {
+    "completedRuns": 12,
+    "failedRuns": 0,
+    "markerRestores": 6,
+    "crossTenantApiDenials": 6,
+    "crossTenantMarkerLeaks": 0,
+    "unexpectedToolEvents": 0,
+    "maximumAttemptCount": 1
+  },
+  "latencyMs": {
+    "acceptance": {
+      "minimum": 40,
+      "p50": 45,
+      "p95": 101,
+      "maximum": 101
+    },
+    "firstText": {
+      "minimum": 1545,
+      "p50": 4526,
+      "p95": 9662,
+      "maximum": 9662
+    },
+    "settled": {
+      "minimum": 2836,
+      "p50": 5548,
+      "p95": 12379,
+      "maximum": 12379
+    },
+    "queueWait": {
+      "minimum": 629,
+      "p50": 3650,
+      "p95": 9039,
+      "maximum": 9039
+    }
+  },
+  "workers": {
+    "distinct": ["agent-dock-worker-1", "agent-dock-worker-2"],
+    "assignments": {
+      "agent-dock-worker-1": 6,
+      "agent-dock-worker-2": 6
+    }
+  },
+  "streaming": {
+    "projectionCount": 12,
+    "projectedSourceEvents": 228,
+    "semanticItems": 12,
+    "canonicalPayloadBytes": 8030,
+    "sourceEventsPerRun": 19
+  },
+  "usage": {
+    "requests": 12,
+    "inputTokens": 870,
+    "outputTokens": 1225,
+    "cacheReadTokens": 12288,
+    "cacheWriteTokens": 0
+  }
+}
