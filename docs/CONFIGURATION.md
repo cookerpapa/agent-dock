@@ -56,8 +56,8 @@ authorities are:
 - Cube API/proxy/Volume Plugin endpoints;
 - provider egress proxy.
 
-KEDA's PostgreSQL scaler reads the count of ready `turn.command.v1` and
-`turn.cancel.v1` Outbox rows. It changes Worker replica count only; database
+KEDA's PostgreSQL scaler reads the count of ready `control.command.pending.v1`
+and `control.command.cancel.pending.v1` Outbox rows. It changes Worker replica count only; database
 claim/fence logic remains the scheduling authority.
 
 ## Ordered timing constraints

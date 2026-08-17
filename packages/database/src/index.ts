@@ -99,6 +99,8 @@ export {
   downPostgresSessionStorageOnly,
   upPiCloudEnvironmentProfile,
   downPiCloudEnvironmentProfile,
+  upPiCloudRunQueueNotification,
+  downPiCloudRunQueueNotification,
 } from "./migrations/index.ts";
 
 export {

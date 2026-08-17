@@ -54,7 +54,7 @@ spec:
         query: >-
           SELECT COUNT(*)::double precision
           FROM outbox
-          WHERE topic IN ('turn.command.v1', 'turn.cancel.v1')
+          WHERE topic IN ('control.command.pending.v1', 'control.command.cancel.pending.v1')
             AND published_at IS NULL
             AND available_at <= now()
         targetQueryValue: {{ .Values.autoscaling.targetQueuedRunsPerReplica | quote }}

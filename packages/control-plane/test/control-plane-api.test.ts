@@ -3203,6 +3203,36 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(mailboxAfterFailure).toEqual(mailboxBeforeFailure);
   });
 
+  it("settles a completed backend execution when the external event projection cannot catch up", async () => {
+    const accepted = await acceptTurn(
+      "event-projection-boundary-failure",
+      "finish the agent loop while the live projection is unavailable",
+    );
+    const dispatcher = new RunCommandExecutor({
+      database,
+      backend: new DeterministicExecutionBackend([{ kind: "complete", stopReason: "stop" }]),
+      eventProjectionBarrier: {
+        async waitForSession() {
+          throw new Error("simulated event projection outage");
+        },
+      },
+    });
+
+    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toMatchObject({
+      status: "failed",
+      commandId: accepted.commandId,
+      phase: "after_start",
+      failureCode: "event_projection_unavailable",
+    });
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "failed",
+      turnState: "failed",
+      sessionState: "idle",
+      commandFailureCode: "event_projection_unavailable",
+      turnFailureCode: "event_projection_unavailable",
+    });
+  });
+
   it("does not expose a terminal event when the final settlement transaction rolls back", async () => {
     const accepted = await acceptTurn(
       "terminal-transaction-rollback",

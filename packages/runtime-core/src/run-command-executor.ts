@@ -457,10 +457,25 @@ export class RunCommandExecutor {
             return this.#recordFailure(claim, started, normalizeFailure(error), acknowledgement);
           }
 
-          await this.#eventProjectionBarrier?.waitForSession(
-            claim.request.tenantId,
-            claim.request.sessionId,
-          );
+          try {
+            await this.#eventProjectionBarrier?.waitForSession(
+              claim.request.tenantId,
+              claim.request.sessionId,
+            );
+          } catch {
+            return this.#recordFailure(
+              claim,
+              true,
+              normalizeFailure(
+                new TurnExecutionBackendError(
+                  "event_projection_unavailable",
+                  "Run output could not reach its durable conversation boundary",
+                  false,
+                ),
+              ),
+              acknowledgement,
+            );
+          }
           await this.#complete(claim, executionResult, acknowledgement);
           return {
             status: "completed",

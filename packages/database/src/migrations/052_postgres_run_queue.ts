@@ -67,7 +67,7 @@ export async function up(db: Kysely<Database>): Promise<void> {
     create trigger outbox_notify_run_queue
     after insert on outbox
     for each row
-    when (new.topic in ('pi-cloud.turn.command.v1', 'pi-cloud.turn.cancellation.v1'))
+    when (new.topic in ('control.command.pending.v1', 'control.command.cancel.pending.v1'))
     execute function pi_cloud_notify_run_queue()
   `.execute(db);
 }
