@@ -1,35 +1,35 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-17T12:55:06.755Z",
+  "checkedAt": "2026-08-17T13:29:13.577Z",
   "model": { "provider": "deepseek", "modelId": "deepseek-v4-flash" },
   "workerDeployment": "compose",
-  "workers": ["agent-dock-worker-1", "agent-dock-worker-2"],
+  "workers": ["pi-cloud-worker-1", "pi-cloud-worker-2"],
   "failover": {
-    "firstWorker": "agent-dock-worker-2",
-    "followUpWorker": "agent-dock-worker-1",
+    "firstWorker": "pi-cloud-worker-1",
+    "followUpWorker": "pi-cloud-worker-2",
     "differentWorker": true,
     "postgresSessionRestored": true,
     "markerRecovered": true,
-    "firstSettledMs": 2492,
-    "followUpSettledMs": 2782,
+    "firstSettledMs": 2014,
+    "followUpSettledMs": 3279,
     "candidateRuns": 1
   },
   "concurrency": {
     "runs": 4,
     "workerIds": [
-      "agent-dock-worker-1",
-      "agent-dock-worker-1",
-      "agent-dock-worker-2",
-      "agent-dock-worker-2"
+      "pi-cloud-worker-2",
+      "pi-cloud-worker-1",
+      "pi-cloud-worker-2",
+      "pi-cloud-worker-1"
     ],
     "distinctWorkers": 2,
-    "observedWorkerIds": ["agent-dock-worker-1", "agent-dock-worker-2"],
-    "settledMs": [9755, 5562, 6467, 10762]
+    "observedWorkerIds": ["pi-cloud-worker-1", "pi-cloud-worker-2"],
+    "settledMs": [3879, 5060, 7809, 9314]
   },
   "totalUsage": {
     "requests": 6,
-    "inputTokens": 274,
-    "outputTokens": 1013,
+    "inputTokens": 276,
+    "outputTokens": 1059,
     "cacheReadTokens": 6144,
     "cacheWriteTokens": 0
   }

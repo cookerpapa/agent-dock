@@ -1,14 +1,14 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-17T12:50:06.266Z",
+  "checkedAt": "2026-08-17T13:27:45.223Z",
   "upstream": "TencentCloud/CubeSandbox@v0.6.0",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
   },
   "pureChat": {
-    "firstTextMs": 1838,
-    "settledMs": 2248,
+    "firstTextMs": 1344,
+    "settledMs": 1571,
     "toolCalls": 0,
     "cubeActivations": 0,
     "usage": {
@@ -21,31 +21,31 @@
     }
   },
   "firstCoding": {
-    "firstTextMs": 1868,
-    "settledMs": 11531,
+    "firstTextMs": 9114,
+    "settledMs": 9989,
     "toolCalls": 2,
     "cubeActivations": 1,
-    "workspaceFileBytes": 1512,
+    "workspaceFileBytes": 1207,
     "usage": {
       "requests": 3,
-      "inputTokens": 296,
-      "outputTokens": 839,
-      "cacheReadTokens": 4352,
+      "inputTokens": 312,
+      "outputTokens": 566,
+      "cacheReadTokens": 4224,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "followUpCoding": {
-    "firstTextMs": 9654,
-    "settledMs": 10745,
+    "firstTextMs": 8738,
+    "settledMs": 9575,
     "toolCalls": 3,
     "cubeActivations": 1,
-    "workspaceFileBytes": 1646,
+    "workspaceFileBytes": 1288,
     "usage": {
       "requests": 4,
-      "inputTokens": 1140,
-      "outputTokens": 461,
-      "cacheReadTokens": 9600,
+      "inputTokens": 1110,
+      "outputTokens": 427,
+      "cacheReadTokens": 8704,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
@@ -56,10 +56,10 @@
     "persistentSandboxPolicy": true,
     "workspaceRestored": true,
     "workspaceVersions": 2,
-    "finalWorkspaceFileBytes": 1646
+    "finalWorkspaceFileBytes": 1288
   },
   "workspaceIsolation": {
-    "volumeId": "adw-572cb1e7e10891bd049804fe318710508f44ef0124beb917",
+    "volumeId": "pcw-927f3028bd8f4ac414bbef216b6fe3d632daa49f755c0494",
     "trustedMetadataSibling": true,
     "userWorkspaceGitEntryAbsent": true
   },
@@ -69,39 +69,39 @@
   },
   "largeWorkspace": {
     "source": "github.com/TencentCloud/CubeSandbox",
-    "firstRunId": "18d0ec25-6645-4191-b15a-9ac0af4b9834",
-    "followUpRunId": "4fa1a40a-79dd-4272-a121-369e2acd41b2",
+    "firstRunId": "1d7993c3-9ac5-4706-8a41-9edd453bd693",
+    "followUpRunId": "758bdcd3-646c-4e2d-9847-7bf3b2658ff7",
     "firstFileCount": 3215,
     "restoredFileCount": 3216,
     "volumeReferenceBytes": 590953,
     "sourceSandboxDestroyed": true,
     "persistentVolumeRetained": true,
-    "volumeId": "adw-075a8943eb3c7b1688608565fff4ecb4a4baf8cf0056bc85",
+    "volumeId": "pcw-171d74dbe3ce28860907bb352718273337b5365b05079783",
     "restoredFromPersistentVolume": true,
     "freshCubeMicroVm": true,
     "higherFenceActivation": true,
     "firstUsage": {
-      "requests": 5,
-      "inputTokens": 2442,
-      "outputTokens": 565,
-      "cacheReadTokens": 10496,
+      "requests": 6,
+      "inputTokens": 2368,
+      "outputTokens": 661,
+      "cacheReadTokens": 13056,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     },
     "followUpUsage": {
       "requests": 2,
-      "inputTokens": 297,
-      "outputTokens": 132,
-      "cacheReadTokens": 7936,
+      "inputTokens": 245,
+      "outputTokens": 130,
+      "cacheReadTokens": 7680,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "semanticConversation": {
     "projectionCount": 3,
-    "projectedSourceEvents": 96,
-    "semanticItems": 9,
-    "replayAfterSequence": 96
+    "projectedSourceEvents": 65,
+    "semanticItems": 8,
+    "replayAfterSequence": 65
   },
   "scheduler": {
     "authority": "PostgreSQL",
@@ -109,10 +109,10 @@
     "workerPool": "shared"
   },
   "totalUsage": {
-    "requests": 15,
-    "inputTokens": 4202,
-    "outputTokens": 2002,
-    "cacheReadTokens": 33408,
+    "requests": 16,
+    "inputTokens": 4062,
+    "outputTokens": 1789,
+    "cacheReadTokens": 34688,
     "cacheWriteTokens": 0
   },
   "cleanup": {
