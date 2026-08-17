@@ -1,14 +1,14 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-17T13:27:45.223Z",
+  "checkedAt": "2026-08-17T14:38:25.666Z",
   "upstream": "TencentCloud/CubeSandbox@v0.6.0",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
   },
   "pureChat": {
-    "firstTextMs": 1344,
-    "settledMs": 1571,
+    "firstTextMs": 2724,
+    "settledMs": 3135,
     "toolCalls": 0,
     "cubeActivations": 0,
     "usage": {
@@ -21,31 +21,31 @@
     }
   },
   "firstCoding": {
-    "firstTextMs": 9114,
-    "settledMs": 9989,
+    "firstTextMs": 10477,
+    "settledMs": 12253,
     "toolCalls": 2,
     "cubeActivations": 1,
-    "workspaceFileBytes": 1207,
+    "workspaceFileBytes": 1392,
     "usage": {
       "requests": 3,
-      "inputTokens": 312,
-      "outputTokens": 566,
-      "cacheReadTokens": 4224,
+      "inputTokens": 564,
+      "outputTokens": 701,
+      "cacheReadTokens": 4352,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "followUpCoding": {
-    "firstTextMs": 8738,
-    "settledMs": 9575,
-    "toolCalls": 3,
+    "firstTextMs": 10344,
+    "settledMs": 11914,
+    "toolCalls": 2,
     "cubeActivations": 1,
-    "workspaceFileBytes": 1288,
+    "workspaceFileBytes": 1955,
     "usage": {
-      "requests": 4,
-      "inputTokens": 1110,
-      "outputTokens": 427,
-      "cacheReadTokens": 8704,
+      "requests": 3,
+      "inputTokens": 906,
+      "outputTokens": 508,
+      "cacheReadTokens": 7168,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
@@ -56,10 +56,10 @@
     "persistentSandboxPolicy": true,
     "workspaceRestored": true,
     "workspaceVersions": 2,
-    "finalWorkspaceFileBytes": 1288
+    "finalWorkspaceFileBytes": 1955
   },
   "workspaceIsolation": {
-    "volumeId": "pcw-927f3028bd8f4ac414bbef216b6fe3d632daa49f755c0494",
+    "volumeId": "pcw-20de8746b006bb5489702cdce0dbaed47b89b2841be3303d",
     "trustedMetadataSibling": true,
     "userWorkspaceGitEntryAbsent": true
   },
@@ -69,39 +69,39 @@
   },
   "largeWorkspace": {
     "source": "github.com/TencentCloud/CubeSandbox",
-    "firstRunId": "1d7993c3-9ac5-4706-8a41-9edd453bd693",
-    "followUpRunId": "758bdcd3-646c-4e2d-9847-7bf3b2658ff7",
+    "firstRunId": "47c3f0d9-3c49-47aa-acda-ac7d2bce128f",
+    "followUpRunId": "148612c5-2b92-42d6-9906-7e4e3b1270b8",
     "firstFileCount": 3215,
     "restoredFileCount": 3216,
     "volumeReferenceBytes": 590953,
     "sourceSandboxDestroyed": true,
     "persistentVolumeRetained": true,
-    "volumeId": "pcw-171d74dbe3ce28860907bb352718273337b5365b05079783",
+    "volumeId": "pcw-bfb2ef77b198be9862d03c0b714ec13e234e2e8e120db8d5",
     "restoredFromPersistentVolume": true,
     "freshCubeMicroVm": true,
     "higherFenceActivation": true,
     "firstUsage": {
-      "requests": 6,
-      "inputTokens": 2368,
-      "outputTokens": 661,
-      "cacheReadTokens": 13056,
+      "requests": 4,
+      "inputTokens": 2253,
+      "outputTokens": 401,
+      "cacheReadTokens": 8704,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     },
     "followUpUsage": {
       "requests": 2,
-      "inputTokens": 245,
-      "outputTokens": 130,
-      "cacheReadTokens": 7680,
+      "inputTokens": 346,
+      "outputTokens": 138,
+      "cacheReadTokens": 7168,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "semanticConversation": {
     "projectionCount": 3,
-    "projectedSourceEvents": 65,
-    "semanticItems": 8,
-    "replayAfterSequence": 65
+    "projectedSourceEvents": 76,
+    "semanticItems": 7,
+    "replayAfterSequence": 76
   },
   "scheduler": {
     "authority": "PostgreSQL",
@@ -109,10 +109,10 @@
     "workerPool": "shared"
   },
   "totalUsage": {
-    "requests": 16,
-    "inputTokens": 4062,
-    "outputTokens": 1789,
-    "cacheReadTokens": 34688,
+    "requests": 13,
+    "inputTokens": 4096,
+    "outputTokens": 1753,
+    "cacheReadTokens": 28416,
     "cacheWriteTokens": 0
   },
   "cleanup": {
