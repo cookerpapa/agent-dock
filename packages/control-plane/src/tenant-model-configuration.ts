@@ -222,18 +222,44 @@ export class TenantModelConfigurationService {
       );
     }
     const currentVersion = positiveVersion(profile.credentialVersion);
-    const currentSecret =
+    const currentCredential =
       profile.provider === "deepseek"
         ? await transaction
             .selectFrom("tenant_model_credentials")
-            .select("secret_sha256 as secretSha256")
+            .select([
+              "key_version as keyVersion",
+              "nonce",
+              "ciphertext",
+              "auth_tag as authTag",
+              "secret_sha256 as secretSha256",
+            ])
             .where("tenant_id", "=", tenantId)
             .where("credential_binding_id", "=", profile.credentialBindingId)
             .where("credential_binding_version", "=", String(currentVersion))
             .executeTakeFirst()
         : undefined;
 
-    if (currentSecret?.secretSha256 === digest) {
+    let currentCredentialReadable = this.#vault === undefined;
+    if (currentCredential?.secretSha256 === digest && this.#vault !== undefined) {
+      try {
+        this.#vault.open(
+          {
+            tenantId,
+            credentialBindingId: profile.credentialBindingId,
+            credentialBindingVersion: currentVersion,
+            provider: "deepseek",
+          },
+          currentCredential,
+        );
+        currentCredentialReadable = true;
+      } catch {
+        // An explicit replacement with the same plaintext must still repair a
+        // credential sealed by an unavailable pre-rotation master key.
+        currentCredentialReadable = false;
+      }
+    }
+
+    if (currentCredential?.secretSha256 === digest && currentCredentialReadable) {
       const changedModel = profile.modelId !== request.modelId;
       if (changedModel) {
         await transaction

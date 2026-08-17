@@ -185,6 +185,52 @@ describe.sequential("tenant model configuration", () => {
     ).rejects.toBeInstanceOf(TenantModelConfigurationError);
   });
 
+  it("reseals an unchanged API key after the credential master key rotates", async () => {
+    const tenant = await createPrivateTenant(database, {
+      slug: "model-master-key-rotation",
+      ownerDisplayName: "Model Master Key Rotation",
+    });
+    const identity = ownerIdentity(tenant);
+    const originalVault = new TenantModelCredentialVault(MASTER_KEY);
+    const originalService = new TenantModelConfigurationService({
+      database,
+      vault: originalVault,
+    });
+    await expect(
+      originalService.replace(identity, {
+        provider: "deepseek",
+        modelId: "deepseek-v4-flash",
+        apiKey: FIRST_SECRET,
+      }),
+    ).resolves.toMatchObject({ credentialVersion: 2 });
+
+    const rotatedVault = new TenantModelCredentialVault(OTHER_MASTER_KEY);
+    const rotatedService = new TenantModelConfigurationService({
+      database,
+      vault: rotatedVault,
+    });
+    await expect(
+      rotatedService.replace(identity, {
+        provider: "deepseek",
+        modelId: "deepseek-v4-flash",
+        apiKey: FIRST_SECRET,
+      }),
+    ).resolves.toMatchObject({ credentialVersion: 3 });
+
+    const resolver = new PostgresTenantModelCredentialResolver({
+      database,
+      vault: rotatedVault,
+    });
+    await expect(
+      resolver.resolve({
+        tenantId: tenant.tenantId,
+        credentialBindingId: tenant.credentialBindingId,
+        credentialBindingVersion: 3,
+        provider: "deepseek",
+      }),
+    ).resolves.toMatchObject({ secret: FIRST_SECRET });
+  });
+
   it("lets a delegated web administrator update the durable platform source", async () => {
     const source = await createPrivateTenant(database, {
       slug: "delegated-model-source",
