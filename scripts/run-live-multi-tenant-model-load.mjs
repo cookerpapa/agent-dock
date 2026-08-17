@@ -54,6 +54,24 @@ const environment = Object.fromEntries(
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
 );
+const databaseUrl = new URL(
+  (
+    await readPrivate(
+      resolve(runtimeDirectory, "secrets/database-url"),
+      4_096,
+      "Production database URL",
+    )
+  ).trim(),
+);
+const databaseUser = decodeURIComponent(databaseUrl.username);
+const databaseName = decodeURIComponent(databaseUrl.pathname.slice(1));
+if (
+  databaseUrl.protocol !== "postgresql:" ||
+  !/^[A-Za-z_][A-Za-z0-9_-]{0,62}$/.test(databaseUser) ||
+  !/^[A-Za-z_][A-Za-z0-9_-]{0,62}$/.test(databaseName)
+) {
+  throw new Error("Production database identity is invalid");
+}
 const bindAddress = environment.PI_CLOUD_HTTP_BIND_ADDRESS;
 const port = environment.PI_CLOUD_HTTP_PORT;
 if (bindAddress === undefined || port === undefined) {
@@ -104,9 +122,9 @@ async function psql(query) {
     "postgres",
     "psql",
     "--username",
-    "pi_cloud",
+    databaseUser,
     "--dbname",
-    "pi_cloud",
+    databaseName,
     "--no-align",
     "--tuples-only",
     "--set",
