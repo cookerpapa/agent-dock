@@ -11,7 +11,7 @@ const COMMIT_SHA = "a".repeat(40);
 const EGRESS_PROXY = {
   host: "10.43.0.10",
   port: 3128,
-  capability: `adpc1_${"a".repeat(128)}.${"b".repeat(86)}`,
+  capability: `pcpc1_${"a".repeat(128)}.${"b".repeat(86)}`,
   publicKeyFingerprint: "c".repeat(64),
 } as const;
 

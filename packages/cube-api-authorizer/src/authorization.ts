@@ -12,7 +12,7 @@ const SANDBOX_ITEM_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}$`);
 const SANDBOX_LIFECYCLE_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}/(?:pause|connect)$`);
 const SANDBOX_SNAPSHOT_PATH = new RegExp(`^/sandboxes/${SANDBOX_ID}/snapshots$`);
 const SNAPSHOT_ITEM_PATH = /^\/templates\/snap-[a-f0-9]{24}$/;
-const WORKSPACE_VOLUME_ITEM_PATH = /^\/volumes\/adw-[a-f0-9]{48}$/;
+const WORKSPACE_VOLUME_ITEM_PATH = /^\/volumes\/pcw-[a-f0-9]{48}$/;
 
 function digest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();

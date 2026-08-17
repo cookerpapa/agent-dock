@@ -194,7 +194,7 @@ describe.sequential("private multi-tenant HTTP boundary", () => {
         },
       });
       expect(response.body).not.toContain("sha256");
-      expect(response.body).not.toContain("adk_");
+      expect(response.body).not.toContain("pck_");
     }
   });
 

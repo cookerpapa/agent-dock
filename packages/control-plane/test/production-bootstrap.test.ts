@@ -38,7 +38,7 @@ const CONFIG: ProductionBootstrapConfig = {
     },
   ],
 };
-const API_TOKEN = `adk_${CONFIG.apiCredentialId}.${"a".repeat(43)}`;
+const API_TOKEN = `pck_${CONFIG.apiCredentialId}.${"a".repeat(43)}`;
 
 let pglite: PGlite;
 let socketServer: PGLiteSocketServer;
@@ -208,7 +208,7 @@ describe.sequential("production bootstrap and configuration", () => {
       PI_CLOUD_API_TOKEN_FILE: await secret(
         root,
         "api",
-        `adk_40000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
+        `pck_40000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
       ),
       PI_CLOUD_SUPERVISOR_ENROLLMENT_TOKEN_FILE: await secret(
         root,
@@ -282,7 +282,7 @@ describe.sequential("production bootstrap and configuration", () => {
     expect(runtime).not.toHaveProperty("defaultModelProfileId");
     expect(runtime).not.toHaveProperty("apiToken");
     await expect(loadProductionApiToken(environment)).resolves.toBe(
-      `adk_40000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
+      `pck_40000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
     );
 
     const apiPath = environment.PI_CLOUD_API_TOKEN_FILE;

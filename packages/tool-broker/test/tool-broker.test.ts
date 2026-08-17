@@ -23,9 +23,9 @@ import {
 } from "../src/index.ts";
 
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
-const CAPABILITY = `adts_${"c".repeat(43)}`;
+const CAPABILITY = `pcts_${"c".repeat(43)}`;
 const SECOND_ACTIVATION_ID = "20000000-0000-4000-8000-000000000020";
-const SECOND_CAPABILITY = `adts_${"d".repeat(43)}`;
+const SECOND_CAPABILITY = `pcts_${"d".repeat(43)}`;
 const STEP_CONTEXT_SHA256 = "a".repeat(64);
 const TURN_CONTEXT_SHA256 = "b".repeat(64);
 const ATTEMPT_CONTEXT_SHA256 = "c".repeat(64);
@@ -318,7 +318,7 @@ describe("provider-backed Tool Tool Broker", () => {
     expect(fixture.createSpec).toBeUndefined();
 
     await expect(
-      manager.execute(`adts_${"x".repeat(43)}`, operation("10000000-0000-4000-8000-000000000012")),
+      manager.execute(`pcts_${"x".repeat(43)}`, operation("10000000-0000-4000-8000-000000000012")),
     ).rejects.toMatchObject({ code: "invalid_tool_capability" });
     const request = operation("10000000-0000-4000-8000-000000000013");
     await expect(manager.execute(CAPABILITY, request)).resolves.toMatchObject({ exitCode: 0 });
@@ -752,8 +752,8 @@ describe("provider-backed Tool Tool Broker", () => {
     const capabilities = [
       CAPABILITY,
       SECOND_CAPABILITY,
-      `adts_${"e".repeat(43)}`,
-      `adts_${"f".repeat(43)}`,
+      `pcts_${"e".repeat(43)}`,
+      `pcts_${"f".repeat(43)}`,
     ];
     const manager = new ToolBroker({
       provider: fixture.provider,

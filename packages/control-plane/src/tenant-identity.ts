@@ -4,7 +4,7 @@ import type { Kysely } from "kysely";
 import type { FastifyRequest } from "fastify";
 
 const TOKEN_PATTERN =
-  /^adk_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43,256})$/i;
+  /^pck_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43,256})$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const DUMMY_DIGEST = Buffer.alloc(32);
 const DUMMY_CREDENTIAL_ID = "00000000-0000-4000-8000-000000000000";
@@ -107,7 +107,7 @@ export function generateTenantApiCredential(
   if (!/^[A-Za-z0-9_-]{43,256}$/.test(secret)) {
     throw new TypeError("tenant API credential secret is invalid");
   }
-  const token = `adk_${normalizedId}.${secret}`;
+  const token = `pck_${normalizedId}.${secret}`;
   return { credentialId: normalizedId, token, secretSha256: tenantApiTokenDigest(token) };
 }
 

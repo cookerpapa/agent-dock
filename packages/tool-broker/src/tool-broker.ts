@@ -165,7 +165,7 @@ function sameEnvironment(
 }
 
 function validCapability(value: string): string {
-  if (!/^adts_[A-Za-z0-9_-]{43}$/.test(value)) {
+  if (!/^pcts_[A-Za-z0-9_-]{43}$/.test(value)) {
     throw new TypeError("Tool Sandbox capability generator returned an invalid value");
   }
   return value;
@@ -297,7 +297,7 @@ export class ToolBroker {
       options.stateRepository ?? new InMemorySandboxActivationStateRepository();
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#capabilityGenerator =
-      options.capabilityGenerator ?? (() => `adts_${randomBytes(32).toString("base64url")}`);
+      options.capabilityGenerator ?? (() => `pcts_${randomBytes(32).toString("base64url")}`);
     this.#maximumActiveSandboxes = positiveInteger(
       options.maximumActiveSandboxes ?? DEFAULT_MAXIMUM_ACTIVE_SANDBOXES,
       "maximumActiveSandboxes",

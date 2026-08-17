@@ -22,7 +22,7 @@ import {
 import type { WorkspaceVolumeGateway } from "../src/workspace-volume-gateway.ts";
 
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
-const CAPABILITY = `adts_${"c".repeat(43)}`;
+const CAPABILITY = `pcts_${"c".repeat(43)}`;
 const STEP_CONTEXT_SHA256 = "a".repeat(64);
 const WEB_PROXY = Object.freeze({ host: "10.255.255.254", port: 3_128 });
 const assignment: ToolSandboxAssignment = {
@@ -439,7 +439,7 @@ describe("CubeSandbox Provider contract", () => {
       patch: "diff --git a/result.txt b/result.txt\n",
       truncated: false,
     });
-    expect(Buffer.from(captured.workspace.data, "base64").toString("utf8")).not.toContain("adch_");
+    expect(Buffer.from(captured.workspace.data, "base64").toString("utf8")).not.toContain("pcch_");
     const materialized = await manager.materializeFile({
       toolBrokerProtocolVersion: 1,
       type: "workspace.materialize_file",
@@ -609,7 +609,7 @@ describe("CubeSandbox Provider contract", () => {
       allowPublicTraffic: false,
       volumeMounts: [
         {
-          name: expect.stringMatching(/^adw-[0-9a-f]{48}$/),
+          name: expect.stringMatching(/^pcw-[0-9a-f]{48}$/),
           path: "/workspace",
         },
       ],

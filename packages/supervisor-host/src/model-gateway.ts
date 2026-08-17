@@ -159,7 +159,7 @@ function validDate(clock: () => Date): Date {
 }
 
 function bearerCapability(value: string | undefined): string | undefined {
-  return value === undefined ? undefined : /^Bearer (admg_[A-Za-z0-9_-]{43})$/.exec(value)?.[1];
+  return value === undefined ? undefined : /^Bearer (pcmg_[A-Za-z0-9_-]{43})$/.exec(value)?.[1];
 }
 
 function samplingIdentity(request: IncomingMessage): ModelSamplingIdentity {
@@ -549,7 +549,7 @@ export class TenantModelGateway {
         "Model gateway capability generation failed",
       );
     }
-    const capability = `admg_${random.toString("base64url")}`;
+    const capability = `pcmg_${random.toString("base64url")}`;
     const digest = capabilityDigest(capability);
     if (this.#capabilities.has(digest)) {
       throw new TenantModelGatewayError(

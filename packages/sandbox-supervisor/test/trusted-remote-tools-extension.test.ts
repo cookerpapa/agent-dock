@@ -50,7 +50,7 @@ async function captureContext(handlers: Map<string, (...args: never[]) => unknow
 const BASE_CONFIGURATION = {
   operationUrl: "http://127.0.0.1:4999/v1/tool-operations",
   activationId: "10000000-0000-4000-8000-000000000001",
-  capability: `adts_${"a".repeat(43)}`,
+  capability: `pcts_${"a".repeat(43)}`,
   turnContextSha256: TURN_CONTEXT_SHA256,
   attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
   captureStepContext: createStepCapture(),
@@ -125,7 +125,7 @@ describe("trusted remote tools extension governance", () => {
     const extension = createTrustedRemoteToolsExtension({
       operationUrl: "http://127.0.0.1:4999/v1/tool-operations",
       activationId: "10000000-0000-4000-8000-000000000099",
-      capability: `adts_${"z".repeat(43)}`,
+      capability: `pcts_${"z".repeat(43)}`,
       turnContextSha256: TURN_CONTEXT_SHA256,
       attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
       captureStepContext: createStepCapture(),

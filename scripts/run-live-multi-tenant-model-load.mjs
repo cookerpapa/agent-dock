@@ -158,24 +158,31 @@ async function readStreamEvidence(runIds) {
   assert(runIds.length > 0, "Stream evidence requires at least one Run");
   const row = await psql(
     `select count(*)::text || '|' ||
-            count(*) filter (where e.type = 'assistant.text.delta')::text || '|' ||
-            coalesce(sum(octet_length(e.payload::text)), 0)::text
-       from session_events e
-       join runs r on r.turn_id = e.turn_id
+            coalesce(sum(p.source_event_count), 0)::text || '|' ||
+            coalesce(sum(jsonb_array_length(p.transcript -> 'items')), 0)::text || '|' ||
+            coalesce(sum(octet_length(p.transcript::text)), 0)::text
+       from conversation_turn_projections p
+       join runs r on r.turn_id = p.turn_id
       where r.id in (${runIds.map(sqlLiteral).join(", ")})`,
   );
-  const [persistedEvents, assistantTextEvents, persistedPayloadBytes] = row
+  const [projectionCount, projectedSourceEvents, semanticItems, canonicalPayloadBytes] = row
     .trim()
     .split("|")
     .map((value) => Number(value));
-  for (const value of [persistedEvents, assistantTextEvents, persistedPayloadBytes]) {
+  for (const value of [
+    projectionCount,
+    projectedSourceEvents,
+    semanticItems,
+    canonicalPayloadBytes,
+  ]) {
     assert(Number.isSafeInteger(value) && value >= 0, "Stream evidence is invalid");
   }
   return {
-    persistedEvents,
-    assistantTextEvents,
-    persistedPayloadBytes,
-    eventsPerRun: Number((persistedEvents / runIds.length).toFixed(2)),
+    projectionCount,
+    projectedSourceEvents,
+    semanticItems,
+    canonicalPayloadBytes,
+    sourceEventsPerRun: Number((projectedSourceEvents / runIds.length).toFixed(2)),
   };
 }
 
@@ -475,6 +482,8 @@ const report = {
 
 assert.equal(report.correctness.maximumAttemptCount, 1);
 assert.equal(report.workers.distinct.length, 2);
+assert.equal(report.streaming.projectionCount, allResults.length);
+assert(report.streaming.projectedSourceEvents > report.streaming.semanticItems);
 assert(totalUsage.requests >= allResults.length);
 assert(totalUsage.inputTokens > 0 && totalUsage.outputTokens > 0);
 
@@ -502,8 +511,8 @@ await writeFile(
     `- First text p50/p95: ${String(report.latencyMs.firstText.p50)} / ${String(report.latencyMs.firstText.p95)} ms`,
     `- Settled p50/p95: ${String(report.latencyMs.settled.p50)} / ${String(report.latencyMs.settled.p95)} ms`,
     `- Queue wait p50/p95: ${String(report.latencyMs.queueWait.p50)} / ${String(report.latencyMs.queueWait.p95)} ms`,
-    `- Persisted events / assistant text events / events per Run: ${String(report.streaming.persistedEvents)} / ${String(report.streaming.assistantTextEvents)} / ${String(report.streaming.eventsPerRun)}`,
-    `- Persisted event payload bytes: ${String(report.streaming.persistedPayloadBytes)}`,
+    `- Canonical Turn projections / source events / semantic items: ${String(report.streaming.projectionCount)} / ${String(report.streaming.projectedSourceEvents)} / ${String(report.streaming.semanticItems)}`,
+    `- Source events per Run / canonical payload bytes: ${String(report.streaming.sourceEventsPerRun)} / ${String(report.streaming.canonicalPayloadBytes)}`,
     `- Real requests/input/output/cache-read tokens: ${String(report.usage.requests)} / ${String(report.usage.inputTokens)} / ${String(report.usage.outputTokens)} / ${String(report.usage.cacheReadTokens)}`,
     "",
     "Every tenant used an independent API credential, Project, Workspace, Session and Pi checkpoint. All first and follow-up Runs were submitted concurrently through the shared PostgreSQL queue and two capacity-one Pi Workers. The follow-up restored only its own marker, foreign Session reads returned 404, no Tool Sandbox was activated, and every Run completed with one Attempt.",

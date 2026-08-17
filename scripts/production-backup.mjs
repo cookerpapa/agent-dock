@@ -81,7 +81,7 @@ async function assertRuntimeTree(path) {
       segments[0] === "state" &&
       segments[1] === "cube-shared" &&
       segments[2] === "volume" &&
-      /^picloud-posix-adw-[0-9a-f]{48}$/.test(segments[3]) &&
+      /^picloud-posix-pcw-[0-9a-f]{48}$/.test(segments[3]) &&
       segments[4] === "workspace"
     );
   }

@@ -10,7 +10,7 @@
 set -euo pipefail
 
 readonly DEFAULT_BASE_DIR="/data/cube-shared/volume"
-readonly VOLUME_ID_PATTERN='^adw-[0-9a-f]{48}$'
+readonly VOLUME_ID_PATTERN='^pcw-[0-9a-f]{48}$'
 readonly VOLUME_WORKSPACE_DIRECTORY="workspace"
 
 operation=""

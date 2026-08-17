@@ -14,7 +14,7 @@ export const PERSISTENT_VOLUME_REFERENCE_FORMAT = "pi-cloud.workspace-volume-ref
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-const VOLUME_ID_PATTERN = /^adw-[0-9a-f]{48}$/;
+const VOLUME_ID_PATTERN = /^pcw-[0-9a-f]{48}$/;
 const GIT_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 
 export type PersistentVolumeReference = Readonly<{

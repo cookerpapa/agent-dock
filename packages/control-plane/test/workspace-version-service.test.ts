@@ -370,7 +370,7 @@ describe.sequential("versioned Workspace service", () => {
   it("lists persistent Volume revisions without pretending their file bytes are portable", async () => {
     const readme = Buffer.from("provider-native\n");
     const checkpoint = createPersistentVolumeReference({
-      volumeId: `adw-${"f".repeat(48)}`,
+      volumeId: `pcw-${"f".repeat(48)}`,
       volumeRevision: "e".repeat(64),
       activationId: "20000000-0000-4000-8000-000000000001",
       tenantId: IDS.tenant,

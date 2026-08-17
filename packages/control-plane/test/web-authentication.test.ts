@@ -116,7 +116,7 @@ describe.sequential("product web authentication", () => {
     expect(response.body).not.toContain(PASSWORD);
     const setCookie = response.headers["set-cookie"];
     expect(typeof setCookie).toBe("string");
-    expect(setCookie).toContain("pi_cloud_session=ads_");
+    expect(setCookie).toContain("pi_cloud_session=pcs_");
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toContain("SameSite=Strict");
     expect(setCookie).not.toContain("Secure");

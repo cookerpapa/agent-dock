@@ -61,7 +61,7 @@ export const DependencyProxyBootstrapSchema = Type.Object(
     capability: Type.String({
       minLength: 128,
       maxLength: 16_384,
-      pattern: "^adpc1_[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]{86}$",
+      pattern: "^pcpc1_[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]{86}$",
     }),
     publicKeyFingerprint: Type.String({ pattern: "^[0-9a-f]{64}$" }),
   },
@@ -135,7 +135,7 @@ export const ToolSandboxCreateResponseSchema = Type.Object(
     requestId: UuidSchema,
     activationId: UuidSchema,
     ownerBaseUrl: Type.String({ minLength: 8, maxLength: 2_048 }),
-    capability: Type.String({ pattern: "^adts_[A-Za-z0-9_-]{43}$" }),
+    capability: Type.String({ pattern: "^pcts_[A-Za-z0-9_-]{43}$" }),
     workspaceRoot: Type.Literal("/workspace"),
     continuity: Type.Union([Type.Literal("cold_restore"), Type.Literal("warm_reuse")]),
   },

@@ -82,7 +82,7 @@ describe("credential-free Tool Sandbox worker", () => {
   });
 
   it("constructs a fixed subprocess environment without inheriting trusted credentials", () => {
-    process.env.PI_CLOUD_RUNTIME_API_KEY = "admg_should-never-cross";
+    process.env.PI_CLOUD_RUNTIME_API_KEY = "pcmg_should-never-cross";
     process.env.PI_CLOUD_TOOL_BROKER_TOKEN = "manager-should-never-cross";
     process.env.DATABASE_URL = "postgresql://should-never-cross";
     try {
@@ -100,7 +100,7 @@ describe("credential-free Tool Sandbox worker", () => {
         GIT_ASKPASS: "/bin/false",
         GIT_LFS_SKIP_SMUDGE: "1",
       });
-      expect(JSON.stringify(environment)).not.toMatch(/admg_|manager-should|postgresql:/);
+      expect(JSON.stringify(environment)).not.toMatch(/pcmg_|manager-should|postgresql:/);
     } finally {
       delete process.env.PI_CLOUD_RUNTIME_API_KEY;
       delete process.env.PI_CLOUD_TOOL_BROKER_TOKEN;
@@ -343,7 +343,7 @@ describe("credential-free Tool Sandbox worker", () => {
         dependencyProxy: {
           host: "10.43.0.53",
           port: 3_128,
-          capability: `adpc1_${"a".repeat(64)}.${"b".repeat(86)}`,
+          capability: `pcpc1_${"a".repeat(64)}.${"b".repeat(86)}`,
           publicKeyFingerprint: "c".repeat(64),
         },
         environmentStage: { type: "dependency_setup" },

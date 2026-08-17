@@ -6,7 +6,7 @@ import {
 import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 
-const VOLUME_ID_PATTERN = /^adw-[0-9a-f]{48}$/;
+const VOLUME_ID_PATTERN = /^pcw-[0-9a-f]{48}$/;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -129,7 +129,7 @@ function boundedOpaque(value: string, name: string): string {
 export function workspaceVolumeId(identity: { tenantId: string; workspaceId: string }): string {
   boundedOpaque(identity.tenantId, "tenantId");
   boundedOpaque(identity.workspaceId, "workspaceId");
-  return `adw-${createHash("sha256")
+  return `pcw-${createHash("sha256")
     .update("pi-cloud.workspace-volume.v1\0")
     .update(identity.tenantId)
     .update("\0")

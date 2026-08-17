@@ -268,7 +268,7 @@ function physicalBindingSha256(
 }
 
 function handoffSecret(): string {
-  return `adch_${randomBytes(32).toString("base64url")}`;
+  return `pcch_${randomBytes(32).toString("base64url")}`;
 }
 
 function assignmentMetadata(

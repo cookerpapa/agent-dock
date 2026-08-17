@@ -27,7 +27,7 @@ const DEFAULT_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const LAST_USED_WRITE_INTERVAL_MS = 5 * 60 * 1_000;
 const MAXIMUM_ACTIVE_SESSIONS = 10;
 const SESSION_PATTERN =
-  /^ads_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43})$/i;
+  /^pcs_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43})$/i;
 const DUMMY_PASSWORD_SALT = Buffer.alloc(PASSWORD_SALT_BYTES, 0x5a).toString("base64url");
 const DUMMY_PASSWORD_HASH = Buffer.alloc(PASSWORD_HASH_BYTES, 0xa5);
 
@@ -109,7 +109,7 @@ function sessionToken(sessionId: string, secret: Buffer): string {
   if (secret.length !== SESSION_SECRET_BYTES) {
     throw new TypeError("Web session secret generator returned an invalid value");
   }
-  return `ads_${sessionId}.${secret.toString("base64url")}`;
+  return `pcs_${sessionId}.${secret.toString("base64url")}`;
 }
 
 function timestamp(value: Date | string): string {

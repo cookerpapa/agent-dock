@@ -24,7 +24,7 @@ const MAXIMUM_REQUEST_BYTES = 8 * 1_024 * 1_024;
 const RESPONSE_TIMEOUT_MS = 10 * 60_000;
 const TOOL_UID = 1_000;
 const TOOL_GID = 1_000;
-const HANDOFF_SECRET_PATTERN = /^adch_[A-Za-z0-9_-]{43}$/;
+const HANDOFF_SECRET_PATTERN = /^pcch_[A-Za-z0-9_-]{43}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const MAXIMUM_TERMINAL_INPUT_BYTES = 64 * 1_024;
 

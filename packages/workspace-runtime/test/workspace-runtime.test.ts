@@ -185,7 +185,7 @@ describe("shared workspace runtime", () => {
 
   it("round-trips a persistent Workspace Volume reference without embedding file bytes", () => {
     const checkpoint = createPersistentVolumeReference({
-      volumeId: `adw-${"a".repeat(48)}`,
+      volumeId: `pcw-${"a".repeat(48)}`,
       volumeRevision: "f".repeat(64),
       activationId: "10000000-0000-4000-8000-000000000001",
       tenantId: "tenant-volume",

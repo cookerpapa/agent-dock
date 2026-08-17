@@ -127,7 +127,7 @@ function validateRuntimeConfiguration(
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       activationId,
     ) ||
-    !/^adts_[A-Za-z0-9_-]{43}$/.test(capability) ||
+    !/^pcts_[A-Za-z0-9_-]{43}$/.test(capability) ||
     !/^[0-9a-f]{64}$/.test(turnContextSha256) ||
     !/^[0-9a-f]{64}$/.test(attemptContextSha256) ||
     typeof candidate.captureStepContext !== "function" ||

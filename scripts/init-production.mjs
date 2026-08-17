@@ -10,7 +10,7 @@ const deploymentVersion = 2;
 const maxRuntimeFileBytes = 64 * 1_024;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const apiTokenPattern =
-  /^adk_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.[A-Za-z0-9_-]{43,256}$/i;
+  /^pck_([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.[A-Za-z0-9_-]{43,256}$/i;
 
 function parseRuntimeDirectory(argv) {
   let configured = process.env.PI_CLOUD_RUNTIME_DIRECTORY;
@@ -448,7 +448,7 @@ const identities = {
   credentialBindingId: randomUUID(),
   modelProfileId: randomUUID(),
 };
-const apiToken = `adk_${identities.apiCredentialId}.${randomBytes(32).toString("base64url")}`;
+const apiToken = `pck_${identities.apiCredentialId}.${randomBytes(32).toString("base64url")}`;
 const application = applicationIdentity();
 const imageVersion = boundedEnvironmentValue(
   "PI_CLOUD_IMAGE_VERSION",

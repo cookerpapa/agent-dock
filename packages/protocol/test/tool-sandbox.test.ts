@@ -61,7 +61,7 @@ describe("Tool Sandbox protocol", () => {
       requestId: "10000000-0000-4000-8000-000000000004",
       activationId: "10000000-0000-4000-8000-000000000005",
       ownerBaseUrl: "http://tool-broker-0:4300",
-      capability: `adts_${"x".repeat(43)}`,
+      capability: `pcts_${"x".repeat(43)}`,
       workspaceRoot: "/workspace",
       continuity: "cold_restore",
     } as const;

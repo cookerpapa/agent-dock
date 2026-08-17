@@ -515,7 +515,7 @@ export function safeToolEnvironment(
       !Number.isSafeInteger(dependencyProxy.port) ||
       dependencyProxy.port < 1 ||
       dependencyProxy.port > 65_535 ||
-      !/^adpc1_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{86}$/.test(dependencyProxy.capability) ||
+      !/^pcpc1_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{86}$/.test(dependencyProxy.capability) ||
       !/^[0-9a-f]{64}$/.test(dependencyProxy.publicKeyFingerprint)
     ) {
       throw new ToolWorkerError(

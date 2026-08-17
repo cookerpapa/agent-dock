@@ -216,7 +216,7 @@ try {
 
   const activationId = randomUUID();
   currentAuthority = {
-    handoffSecret: `adch_${randomBytes(32).toString("base64url")}`,
+    handoffSecret: `pcch_${randomBytes(32).toString("base64url")}`,
     fencingToken: 7,
     bindingSha256: createHash("sha256").update("template-check-binding").digest("hex"),
   };
@@ -430,7 +430,7 @@ try {
   const previousAuthority = currentAuthority;
   const recoveryAuthority = {
     ...previousAuthority,
-    handoffSecret: `adch_${randomBytes(32).toString("base64url")}`,
+    handoffSecret: `pcch_${randomBytes(32).toString("base64url")}`,
   };
   const checkpointed = await jsonRequest(
     baseUrl,
@@ -464,7 +464,7 @@ try {
 
   const nextAuthority = {
     ...recoveryAuthority,
-    handoffSecret: `adch_${randomBytes(32).toString("base64url")}`,
+    handoffSecret: `pcch_${randomBytes(32).toString("base64url")}`,
     fencingToken: recoveryAuthority.fencingToken + 1,
   };
   const rebound = await jsonRequest(

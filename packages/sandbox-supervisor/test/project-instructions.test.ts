@@ -5,7 +5,7 @@ import { projectInstructionsFromSnapshot } from "../src/remote-tool-sandbox-turn
 describe("trusted project instruction extraction", () => {
   it("defers persistent Volume bytes until the Tool Sandbox attaches them", () => {
     const checkpoint = createPersistentVolumeReference({
-      volumeId: `adw-${"a".repeat(48)}`,
+      volumeId: `pcw-${"a".repeat(48)}`,
       volumeRevision: "e".repeat(64),
       activationId: "10000000-0000-4000-8000-000000000001",
       tenantId: "tenant-project-instructions-test",

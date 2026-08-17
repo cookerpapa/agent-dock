@@ -496,7 +496,7 @@ export class ToolBrokerServer {
 
     this.#server.post(TOOL_BROKER_OPERATION_PATH, async (request, reply) => {
       const capability = bearer(request.headers.authorization);
-      if (capability === undefined || !/^adts_[A-Za-z0-9_-]{43}$/.test(capability)) {
+      if (capability === undefined || !/^pcts_[A-Za-z0-9_-]{43}$/.test(capability)) {
         await reply.code(401).send({
           error: {
             code: "invalid_tool_capability",

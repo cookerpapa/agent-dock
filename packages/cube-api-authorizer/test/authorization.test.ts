@@ -19,7 +19,7 @@ describe("Cube API authorizer", () => {
     ["GET", "/v2/sandboxes"],
     ["GET", "/v2/sandboxes?limit=1000"],
     ["POST", "/volumes"],
-    ["GET", `/volumes/adw-${"a".repeat(48)}`],
+    ["GET", `/volumes/pcw-${"a".repeat(48)}`],
   ])("allows the Provider operation %s %s", (method, path) => {
     expect(isAllowedCubeApiOperation(path, method)).toBe(true);
     expect(
@@ -47,10 +47,10 @@ describe("Cube API authorizer", () => {
     ["GET", "/v2/sandboxes?limit=1001"],
     ["GET", "/v2/sandboxes?owner=another-tenant"],
     ["POST", "/sandboxes?unsafe=true"],
-    ["DELETE", `/volumes/adw-${"a".repeat(48)}`],
+    ["DELETE", `/volumes/pcw-${"a".repeat(48)}`],
     ["GET", "/volumes"],
-    ["GET", "/volumes/adw-invalid"],
-    ["GET", `/volumes/adw-${"a".repeat(48)}?unsafe=true`],
+    ["GET", "/volumes/pcw-invalid"],
+    ["GET", `/volumes/pcw-${"a".repeat(48)}?unsafe=true`],
   ])("denies the operation %s %s", (method, path) => {
     expect(isAllowedCubeApiOperation(path, method)).toBe(false);
     expect(

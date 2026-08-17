@@ -33,7 +33,7 @@ import {
 const SERVICE_TOKEN = `service-${"s".repeat(48)}`;
 const MATERIALIZER_TOKEN = `materializer-${"m".repeat(48)}`;
 const TERMINAL_TOKEN = `terminal-${"t".repeat(48)}`;
-const CAPABILITY = `adts_${"c".repeat(43)}`;
+const CAPABILITY = `pcts_${"c".repeat(43)}`;
 const STEP_CONTEXT_SHA256 = "a".repeat(64);
 const ACTIVATION_ID = "10000000-0000-4000-8000-000000000010";
 const assignment: ToolSandboxAssignment = {

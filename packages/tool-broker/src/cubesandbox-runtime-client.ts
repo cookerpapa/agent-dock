@@ -439,7 +439,7 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
           ? {}
           : {
               volumeMounts: input.volumeMounts.map((mount) => {
-                if (!/^adw-[0-9a-f]{48}$/.test(mount.name) || mount.path !== "/workspace") {
+                if (!/^pcw-[0-9a-f]{48}$/.test(mount.name) || mount.path !== "/workspace") {
                   throw new CubeRuntimeClientError("CubeSandbox volume mount was invalid");
                 }
                 return { name: mount.name, path: mount.path };

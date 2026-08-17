@@ -114,7 +114,7 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
       displayName: "Alpha Owner",
       role: "owner",
     });
-    expect(alpha.apiToken).toMatch(/^adk_[0-9a-f-]{36}\.[A-Za-z0-9_-]{43,}$/i);
+    expect(alpha.apiToken).toMatch(/^pck_[0-9a-f-]{36}\.[A-Za-z0-9_-]{43,}$/i);
     expect(alphaResponse.body).not.toContain("secretSha256");
 
     const bravoResponse = await register("public-bravo", "Bravo Owner");
@@ -165,8 +165,8 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
       .select((expression) => expression.fn.countAll<string>().as("count"))
       .executeTakeFirstOrThrow();
     expect(after.count).toBe(before.count);
-    expect(invalid.body).not.toContain("adk_");
-    expect(duplicate.body).not.toContain("adk_");
+    expect(invalid.body).not.toContain("pck_");
+    expect(duplicate.body).not.toContain("pck_");
   });
 
   it("lists and loads only conversations owned by the authenticated tenant", async () => {
@@ -843,7 +843,7 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
         message: "Self-service tenant registration capacity has been reached",
       },
     });
-    expect(rejected.body).not.toContain("adk_");
+    expect(rejected.body).not.toContain("pck_");
     const count = await database
       .selectFrom("tenants")
       .select((expression) => expression.fn.countAll<string>().as("count"))

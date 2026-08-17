@@ -57,7 +57,7 @@ describe("tenant-aware browser API", () => {
   });
 
   it("creates an empty project workspace without exposing import controls", async () => {
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const token = `pck_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe("/v1/projects");
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
@@ -84,7 +84,7 @@ describe("tenant-aware browser API", () => {
   });
 
   it("allows internal acceptance clients to request the sample Java fixture explicitly", async () => {
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const token = `pck_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe("/v1/projects");
       expect(JSON.parse(String(init?.body))).toEqual({
@@ -169,7 +169,7 @@ describe("tenant-aware browser API", () => {
   });
 
   it("reads safe model metadata and submits a write-only provider credential", async () => {
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const token = `pck_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const providerKey = `sk-${"p".repeat(48)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
@@ -215,7 +215,7 @@ describe("tenant-aware browser API", () => {
   });
 
   it("reads and hot-replaces the versioned Cube proxy origin", async () => {
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const token = `pck_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
       expect(String(input)).toBe("/v1/platform-settings/cube-proxy");
@@ -257,7 +257,7 @@ describe("tenant-aware browser API", () => {
   });
 
   it("authenticates identity before exposing tenant metadata", async () => {
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const token = `pck_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
       return new Response(
@@ -289,7 +289,7 @@ describe("tenant-aware browser API", () => {
   });
 
   it("registers without a bearer and validates the one-time owner credential", async () => {
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const token = `pck_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (_input, init) => {
       expect(new Headers(init?.headers).get("authorization")).toBeNull();
       expect(JSON.parse(String(init?.body))).toEqual({
@@ -322,7 +322,7 @@ describe("tenant-aware browser API", () => {
   });
 
   it("loads only authenticated conversation resources", async () => {
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const token = `pck_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const createdAt = "2026-07-19T00:00:00.000Z";
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
@@ -465,7 +465,7 @@ describe("tenant-aware browser API", () => {
 
   it("loads binary Workspace content", async () => {
     const versionId = "20000000-0000-4000-8000-000000000001";
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const token = `pck_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
       expect(String(input)).toBe(`/v1/workspace-versions/${versionId}/file?path=src%2FMain.java`);
@@ -483,7 +483,7 @@ describe("tenant-aware browser API", () => {
   it("requests subsequent immutable Workspace file pages with an encoded cursor", async () => {
     const versionId = "20000000-0000-4000-8000-000000000001";
     const cursor = "src/目录/Main.java";
-    const token = `adk_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
+    const token = `pck_10000000-0000-4000-8000-000000000001.${"a".repeat(43)}`;
     const fetchImplementation = vi.fn<typeof fetch>(async (input) => {
       expect(String(input)).toBe(
         `/v1/workspace-versions/${versionId}/files?cursor=${encodeURIComponent(cursor)}`,

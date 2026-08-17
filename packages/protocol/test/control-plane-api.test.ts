@@ -148,7 +148,7 @@ describe("control-plane public API schemas", () => {
         userId: "80000000-0000-4000-8000-000000000002",
         displayName: "Alpha Owner",
         role: "owner",
-        apiToken: `adk_80000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
+        apiToken: `pck_80000000-0000-4000-8000-000000000003.${"a".repeat(43)}`,
       }),
     ).toMatchObject({ tenantSlug: "public-alpha", role: "owner" });
     expect(

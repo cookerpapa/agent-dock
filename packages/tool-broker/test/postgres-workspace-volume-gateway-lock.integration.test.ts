@@ -30,7 +30,7 @@ describe.skipIf(connectionString === undefined)("PostgreSQL Workspace Volume Gat
     const held = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    const volumeId = `adw-integration-${randomUUID()}`;
+    const volumeId = `pcw-integration-${randomUUID()}`;
     const firstRun = first.withLock(volumeId, async () => {
       events.push("first-start");
       await held;

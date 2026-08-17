@@ -16,7 +16,7 @@ export const AgentModelRuntimeSchema = Type.Object(
     provider: Type.Literal("deepseek"),
     modelId: DeepSeekModelIdSchema,
     baseUrl: Type.String({ minLength: 12, maxLength: 2_048 }),
-    capability: Type.String({ pattern: "^admg_[A-Za-z0-9_-]{43}$" }),
+    capability: Type.String({ pattern: "^pcmg_[A-Za-z0-9_-]{43}$" }),
     reasoning: Type.Boolean(),
     contextWindow: Type.Integer({ minimum: 1_024, maximum: 1_000_000 }),
     maxTokens: Type.Integer({ minimum: 128, maximum: 65_536 }),

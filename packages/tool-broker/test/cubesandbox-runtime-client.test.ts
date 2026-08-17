@@ -56,7 +56,7 @@ beforeAll(async () => {
       }
       if (
         request.method === "GET" &&
-        request.url === "/volumes/adw-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        request.url === "/volumes/pcw-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       ) {
         response.writeHead(404);
         response.end();
@@ -150,7 +150,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
     expect(observed.find((request) => request.path === "/health")).toMatchObject({
       headers: { authorization: `Bearer ${"k".repeat(48)}` },
     });
-    const volumeId = `adw-${"a".repeat(48)}`;
+    const volumeId = `pcw-${"a".repeat(48)}`;
     await expect(client.ensureVolume(volumeId, "picloud-posix")).resolves.toEqual({
       volumeId,
       name: volumeId,
@@ -191,7 +191,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
         timeoutMs: 1_000,
         maximumResponseBytes: 64 * 1_024,
         authority: {
-          handoffSecret: `adch_${"h".repeat(43)}`,
+          handoffSecret: `pcch_${"h".repeat(43)}`,
           fencingToken: 7,
           bindingSha256: "a".repeat(64),
         },
@@ -203,7 +203,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
         host: "49984-cube-runtime-1.cube.test",
         "e2b-traffic-access-token": "private-traffic-token",
         "cube-traffic-access-token": "private-traffic-token",
-        "x-pi-cloud-handoff-secret": `adch_${"h".repeat(43)}`,
+        "x-pi-cloud-handoff-secret": `pcch_${"h".repeat(43)}`,
         "x-pi-cloud-fencing-token": "7",
         "x-pi-cloud-binding-sha256": "a".repeat(64),
       },
@@ -212,7 +212,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
       rows: 24,
       cols: 100,
       authority: {
-        handoffSecret: `adch_${"h".repeat(43)}`,
+        handoffSecret: `pcch_${"h".repeat(43)}`,
         fencingToken: 7,
         bindingSha256: "a".repeat(64),
       },
@@ -230,7 +230,7 @@ describe("official CubeSandbox HTTP compatibility client", () => {
         host: "49984-cube-runtime-1.cube.test",
         "e2b-traffic-access-token": "private-traffic-token",
         "cube-traffic-access-token": "private-traffic-token",
-        "x-pi-cloud-handoff-secret": `adch_${"h".repeat(43)}`,
+        "x-pi-cloud-handoff-secret": `pcch_${"h".repeat(43)}`,
         "x-pi-cloud-fencing-token": "7",
         "x-pi-cloud-binding-sha256": "a".repeat(64),
       },
