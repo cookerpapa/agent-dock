@@ -94,7 +94,7 @@ function tokenDigestBuffer(value: string): Buffer {
 
 export function tenantApiTokenDigest(value: string): string {
   if (!TOKEN_PATTERN.test(value)) {
-    throw new TypeError("tenant API token must use the current adk credential format");
+    throw new TypeError("tenant API token must use the current pck credential format");
   }
   return tokenDigestBuffer(value).toString("hex");
 }
