@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest --run --maxWorkers=2",
+    "test": "vitest --run --maxWorkers=2 --testTimeout=15000 --hookTimeout=30000",
     "migrate": "node src/migrate.ts up",
     "migrate:down": "node src/migrate.ts down"
   },

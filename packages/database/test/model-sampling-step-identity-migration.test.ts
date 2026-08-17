@@ -63,5 +63,5 @@ describe("model sampling Step identity migration", () => {
     } finally {
       await postgres.close();
     }
-  }, 15_000);
+  });
 });
