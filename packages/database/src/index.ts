@@ -97,6 +97,8 @@ export {
   downRemoveDormantAdvancedFeatures,
   upPostgresSessionStorageOnly,
   downPostgresSessionStorageOnly,
+  upPiCloudEnvironmentProfile,
+  downPiCloudEnvironmentProfile,
 } from "./migrations/index.ts";
 
 export {

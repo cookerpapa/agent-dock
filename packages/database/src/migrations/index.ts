@@ -61,6 +61,7 @@ import * as piSessionOpaqueIdentifiers from "./059_pi_session_opaque_identifiers
 import * as workspaceTerminalLeases from "./060_workspace_terminal_leases.ts";
 import * as removeDormantAdvancedFeatures from "./061_remove_dormant_advanced_features.ts";
 import * as postgresSessionStorageOnly from "./062_postgres_session_storage_only.ts";
+import * as piCloudEnvironmentProfile from "./063_pi_cloud_environment_profile.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -127,6 +128,7 @@ export const migrationProvider: MigrationProvider = {
       "060_workspace_terminal_leases": workspaceTerminalLeases,
       "061_remove_dormant_advanced_features": removeDormantAdvancedFeatures,
       "062_postgres_session_storage_only": postgresSessionStorageOnly,
+      "063_pi_cloud_environment_profile": piCloudEnvironmentProfile,
     };
   },
 };
@@ -355,3 +357,7 @@ export {
   down as downPostgresSessionStorageOnly,
   up as upPostgresSessionStorageOnly,
 } from "./062_postgres_session_storage_only.ts";
+export {
+  down as downPiCloudEnvironmentProfile,
+  up as upPiCloudEnvironmentProfile,
+} from "./063_pi_cloud_environment_profile.ts";
