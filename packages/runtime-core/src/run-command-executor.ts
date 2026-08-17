@@ -127,7 +127,19 @@ export class TurnExecutionCancelledError extends TurnExecutionBackendError {
   readonly forced: boolean;
 
   constructor(reason: CancelTurnCommandMessage["payload"]["reason"], forced: boolean) {
-    super("turn_cancelled", "Turn cancellation was confirmed", false);
+    const code =
+      reason === "timeout"
+        ? "pi_timeout"
+        : reason === "shutdown"
+          ? "worker_shutdown"
+          : "turn_cancelled";
+    const message =
+      reason === "timeout"
+        ? "Pi turn exceeded its execution deadline"
+        : reason === "shutdown"
+          ? "Pi Worker shut down before the turn settled"
+          : "Turn cancellation was confirmed";
+    super(code, message, false);
     this.name = "TurnExecutionCancelledError";
     this.reason = reason;
     this.forced = forced;
@@ -442,7 +454,7 @@ export class RunCommandExecutor {
             if (started) {
               const externallySettled = await this.#observeCancellation(claim);
               if (externallySettled !== undefined) return externallySettled;
-              if (error instanceof TurnExecutionCancelledError) {
+              if (error instanceof TurnExecutionCancelledError && error.reason === "user_request") {
                 throw new RunCommandExecutorInvariantError(
                   "Cancellation confirmation arrived before its durable lifecycle",
                 );

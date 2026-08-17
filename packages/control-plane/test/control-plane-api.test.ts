@@ -35,6 +35,7 @@ import {
   LocalSupervisorExecutionBackend,
   RunCommandExecutor,
   RunCommandExecutorStaleClaimError,
+  TurnExecutionCancelledError,
   PostgresSessionEventNotifications,
   PostgresRunAttemptPhaseObserver,
   SessionLeaseCoordinator,
@@ -3230,6 +3231,34 @@ describe.sequential("single-user durable turn intake API", () => {
       sessionState: "idle",
       commandFailureCode: "event_projection_unavailable",
       turnFailureCode: "event_projection_unavailable",
+    });
+  });
+
+  it("settles an internally timed-out Pi turn without requiring a user cancellation command", async () => {
+    const accepted = await acceptTurn(
+      "internal-turn-timeout",
+      "let the trusted Pi runtime reach its own deadline",
+    );
+    const backend: TurnExecutionBackend = {
+      async execute(_request, lifecycle) {
+        await lifecycle.started();
+        throw new TurnExecutionCancelledError("timeout", true);
+      },
+    };
+    const dispatcher = new RunCommandExecutor({ database, backend });
+
+    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toMatchObject({
+      status: "failed",
+      commandId: accepted.commandId,
+      phase: "after_start",
+      failureCode: "pi_timeout",
+    });
+    expect(await readTurnExecution(accepted)).toMatchObject({
+      commandState: "failed",
+      commandFailureCode: "pi_timeout",
+      turnState: "failed",
+      turnFailureCode: "pi_timeout",
+      sessionState: "idle",
     });
   });
 
