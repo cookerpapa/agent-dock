@@ -101,6 +101,7 @@ export interface WorkspaceVolumeGateway {
 
 export interface WorkspaceVolumeGatewayLock {
   withLock<T>(volumeId: string, run: () => Promise<T>): Promise<T>;
+  withLocks?<T>(volumeIds: readonly string[], run: () => Promise<T>): Promise<T>;
 }
 
 export type PersistentVolumeWorkspaceVolumeGatewayOptions = Readonly<{

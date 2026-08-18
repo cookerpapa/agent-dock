@@ -564,22 +564,7 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
   }
 
   async #withVolumeLock<T>(volumeId: string, operation: () => Promise<T>): Promise<T> {
-    const run = async (): Promise<T> => {
-      const previous = this.#locks.get(volumeId) ?? Promise.resolve();
-      let release!: () => void;
-      const current = new Promise<void>((resolvePromise) => {
-        release = resolvePromise;
-      });
-      const tail = previous.then(() => current);
-      this.#locks.set(volumeId, tail);
-      await previous;
-      try {
-        return await operation();
-      } finally {
-        release();
-        if (this.#locks.get(volumeId) === tail) this.#locks.delete(volumeId);
-      }
-    };
+    const run = () => this.#withLocalVolumeLock(volumeId, operation);
     return this.#distributedLock === undefined
       ? run()
       : this.#distributedLock.withLock(volumeId, run);
@@ -587,6 +572,15 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
 
   async #withVolumeLocks<T>(volumeIds: readonly string[], operation: () => Promise<T>): Promise<T> {
     const ordered = [...new Set(volumeIds)].sort();
+    const acquireLocal = (index: number): Promise<T> => {
+      const volumeId = ordered[index];
+      return volumeId === undefined
+        ? operation()
+        : this.#withLocalVolumeLock(volumeId, () => acquireLocal(index + 1));
+    };
+    if (this.#distributedLock?.withLocks !== undefined) {
+      return this.#distributedLock.withLocks(ordered, () => acquireLocal(0));
+    }
     const acquire = (index: number): Promise<T> => {
       const volumeId = ordered[index];
       return volumeId === undefined
@@ -594,6 +588,23 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
         : this.#withVolumeLock(volumeId, () => acquire(index + 1));
     };
     return acquire(0);
+  }
+
+  async #withLocalVolumeLock<T>(volumeId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.#locks.get(volumeId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolvePromise) => {
+      release = resolvePromise;
+    });
+    const tail = previous.then(() => current);
+    this.#locks.set(volumeId, tail);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.#locks.get(volumeId) === tail) this.#locks.delete(volumeId);
+    }
   }
 
   #volumeRevision(
