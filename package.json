@@ -72,6 +72,7 @@
     "production:token": "node scripts/print-production-token.mjs",
     "production:tenant": "node scripts/production-compose.mjs run --rm --no-deps database-bootstrap /app/packages/control-plane/src/tenant-admin.ts",
     "production:check": "node scripts/run-live-cubesandbox-production-check.mjs",
+    "production:subagents-check": "node scripts/run-live-subagent-production-check.mjs",
     "production:semantic-check": "node scripts/run-live-cubesandbox-production-check.mjs",
     "production:worker-pool-check": "node scripts/run-live-pi-worker-pool-check.mjs",
     "production:control-plane-restart-check": "node scripts/run-live-control-plane-restart-check.mjs",
