@@ -22,3 +22,4 @@ Archived design input:
 
 - [2026-08-13 PiCloud architecture review](./2026-08-13-chatgpt-pi-cloud-architecture-review.md)
 - [2026-08-14 Streaming durability and thin Pi runtime](./2026-08-14-chatgpt-streaming-and-pi-runtime.md)
+- [2026-08-18 Coder Agents, Agent Host and Tool capabilities](./2026-08-18-chatgpt-coder-agents-and-tool-capabilities.md)

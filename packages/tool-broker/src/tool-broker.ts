@@ -13,7 +13,9 @@ import type {
   ToolSandboxReleaseResponse,
   ToolBrokerMaterializeFileRequest,
   ToolBrokerMaterializeFileResponse,
+  CloudToolName,
 } from "@pi-cloud/protocol";
+import { parseCloudToolCapabilitySnapshot } from "@pi-cloud/protocol";
 import {
   canonicalEnvironmentRecipeJson,
   DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY,
@@ -64,6 +66,7 @@ type ManagedActivation = {
   attemptContextSha256: string;
   currentStep?: Readonly<{ sequence: number; sha256: string }>;
   capabilityDigest: Buffer;
+  allowedTools: ReadonlySet<CloudToolName>;
   spec: Parameters<SandboxProvider["create"]>[0];
   handle?: SandboxHandle;
   materializing?: Promise<SandboxHandle>;
@@ -147,6 +150,13 @@ function operationFailureCode(error: unknown): string {
     ? error.code
     : "tool_broker_failed";
 }
+
+const TOOL_OPERATIONS: Readonly<Record<CloudToolName, ReadonlySet<string>>> = {
+  read: new Set(["file.read", "file.read_range", "file.access"]),
+  write: new Set(["file.write", "file.mkdir"]),
+  edit: new Set(["file.read", "file.write", "file.access"]),
+  bash: new Set(["bash.exec"]),
+};
 
 function sameEnvironment(
   left: EnvironmentRuntimeSnapshot,
@@ -560,6 +570,7 @@ export class ToolBroker {
     }
     const capability = validCapability(this.#capabilityGenerator());
     const capabilitySha256 = capabilityDigest(capability).toString("hex");
+    const allowedTools = parseCloudToolCapabilitySnapshot(request.allowedTools);
     const spec = {
       activationId,
       assignment: request.assignment,
@@ -618,6 +629,7 @@ export class ToolBroker {
       turnContextSha256: request.turnContextSha256,
       attemptContextSha256: request.attemptContextSha256,
       capabilityDigest: Buffer.from(capabilitySha256, "hex"),
+      allowedTools: new Set(allowedTools),
       spec,
       ...(inherited === undefined ? {} : { handle: inherited.handle }),
       materializedForCurrentAssignment: false,
@@ -642,6 +654,20 @@ export class ToolBroker {
     signal?: AbortSignal,
   ): Promise<ToolSandboxOperationResponse> {
     const activation = this.#authorized(request.activationId, capability);
+    if (!activation.allowedTools.has(request.toolName)) {
+      throw new ToolBrokerError(
+        "tool_not_granted",
+        "Tool is not present in this Run capability snapshot",
+        false,
+      );
+    }
+    if (!TOOL_OPERATIONS[request.toolName].has(request.operation)) {
+      throw new ToolBrokerError(
+        "tool_operation_not_granted",
+        "Tool operation does not match its granted Tool",
+        false,
+      );
+    }
     if (request.turnContextSha256 !== activation.turnContextSha256) {
       throw new ToolBrokerError(
         "turn_context_mismatch",

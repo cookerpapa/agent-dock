@@ -413,6 +413,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         assignment: toolAssignment,
         turnContextSha256: cloudTurn.sha256,
         attemptContextSha256: cloudAttempt.sha256,
+        allowedTools: cloudTurn.context.tools.names,
         environment: command.payload.environment,
         workspaceSeed:
           workspaceSeed === undefined
@@ -619,6 +620,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
             capability: activeSandbox.capability,
             turnContextSha256: cloudTurn.sha256,
             attemptContextSha256: cloudAttempt.sha256,
+            allowedTools: cloudTurn.context.tools.names,
             captureStepContext: (activeTools, purpose = "agent") =>
               captureSamplingStep(
                 async () => {
@@ -627,6 +629,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                     sequence: (stepSequence += 1),
                     turnContextSha256: cloudTurn.sha256,
                     attemptContextSha256: cloudAttempt.sha256,
+                    allowedTools: cloudTurn.context.tools.names,
                     activeTools,
                     worldState: captured.worldState,
                   });

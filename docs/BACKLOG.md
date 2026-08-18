@@ -57,10 +57,21 @@ retired and remain only in Git history or explicitly superseded ADRs.
 ## Security and operations
 
 - [ ] Add an enterprise egress allowlist and searchable network audit trail.
+- [ ] Add administrator-owned MCP connections and Session Tool grants on top
+      of the Run capability snapshot; never load tenant code in the Pi Host.
 - [ ] Add tenant/session hard deletion and PostgreSQL/Kafka/Volume retention.
 - [ ] Add backup/restore coverage for PostgreSQL and Workspace storage as two
       explicit authorities.
 - [ ] Define a separate trust policy before enabling user Pi extensions.
+
+## Multi-agent execution
+
+- [ ] Map `spawn_agent` to a child Session and child Run rather than a local Pi
+      subprocess; forbid nested children in the first release.
+- [ ] Support explicit `shared_readonly`, `shared_serialized` and `isolated`
+      Workspace modes without equating conversation forks with file forks.
+- [ ] Implement an isolated Workspace branch provider before allowing parallel
+      mutating child Agents.
 
 ## Product expansion rule
 

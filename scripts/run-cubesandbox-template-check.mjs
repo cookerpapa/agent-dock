@@ -131,6 +131,7 @@ function operationEnvelope(activationId, operationId, operation) {
     attemptContextSha256: templateAttemptContextSha256,
     stepContextSequence: 1,
     stepContextSha256: templateStepContextSha256,
+    toolName: "bash",
     ...operation,
   };
 }

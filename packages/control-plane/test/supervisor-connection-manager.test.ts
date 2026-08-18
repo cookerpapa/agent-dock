@@ -336,6 +336,7 @@ async function createAcceptedTurn(): Promise<{
       nextEventSeq: "1",
       input: { kind: "prompt", prompt: "keep this assignment alive" },
       sandboxRetention: "ephemeral",
+      toolCapabilities: ["read", "write", "edit", "bash"],
       model: {
         profileId,
         provider: "pi-cloud-fake",

@@ -287,6 +287,7 @@ function operation(activationId: string): ToolSandboxOperationRequest {
     attemptContextSha256: STEP_CONTEXT_SHA256,
     stepContextSequence: 1,
     stepContextSha256: STEP_CONTEXT_SHA256,
+    toolName: "bash",
     operation: "bash.exec",
     command: "printf 'inside cube\\n'",
     cwd: "/workspace",
@@ -372,6 +373,7 @@ describe("CubeSandbox Provider contract", () => {
       assignment,
       turnContextSha256: STEP_CONTEXT_SHA256,
       attemptContextSha256: STEP_CONTEXT_SHA256,
+      allowedTools: ["read", "write", "edit", "bash"],
       environment,
       workspaceSeed: { kind: "sample_java" },
     });
@@ -521,6 +523,7 @@ describe("CubeSandbox Provider contract", () => {
       assignment: nextAssignment,
       turnContextSha256: STEP_CONTEXT_SHA256,
       attemptContextSha256: STEP_CONTEXT_SHA256,
+      allowedTools: ["read", "write", "edit", "bash"],
       environment,
       workspaceSeed: { kind: "sample_java" },
       workspaceRevision: "a".repeat(64),

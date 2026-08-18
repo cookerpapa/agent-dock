@@ -60,6 +60,12 @@ Workers are horizontally replaceable. A Worker slot claims one Run, opens the
 Pi Session, calls the model and delegates Tools. Cold Sessions have no process
 or thread.
 
+One Worker process is an Agent Host with several bounded runtime slots; it is
+not a Session owner. Each slot constructs an independent Pi `Agent`, model
+capability and Tool set from the accepted Run. Process-wide registries contain
+trusted definitions only and never imply that every Agent runtime can see or
+execute every definition.
+
 Pi 0.84's official `SessionStorage` interface is implemented by
 `@pi-cloud/pi-session-postgres`. It stores Pi entries, lanes, records, labels
 and the append log in PostgreSQL, and bounds an active branch at Pi compaction.
@@ -94,6 +100,14 @@ world-state changes and terminal Workspace settlement. A Tool intent is
 written before its effect. If a Worker disappears before the Tool result is
 known, the next Run records an unknown-effect result and interruption fact
 instead of replaying arbitrary shell or file mutations.
+
+Session Tool grants are copied into immutable Run capability snapshots during
+admission. The snapshot is part of the frozen Cloud Turn context, selects which
+Pi `AgentTool` proxies enter one runtime, and is carried to Tool Broker when an
+activation is reserved. Each operation then carries its trusted Pi Tool name;
+Broker rejects both ungranted names and invalid Tool/operation combinations.
+Model visibility is therefore an affordance, while Broker authorization is the
+security boundary.
 
 ### Worker Control Channel
 
@@ -177,6 +191,7 @@ not an authority.
 | tenants, users, sessions, quotas | PostgreSQL |
 | Runs, Attempts, leases, fences, ready queue | PostgreSQL |
 | Pi Session entries/compaction/operation records | PostgreSQL SessionStorage |
+| Session Tool grants and immutable Run capability snapshots | PostgreSQL |
 | conversation parent/fork graph | PostgreSQL |
 | canonical completed conversation | PostgreSQL |
 | retained high-frequency Worker events | Kafka |

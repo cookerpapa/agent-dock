@@ -92,6 +92,11 @@ Tool admission. Lease and fence representations stay out of model messages and
 Tool arguments, while unfinished Tool effects are recorded as unknown instead
 of being replayed blindly.
 
+Built-in Tool visibility is also Run-scoped. A Session grant is frozen into the
+accepted Run, the Agent Host registers only those Pi Tool proxies, and Tool
+Broker independently verifies both the granted Tool name and its low-level
+operation. Concurrent Agent runtimes in one Host never share a global Tool set.
+
 The first Tool call attaches the Workspace's stable Cube Volume to a fresh or
 warm KVM. Stopping a Cube loses processes, sockets and memory, but not files.
 The committed Workspace revision is a bounded file/hash/Git-baseline reference,
@@ -123,7 +128,7 @@ platform credential is exposed.
 - the Worker never executes user Bash and never receives the Cube management
   credential;
 - the Tool Broker validates tenant, Workspace, Session, Run, Attempt, lease,
-  fence and Cloud Step identity;
+  fence, Cloud Step identity and the immutable Run Tool snapshot;
 - public egress crosses a deployment-owned proxy that blocks private,
   link-local, metadata and platform destinations;
 - provider/runtime policy and mounts are deployment-owned, never model-owned.

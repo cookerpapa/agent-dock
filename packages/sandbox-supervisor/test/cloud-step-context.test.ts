@@ -31,6 +31,7 @@ const command: ExecuteTurnCommandMessage = {
     nextEventSeq: 1,
     input: { kind: "prompt", text: "test" },
     sandboxRetention: "ephemeral",
+    toolCapabilities: ["read", "write", "edit", "bash"],
     model: {
       profileId: "profile-step",
       provider: "pi-cloud-fake",
@@ -128,6 +129,7 @@ describe("Cloud Turn, Attempt and sampling Step contexts", () => {
       sequence: 1,
       turnContextSha256: turn.sha256,
       attemptContextSha256: attempt.sha256,
+      allowedTools: command.payload.toolCapabilities,
       activeTools: ["read", "write", "edit", "bash"],
       worldState,
     });
@@ -135,6 +137,7 @@ describe("Cloud Turn, Attempt and sampling Step contexts", () => {
       sequence: 2,
       turnContextSha256: turn.sha256,
       attemptContextSha256: attempt.sha256,
+      allowedTools: command.payload.toolCapabilities,
       activeTools: ["read", "write", "edit", "bash"],
       worldState,
     });
@@ -142,7 +145,17 @@ describe("Cloud Turn, Attempt and sampling Step contexts", () => {
     expect(first.sha256).not.toBe(second.sha256);
     expect(first.context.turnContextSha256).toBe(turn.sha256);
     expect(first.context.attemptContextSha256).toBe(attempt.sha256);
-    expect(first.context.activeTools).toEqual(["bash", "edit", "read", "write"]);
+    expect(first.context.activeTools).toEqual(["read", "write", "edit", "bash"]);
     expect(Object.isFrozen(first.context.worldState)).toBe(true);
+    expect(() =>
+      createCloudStepContext({
+        sequence: 3,
+        turnContextSha256: turn.sha256,
+        attemptContextSha256: attempt.sha256,
+        allowedTools: ["read"],
+        activeTools: ["read", "bash"],
+        worldState,
+      }),
+    ).toThrow("exceeded the accepted Run capability snapshot");
   });
 });

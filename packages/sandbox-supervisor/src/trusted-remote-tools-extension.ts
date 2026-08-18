@@ -1,7 +1,11 @@
 import {
   modelSamplingHeaders,
   parseInternalServiceError,
+  parseCloudToolCapabilitySnapshot,
   parseToolSandboxOperationResponse,
+  CLOUD_TOOL_NAMES,
+  type CloudToolCapabilitySnapshot,
+  type CloudToolName,
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
 } from "@pi-cloud/protocol";
@@ -51,6 +55,7 @@ type RemoteOperationInput<T = ToolSandboxOperationRequest> = T extends unknown
       | "attemptContextSha256"
       | "stepContextSequence"
       | "stepContextSha256"
+      | "toolName"
     >
   : never;
 
@@ -72,6 +77,7 @@ export type TrustedRemoteToolsRuntimeConfiguration = {
   capability: string;
   turnContextSha256: string;
   attemptContextSha256: string;
+  allowedTools?: CloudToolCapabilitySnapshot;
   captureStepContext: (
     activeTools: readonly string[],
     purpose?: "agent" | "context_maintenance",
@@ -123,6 +129,9 @@ function validateRuntimeConfiguration(
   const traceparent = candidate.traceparent;
   const tracestate = candidate.tracestate;
   const toolOutputDirectory = resolve(configuredToolOutputDirectory);
+  const allowedTools = parseCloudToolCapabilitySnapshot(
+    candidate.allowedTools ?? [...CLOUD_TOOL_NAMES],
+  );
   if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       activationId,
@@ -173,6 +182,7 @@ function validateRuntimeConfiguration(
     capability,
     turnContextSha256,
     attemptContextSha256,
+    allowedTools,
     captureStepContext: candidate.captureStepContext,
     ...(candidate.onToolOperationStarted === undefined
       ? {}
@@ -368,6 +378,7 @@ function registerTrustedRemoteTools(
   };
 
   const operation = async (
+    toolName: CloudToolName,
     request: RemoteOperationInput,
     signal?: AbortSignal,
   ): Promise<ToolSandboxOperationResponse> => {
@@ -388,6 +399,7 @@ function registerTrustedRemoteTools(
       attemptContextSha256: runtime.attemptContextSha256,
       stepContextSequence: currentStep.context.sequence,
       stepContextSha256: currentStep.sha256,
+      toolName,
       ...request,
     } as ToolSandboxOperationRequest;
     const requestOnce = async (): Promise<{ response: Response; value: unknown }> => {
@@ -474,10 +486,10 @@ function registerTrustedRemoteTools(
     await writeFile(target, value, { flag: "wx", mode: 0o600 });
   };
 
-  const readOperations = (toolCallId?: string): ReadOperations => ({
+  const readOperations = (toolName: "read" | "edit", toolCallId?: string): ReadOperations => ({
     readFile: async (path) => {
       try {
-        const response = await operation({ operation: "file.read", path });
+        const response = await operation(toolName, { operation: "file.read", path });
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
         if (response.operation !== "file.read") throw new Error("Tool response kind changed");
         const content = canonicalBase64(response.content);
@@ -495,7 +507,7 @@ function registerTrustedRemoteTools(
     },
     access: async (path) => {
       try {
-        const response = await operation({ operation: "file.access", path });
+        const response = await operation(toolName, { operation: "file.access", path });
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
       } catch (error: unknown) {
         throw errorForPi(error);
@@ -520,7 +532,7 @@ function registerTrustedRemoteTools(
   const writeOperations: WriteOperations = {
     writeFile: async (path, content) => {
       try {
-        const response = await operation({ operation: "file.write", path, content });
+        const response = await operation("write", { operation: "file.write", path, content });
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
         if (response.operation !== "file.write") throw new Error("Tool response kind changed");
       } catch (error: unknown) {
@@ -529,7 +541,7 @@ function registerTrustedRemoteTools(
     },
     mkdir: async (path) => {
       try {
-        const response = await operation({ operation: "file.mkdir", path });
+        const response = await operation("write", { operation: "file.mkdir", path });
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
       } catch (error: unknown) {
         throw errorForPi(error);
@@ -540,7 +552,7 @@ function registerTrustedRemoteTools(
   const editOperations: EditOperations = {
     readFile: async (path) => {
       try {
-        const response = await operation({ operation: "file.read", path });
+        const response = await operation("edit", { operation: "file.read", path });
         if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
         if (response.operation !== "file.read") throw new Error("Tool response kind changed");
         const content = canonicalBase64(response.content);
@@ -565,7 +577,7 @@ function registerTrustedRemoteTools(
         throw new Error("tool_edit_conflict: Edit did not read the current file revision");
       }
       try {
-        const response = await operation({
+        const response = await operation("edit", {
           operation: "file.write",
           path,
           content,
@@ -585,7 +597,7 @@ function registerTrustedRemoteTools(
         throw errorForPi(error);
       }
     },
-    access: readOperations().access,
+    access: readOperations("edit").access,
   };
   const bashOperations = (toolCallId: string): BashOperations => ({
     exec: async (command, cwd, { onData, signal, timeout }) => {
@@ -594,6 +606,7 @@ function registerTrustedRemoteTools(
         // Deliberately do not forward the `env` argument. It contains the
         // trusted Pi/model environment and must never cross into Tool Sandbox.
         const response = await operation(
+          "bash",
           {
             operation: "bash.exec",
             command,
@@ -665,113 +678,125 @@ function registerTrustedRemoteTools(
   const writeTool = createWriteTool(WORKSPACE_ROOT);
   const editTool = createEditTool(WORKSPACE_ROOT);
   const bashTool = createBashTool(WORKSPACE_ROOT);
+  const allowedTools = new Set(runtime.allowedTools);
 
-  pi.registerTool({
-    ...readTool,
-    executionMode: CLOUD_TOOL_EXECUTION_MODE,
-    async execute(id, params, signal, onUpdate) {
-      consumeToolCall();
-      const input = params as ReadToolInput;
-      if (/\.(?:png|jpe?g|gif|webp|bmp)$/i.test(input.path)) {
-        return createReadTool(WORKSPACE_ROOT, { operations: readOperations(id) }).execute(
+  if (allowedTools.has("read")) {
+    pi.registerTool({
+      ...readTool,
+      executionMode: CLOUD_TOOL_EXECUTION_MODE,
+      async execute(id, params, signal, onUpdate) {
+        consumeToolCall();
+        const input = params as ReadToolInput;
+        if (/\.(?:png|jpe?g|gif|webp|bmp)$/i.test(input.path)) {
+          return createReadTool(WORKSPACE_ROOT, { operations: readOperations("read", id) }).execute(
+            id,
+            params,
+            signal,
+            onUpdate,
+          );
+        }
+        const offsetLine = input.offset ?? 1;
+        const requestedLimit = input.limit ?? DEFAULT_MAX_LINES;
+        if (
+          !Number.isSafeInteger(offsetLine) ||
+          offsetLine < 1 ||
+          !Number.isSafeInteger(requestedLimit) ||
+          requestedLimit < 1
+        ) {
+          throw new Error("tool_read_range_invalid: offset and limit must be positive integers");
+        }
+        try {
+          const response = await operation(
+            "read",
+            {
+              operation: "file.read_range",
+              path: input.path,
+              offsetLine,
+              limitLines: Math.min(DEFAULT_MAX_LINES, requestedLimit),
+            },
+            signal,
+          );
+          if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
+          if (response.operation !== "file.read_range") {
+            throw new Error("Tool response kind changed");
+          }
+          if (response.firstLineBytes !== undefined) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `[Line ${response.startLine} is ${response.firstLineBytes} bytes, exceeds ${DEFAULT_MAX_BYTES} byte limit. Use bash with sed/head to inspect a bounded slice.]`,
+                },
+              ],
+              details: undefined,
+            };
+          }
+          const range = canonicalBase64(response.content);
+          const maximumInlineBytes = Math.min(runtime.maximumToolOutputBytes, DEFAULT_MAX_BYTES);
+          await preserveLargeOutput(id, range, maximumInlineBytes);
+          let output = modelOutputPreview(range, maximumInlineBytes, id).toString("utf8");
+          if (response.nextOffsetLine !== undefined) {
+            output += `\n\n[Showing lines ${response.startLine}-${response.endLine}. Use offset=${response.nextOffsetLine} to continue.]`;
+          }
+          return { content: [{ type: "text", text: output }], details: undefined };
+        } catch (error: unknown) {
+          throw errorForPi(error);
+        }
+      },
+    });
+  }
+  if (allowedTools.has("write")) {
+    pi.registerTool({
+      ...writeTool,
+      executionMode: CLOUD_TOOL_EXECUTION_MODE,
+      async execute(id, params, signal, onUpdate) {
+        consumeToolCall();
+        return createWriteTool(WORKSPACE_ROOT, { operations: writeOperations }).execute(
           id,
           params,
           signal,
           onUpdate,
         );
-      }
-      const offsetLine = input.offset ?? 1;
-      const requestedLimit = input.limit ?? DEFAULT_MAX_LINES;
-      if (
-        !Number.isSafeInteger(offsetLine) ||
-        offsetLine < 1 ||
-        !Number.isSafeInteger(requestedLimit) ||
-        requestedLimit < 1
-      ) {
-        throw new Error("tool_read_range_invalid: offset and limit must be positive integers");
-      }
-      try {
-        const response = await operation(
-          {
-            operation: "file.read_range",
-            path: input.path,
-            offsetLine,
-            limitLines: Math.min(DEFAULT_MAX_LINES, requestedLimit),
-          },
+      },
+    });
+  }
+  if (allowedTools.has("edit")) {
+    pi.registerTool({
+      ...editTool,
+      executionMode: CLOUD_TOOL_EXECUTION_MODE,
+      async execute(id, params, signal, onUpdate) {
+        consumeToolCall();
+        return createEditTool(WORKSPACE_ROOT, { operations: editOperations }).execute(
+          id,
+          params,
           signal,
+          onUpdate,
         );
-        if (response.type === "tool_sandbox.operation_failed") throwFailure(response);
-        if (response.operation !== "file.read_range") {
-          throw new Error("Tool response kind changed");
-        }
-        if (response.firstLineBytes !== undefined) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `[Line ${response.startLine} is ${response.firstLineBytes} bytes, exceeds ${DEFAULT_MAX_BYTES} byte limit. Use bash with sed/head to inspect a bounded slice.]`,
-              },
-            ],
-            details: undefined,
-          };
-        }
-        const range = canonicalBase64(response.content);
-        const maximumInlineBytes = Math.min(runtime.maximumToolOutputBytes, DEFAULT_MAX_BYTES);
-        await preserveLargeOutput(id, range, maximumInlineBytes);
-        let output = modelOutputPreview(range, maximumInlineBytes, id).toString("utf8");
-        if (response.nextOffsetLine !== undefined) {
-          output += `\n\n[Showing lines ${response.startLine}-${response.endLine}. Use offset=${response.nextOffsetLine} to continue.]`;
-        }
-        return { content: [{ type: "text", text: output }], details: undefined };
-      } catch (error: unknown) {
-        throw errorForPi(error);
-      }
-    },
-  });
-  pi.registerTool({
-    ...writeTool,
-    executionMode: CLOUD_TOOL_EXECUTION_MODE,
-    async execute(id, params, signal, onUpdate) {
-      consumeToolCall();
-      return createWriteTool(WORKSPACE_ROOT, { operations: writeOperations }).execute(
-        id,
-        params,
-        signal,
-        onUpdate,
-      );
-    },
-  });
-  pi.registerTool({
-    ...editTool,
-    executionMode: CLOUD_TOOL_EXECUTION_MODE,
-    async execute(id, params, signal, onUpdate) {
-      consumeToolCall();
-      return createEditTool(WORKSPACE_ROOT, { operations: editOperations }).execute(
-        id,
-        params,
-        signal,
-        onUpdate,
-      );
-    },
-  });
-  pi.registerTool({
-    ...bashTool,
-    executionMode: CLOUD_TOOL_EXECUTION_MODE,
-    async execute(id, params, signal, onUpdate) {
-      consumeToolCall();
-      return createBashTool(WORKSPACE_ROOT, { operations: bashOperations(id) }).execute(
-        id,
-        params,
-        signal,
-        onUpdate,
-      );
-    },
-  });
+      },
+    });
+  }
+  if (allowedTools.has("bash")) {
+    pi.registerTool({
+      ...bashTool,
+      executionMode: CLOUD_TOOL_EXECUTION_MODE,
+      async execute(id, params, signal, onUpdate) {
+        consumeToolCall();
+        return createBashTool(WORKSPACE_ROOT, { operations: bashOperations(id) }).execute(
+          id,
+          params,
+          signal,
+          onUpdate,
+        );
+      },
+    });
+  }
 
-  pi.on("user_bash", async () => {
-    consumeToolCall();
-    return { operations: bashOperations(randomUUID()) };
-  });
+  if (allowedTools.has("bash")) {
+    pi.on("user_bash", async () => {
+      consumeToolCall();
+      return { operations: bashOperations(randomUUID()) };
+    });
+  }
   return {
     transformContext: (messages, purpose) => transformContext({ messages }, purpose),
   };

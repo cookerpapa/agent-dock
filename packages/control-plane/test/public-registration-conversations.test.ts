@@ -192,8 +192,25 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
       headers: { ...authorization(alpha.apiToken), "idempotency-key": "alpha-conversation" },
       payload: { prompt: "alpha private prompt" },
     });
-    expect(createAlphaTurn.statusCode).toBe(202);
+    expect(createAlphaTurn.statusCode, createAlphaTurn.body).toBe(202);
     alphaTurn = createAlphaTurn.json<AcceptedTurnResource>();
+    const acceptedToolSnapshot = await database
+      .selectFrom("runs as run")
+      .innerJoin("sessions as session", (join) =>
+        join
+          .onRef("session.tenant_id", "=", "run.tenant_id")
+          .onRef("session.id", "=", "run.session_id"),
+      )
+      .select([
+        "session.tool_capabilities as sessionTools",
+        "run.tool_capability_snapshot as runTools",
+      ])
+      .where("run.id", "=", alphaTurn.runId)
+      .executeTakeFirstOrThrow();
+    expect(acceptedToolSnapshot).toEqual({
+      sessionTools: ["read", "write", "edit", "bash"],
+      runTools: ["read", "write", "edit", "bash"],
+    });
 
     const bravoProjectResponse = await http.inject({
       method: "POST",

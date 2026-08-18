@@ -10,6 +10,7 @@ import {
   EnvironmentToolchainReportSchema,
   EnvironmentValidationReportSchema,
 } from "./environment.ts";
+import { CloudToolCapabilitySnapshotSchema, CloudToolNameSchema } from "./tool-capabilities.ts";
 
 export const MAX_TOOL_COMMAND_BYTES = 64 * 1_024;
 export const MAX_TOOL_FILE_BYTES = 512 * 1_024;
@@ -120,6 +121,7 @@ export const ToolSandboxCreateRequestSchema = Type.Object(
     assignment: ToolSandboxAssignmentSchema,
     turnContextSha256: Sha256Schema,
     attemptContextSha256: Sha256Schema,
+    allowedTools: CloudToolCapabilitySnapshotSchema,
     environment: EnvironmentRuntimeSnapshotSchema,
     workspaceSeed: AgentWorkspaceSeedSchema,
     workspaceRestore: Type.Optional(SandboxCheckpointBlobSchema),
@@ -332,6 +334,7 @@ const OperationEnvelope = {
   attemptContextSha256: Sha256Schema,
   stepContextSequence: PositiveSafeIntegerSchema,
   stepContextSha256: Sha256Schema,
+  toolName: CloudToolNameSchema,
 };
 
 const ToolPathSchema = Type.String({ minLength: 1, maxLength: 4_096 });

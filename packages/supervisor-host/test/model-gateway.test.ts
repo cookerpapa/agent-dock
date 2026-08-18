@@ -246,6 +246,7 @@ beforeAll(async () => {
       nextEventSeq: 1,
       input: { kind: "prompt", text: "Repair it" },
       sandboxRetention: "ephemeral",
+      toolCapabilities: ["read", "write", "edit", "bash"],
       model: {
         profileId: tenant.defaultModelProfileId,
         provider: "deepseek",

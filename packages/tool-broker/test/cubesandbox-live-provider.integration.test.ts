@@ -169,6 +169,7 @@ function createRequest(
     assignment: assigned,
     turnContextSha256: STEP_CONTEXT_SHA256,
     attemptContextSha256: STEP_CONTEXT_SHA256,
+    allowedTools: ["read", "write", "edit", "bash"],
     environment: {
       environmentVersionId: randomUUID(),
       versionNumber: 1,
@@ -197,6 +198,7 @@ function operation(
     attemptContextSha256: STEP_CONTEXT_SHA256,
     stepContextSequence: 1,
     stepContextSha256: STEP_CONTEXT_SHA256,
+    toolName: "bash",
     operation: "bash.exec",
     command,
     cwd: "/workspace",

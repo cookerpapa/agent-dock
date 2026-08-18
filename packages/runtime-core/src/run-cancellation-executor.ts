@@ -9,6 +9,7 @@ import {
 } from "@pi-cloud/domain";
 import {
   TURN_CANCELLATION_OUTBOX_TOPIC,
+  parseCloudToolCapabilitySnapshot,
   parseEnvironmentRuntimeSnapshot,
   parseTurnCancellationOutboxPayload,
   type CancelTurnCommandMessage,
@@ -428,6 +429,7 @@ export class RunCancellationExecutor {
           "session_row.sandbox_retention_policy as sandboxRetention",
           "session_row.next_event_seq as nextEventSeq",
           "run.id as runId",
+          "run.tool_capability_snapshot as toolCapabilitySnapshot",
           "run_attempt.id as runAttemptId",
           "run_attempt.attempt_number as runAttemptNumber",
           "environment.id as environmentVersionId",
@@ -532,6 +534,7 @@ export class RunCancellationExecutor {
             nextEventSeq: row.nextEventSeq,
             input: { kind: "prompt", prompt: row.inputText },
             sandboxRetention: row.sandboxRetention,
+            toolCapabilities: parseCloudToolCapabilitySnapshot(row.toolCapabilitySnapshot),
             model: {
               profileId: row.modelProfileId,
               provider: row.provider,

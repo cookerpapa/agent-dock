@@ -173,6 +173,7 @@ describe("supervisor/control-plane wire protocol", () => {
         nextEventSeq: 11,
         input: { kind: "prompt", text: "Fix the failing test" },
         sandboxRetention: "ephemeral",
+        toolCapabilities: ["read", "write", "edit", "bash"],
         model: modelSnapshot(),
         environment: environmentSnapshot(),
         traceContext: {

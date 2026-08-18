@@ -42,6 +42,7 @@ type GeneratedJsonObject = JSONColumnType<
   Record<string, unknown> | undefined,
   Record<string, unknown>
 >;
+type GeneratedJsonArray = JSONColumnType<unknown[], unknown[] | undefined, unknown[]>;
 
 export type CredentialBindingStatus = "active" | "disabled" | "revoked";
 export type CredentialKind = "oauth" | "api_key" | "brokered";
@@ -397,6 +398,7 @@ export interface SessionTable {
   desired_model_profile_id: string;
   state: SessionState;
   sandbox_retention_policy: Generated<SandboxRetentionPolicy>;
+  tool_capabilities: GeneratedJsonArray;
   workspace_snapshot_key: string | null;
   next_event_seq: GeneratedInt8;
   next_mailbox_position: GeneratedInt8;
@@ -455,6 +457,7 @@ export interface RunTable {
   turn_id: string;
   command_id: string;
   environment_version_id: string;
+  tool_capability_snapshot: GeneratedJsonArray;
   source_set_snapshot: GeneratedJsonObject;
   conversation_base_seq: GeneratedInt8;
   workspace_base_version_id: GeneratedNullable<string>;

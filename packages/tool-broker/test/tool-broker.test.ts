@@ -80,6 +80,7 @@ const createRequest: ToolSandboxCreateRequest = {
   assignment,
   turnContextSha256: TURN_CONTEXT_SHA256,
   attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
+  allowedTools: ["read", "write", "edit", "bash"],
   environment,
   workspaceSeed: { kind: "sample_java" },
 };
@@ -221,6 +222,7 @@ function operation(
     attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
     stepContextSequence: 1,
     stepContextSha256: STEP_CONTEXT_SHA256,
+    toolName: "bash",
     operation: "bash.exec",
     command: "pwd",
     cwd: "/workspace",
@@ -368,6 +370,28 @@ describe("provider-backed Tool Tool Broker", () => {
     await expect(
       manager.execute(CAPABILITY, operation("10000000-0000-4000-8000-000000000014")),
     ).rejects.toMatchObject({ code: "invalid_tool_capability" });
+  });
+
+  it("enforces the Run Tool snapshot independently of model visibility", async () => {
+    const fixture = providerFixture();
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const created = await manager.create({ ...createRequest, allowedTools: ["read"] });
+
+    await expect(
+      manager.execute(created.capability, operation("10000000-0000-4000-8000-000000000041")),
+    ).rejects.toMatchObject({ code: "tool_not_granted" });
+    await expect(
+      manager.execute(created.capability, {
+        ...operation("10000000-0000-4000-8000-000000000042"),
+        toolName: "read",
+      }),
+    ).rejects.toMatchObject({ code: "tool_operation_not_granted" });
+    expect(fixture.createCount).toBe(0);
+    expect(fixture.exec).not.toHaveBeenCalled();
   });
 
   it("queues materialization behind the global active Sandbox admission limit", async () => {

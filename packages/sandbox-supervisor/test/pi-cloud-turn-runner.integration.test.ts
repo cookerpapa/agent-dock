@@ -36,6 +36,7 @@ const command: ExecuteTurnCommandMessage = {
     nextEventSeq: 1,
     input: { kind: "prompt", text: "Return the deterministic fake response." },
     sandboxRetention: "ephemeral",
+    toolCapabilities: ["read", "write", "edit", "bash"],
     model: {
       profileId: "profile-1",
       provider: "pi-cloud-fake",
@@ -119,6 +120,7 @@ describe("PiCloudTurnRunner integration", () => {
                   sequence: (stepSequence += 1),
                   turnContextSha256: turn.sha256,
                   attemptContextSha256: attempt.sha256,
+                  allowedTools: command.payload.toolCapabilities,
                   activeTools: ["read", "write", "edit", "bash"],
                   worldState: captured.worldState,
                 }),

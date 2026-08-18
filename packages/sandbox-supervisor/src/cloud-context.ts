@@ -1,11 +1,15 @@
-import type { ExecuteTurnCommandMessage } from "@pi-cloud/protocol";
+import {
+  parseCloudToolCapabilitySnapshot,
+  type CloudToolCapabilitySnapshot,
+  type ExecuteTurnCommandMessage,
+} from "@pi-cloud/protocol";
 import { createHash } from "node:crypto";
 import type { SandboxRuntimeIdentity } from "./sandbox-assignment-inventory.ts";
 
 export const CLOUD_TURN_CONTEXT_SCHEMA_VERSION = 1 as const;
 export const CLOUD_ATTEMPT_CONTEXT_SCHEMA_VERSION = 1 as const;
 export const CLOUD_STEP_CONTEXT_SCHEMA_VERSION = 1 as const;
-export const REMOTE_TOOL_REGISTRY_VERSION = "pi-remote-tools.v1" as const;
+export const REMOTE_TOOL_REGISTRY_VERSION = "pi-remote-tools.v2" as const;
 export const TOOL_NETWORK_POLICY_VERSION = "cube-proxy-public-egress.v1" as const;
 
 /** The logical contract for one accepted user Turn, stable across retries. */
@@ -43,7 +47,7 @@ export type CloudTurnContext = Readonly<{
   }>;
   tools: Readonly<{
     registryVersion: typeof REMOTE_TOOL_REGISTRY_VERSION;
-    names: readonly ["read", "write", "edit", "bash"];
+    names: CloudToolCapabilitySnapshot;
     networkPolicyVersion: typeof TOOL_NETWORK_POLICY_VERSION;
   }>;
   budgets: ExecuteTurnCommandMessage["payload"]["budgets"] | null;
@@ -158,7 +162,7 @@ export function createCloudTurnContext(
     sandbox: { retention: payload.sandboxRetention },
     tools: {
       registryVersion: REMOTE_TOOL_REGISTRY_VERSION,
-      names: ["read", "write", "edit", "bash"],
+      names: parseCloudToolCapabilitySnapshot(payload.toolCapabilities),
       networkPolicyVersion: TOOL_NETWORK_POLICY_VERSION,
     },
     budgets: payload.budgets === undefined ? null : { ...payload.budgets },
@@ -200,18 +204,17 @@ export function createCloudStepContext(input: {
   sequence: number;
   turnContextSha256: string;
   attemptContextSha256: string;
+  allowedTools: readonly string[];
   activeTools: readonly string[];
   worldState: CloudStepWorldState;
 }): FrozenCloudStep {
   if (!Number.isSafeInteger(input.sequence) || input.sequence < 1) {
     throw new TypeError("Cloud Step sequence must be a positive safe integer");
   }
-  const activeTools = [...input.activeTools].sort();
-  if (
-    activeTools.length !== 4 ||
-    activeTools.some((name, index) => name !== ["bash", "edit", "read", "write"][index])
-  ) {
-    throw new TypeError("Cloud Step remote Tool registry is invalid");
+  const activeTools = parseCloudToolCapabilitySnapshot(input.activeTools);
+  const allowedTools = new Set(parseCloudToolCapabilitySnapshot(input.allowedTools));
+  if (activeTools.some((name) => !allowedTools.has(name))) {
+    throw new TypeError("Cloud Step Tool set exceeded the accepted Run capability snapshot");
   }
   const context = freezeContext<CloudStepContext>({
     schemaVersion: CLOUD_STEP_CONTEXT_SCHEMA_VERSION,

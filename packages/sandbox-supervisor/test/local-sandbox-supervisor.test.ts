@@ -63,6 +63,7 @@ function command(
       nextEventSeq: 1,
       input: { kind: "prompt", text: "hello" },
       sandboxRetention: "ephemeral",
+      toolCapabilities: ["read", "write", "edit", "bash"],
       model: {
         profileId: "profile-1",
         provider: "pi-cloud-fake",

@@ -12,11 +12,13 @@ import {
 } from "@pi-cloud/domain";
 import {
   TURN_COMMAND_OUTBOX_TOPIC,
+  parseCloudToolCapabilitySnapshot,
   parseEnvironmentRuntimeSnapshot,
   parseTurnCommandOutboxPayload,
 } from "@pi-cloud/protocol";
 import type {
   CancelTurnCommandMessage,
+  CloudToolCapabilitySnapshot,
   TurnBudgetSnapshot,
   WorkspacePatch,
 } from "@pi-cloud/protocol";
@@ -53,6 +55,7 @@ export type TurnExecutionRequest = {
     prompt: string;
   };
   sandboxRetention: import("@pi-cloud/protocol").SandboxRetentionPolicy;
+  toolCapabilities: CloudToolCapabilitySnapshot;
   model: {
     profileId: string;
     provider: string;
@@ -641,6 +644,7 @@ export class RunCommandExecutor {
           "workspace_row.current_workspace_version_id as currentWorkspaceVersionId",
           "run.id as runId",
           "run.trace_id as traceId",
+          "run.tool_capability_snapshot as toolCapabilitySnapshot",
           "run.queued_at as runQueuedAt",
           "run.state as runState",
           "run.current_attempt_id as currentAttemptId",
@@ -806,6 +810,7 @@ export class RunCommandExecutor {
       // full per-Run budget. The trusted Runner decrements it in memory while
       // the Agent Loop is active.
       const remainingToolCalls = maximumToolCalls;
+      const toolCapabilities = parseCloudToolCapabilitySnapshot(row.toolCapabilitySnapshot);
 
       const attemptNumber = row.attempts + 1;
       if (row.runAttemptCount !== row.attempts) {
@@ -976,6 +981,7 @@ export class RunCommandExecutor {
           nextEventSeq: row.nextEventSeq,
           input: { kind: "prompt", prompt: row.inputText },
           sandboxRetention: row.sandboxRetention,
+          toolCapabilities,
           model: {
             profileId: row.modelProfileId,
             provider: row.provider,

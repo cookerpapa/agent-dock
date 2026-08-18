@@ -40,6 +40,7 @@ import {
   parseEnvironmentRecipe,
   parseEnvironmentValidationReport,
   parseConversationTurnTranscriptResource,
+  parseCloudToolCapabilitySnapshot,
   parseWorkspaceSourceSetSnapshot,
   TURN_CANCELLATION_OUTBOX_TOPIC,
   TURN_COMMAND_OUTBOX_TOPIC,
@@ -1917,6 +1918,7 @@ export class ControlPlaneStore {
           "current_workspace_version_id",
           "workspace_snapshot_key",
           "forked_from_session_id",
+          "tool_capabilities",
           "archived_at",
         ])
         .where("tenant_id", "=", this.#tenantId)
@@ -2009,6 +2011,15 @@ export class ControlPlaneStore {
         "Next mailbox position",
       );
       const model = await this.#resolveModelSnapshot(transaction, request.thinkingLevel);
+      let toolCapabilities;
+      try {
+        toolCapabilities = parseCloudToolCapabilitySnapshot(session.tool_capabilities);
+      } catch {
+        throw new ControlPlaneStoreError(
+          "control_plane_misconfigured",
+          "Session Tool grant is invalid",
+        );
+      }
       const environment =
         validation === undefined
           ? await this.#activeEnvironmentForRun(transaction, session.project_id)
@@ -2104,6 +2115,7 @@ export class ControlPlaneStore {
           turn_id: turnId,
           command_id: command.id,
           environment_version_id: environment.environmentVersionId,
+          tool_capability_snapshot: sql<unknown[]>`${JSON.stringify(toolCapabilities)}::jsonb`,
           source_set_snapshot: sql<Record<string, unknown>>`${canonicalWorkspaceSourceSetJson(
             sourceSet,
           )}::jsonb`,

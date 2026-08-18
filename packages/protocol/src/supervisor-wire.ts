@@ -16,6 +16,7 @@ import {
   UuidSchema,
 } from "./protocol-primitives.ts";
 import { EnvironmentRuntimeSnapshotSchema } from "./environment.ts";
+import { CloudToolCapabilitySnapshotSchema } from "./tool-capabilities.ts";
 
 export const TWO_PHASE_COMMAND_CAPABILITY = "command.two_phase.v1";
 export const PI_STEER_CAPABILITY = "pi.steer.v1";
@@ -201,6 +202,7 @@ export const ExecuteTurnCommandMessageSchema = Type.Object(
         nextEventSeq: PositiveSafeIntegerSchema,
         input: Type.Union([PromptInputSchema, ContinueInputSchema]),
         sandboxRetention: SandboxRetentionPolicySchema,
+        toolCapabilities: CloudToolCapabilitySnapshotSchema,
         model: TurnModelSnapshotSchema,
         environment: EnvironmentRuntimeSnapshotSchema,
         budgets: Type.Optional(TurnBudgetSnapshotSchema),

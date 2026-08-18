@@ -362,6 +362,7 @@ describe("Tool Broker authenticated RPC", () => {
         assignment: { ...assignment, workspaceId: `workspace-replica-${String(replica)}` },
         turnContextSha256: STEP_CONTEXT_SHA256,
         attemptContextSha256: STEP_CONTEXT_SHA256,
+        allowedTools: ["read", "write", "edit", "bash"],
         environment: {
           environmentVersionId: "10000000-0000-4000-8000-000000000013",
           versionNumber: 1,
@@ -435,6 +436,7 @@ describe("Tool Broker authenticated RPC", () => {
       assignment,
       turnContextSha256: STEP_CONTEXT_SHA256,
       attemptContextSha256: STEP_CONTEXT_SHA256,
+      allowedTools: ["read", "write", "edit", "bash"],
       environment: {
         environmentVersionId: "10000000-0000-4000-8000-000000000013",
         versionNumber: 1,
@@ -476,6 +478,7 @@ describe("Tool Broker authenticated RPC", () => {
       assignment,
       turnContextSha256: STEP_CONTEXT_SHA256,
       attemptContextSha256: STEP_CONTEXT_SHA256,
+      allowedTools: ["read", "write", "edit", "bash"],
       environment: {
         environmentVersionId: "10000000-0000-4000-8000-000000000013",
         versionNumber: 1,
@@ -510,6 +513,7 @@ describe("Tool Broker authenticated RPC", () => {
       attemptContextSha256: STEP_CONTEXT_SHA256,
       stepContextSequence: 1,
       stepContextSha256: STEP_CONTEXT_SHA256,
+      toolName: "bash",
       operation: "bash.exec",
       command: "pwd",
       cwd: "/workspace",

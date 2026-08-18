@@ -102,6 +102,7 @@ function command(turn: 1 | 2): ExecuteTurnCommandMessage {
       nextEventSeq: turn,
       input: { kind: "prompt", text: `turn ${String(turn)}` },
       sandboxRetention: "ephemeral",
+      toolCapabilities: ["read", "write", "edit", "bash"],
       model: {
         profileId: IDS.profile,
         provider: "pi-cloud-fake",

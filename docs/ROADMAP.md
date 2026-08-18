@@ -14,6 +14,8 @@
 - Kubernetes/KEDA deployment with PostgreSQL backlog scaling;
 - one-host installer, configuration UI and real Cube/model acceptance.
 - human Pi Session tree navigation and transactional conversation forks.
+- Run-scoped built-in Tool capability snapshots enforced independently by the
+  Agent Host and Tool Broker.
 
 ## Current release gate
 

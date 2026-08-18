@@ -101,6 +101,8 @@ export {
   downPiCloudEnvironmentProfile,
   upPiCloudRunQueueNotification,
   downPiCloudRunQueueNotification,
+  upRunToolCapabilitySnapshots,
+  downRunToolCapabilitySnapshots,
 } from "./migrations/index.ts";
 
 export {

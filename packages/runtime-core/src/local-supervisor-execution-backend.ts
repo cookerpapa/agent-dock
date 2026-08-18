@@ -298,6 +298,7 @@ export class LocalSupervisorExecutionBackend
           nextEventSeq: positiveSafeInteger(request.nextEventSeq, "next event sequence"),
           input: { kind: "prompt", text: request.input.prompt },
           sandboxRetention: request.sandboxRetention,
+          toolCapabilities: request.toolCapabilities,
           model: {
             profileId: request.model.profileId,
             provider: request.model.provider,

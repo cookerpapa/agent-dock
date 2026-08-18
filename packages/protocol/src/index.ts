@@ -441,6 +441,15 @@ export {
 } from "./supervisor-wire.ts";
 
 export {
+  CLOUD_TOOL_NAMES,
+  CloudToolCapabilitySnapshotSchema,
+  CloudToolNameSchema,
+  parseCloudToolCapabilitySnapshot,
+  type CloudToolCapabilitySnapshot,
+  type CloudToolName,
+} from "./tool-capabilities.ts";
+
+export {
   PiCloudInternalProtocolError,
   InternalServiceErrorSchema,
   SupervisorBootProvisionRequestSchema,

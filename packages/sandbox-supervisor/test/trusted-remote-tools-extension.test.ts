@@ -96,6 +96,14 @@ describe("trusted remote tools extension governance", () => {
     });
   });
 
+  it("exposes only the immutable Run capability snapshot to one Agent runtime", () => {
+    const runtime = createTrustedRemoteAgentTools({
+      ...BASE_CONFIGURATION,
+      allowedTools: ["read", "bash"],
+    });
+    expect(runtime.tools.map((tool) => tool.name)).toEqual(["read", "bash"]);
+  });
+
   it("assigns fresh governed identities to Pi context-maintenance requests", async () => {
     const purposes: Array<string | undefined> = [];
     const capture = createStepCapture();
@@ -248,6 +256,7 @@ describe("trusted remote tools extension governance", () => {
 
     expect(capturedSteps.map((entry) => entry.step.context.sequence)).toEqual([1, 2]);
     expect(requestBody).toMatchObject({
+      toolName: "bash",
       turnContextSha256: TURN_CONTEXT_SHA256,
       attemptContextSha256: ATTEMPT_CONTEXT_SHA256,
       stepContextSequence: 2,

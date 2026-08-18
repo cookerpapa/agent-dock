@@ -63,6 +63,7 @@ import * as removeDormantAdvancedFeatures from "./061_remove_dormant_advanced_fe
 import * as postgresSessionStorageOnly from "./062_postgres_session_storage_only.ts";
 import * as piCloudEnvironmentProfile from "./063_pi_cloud_environment_profile.ts";
 import * as piCloudRunQueueNotification from "./064_pi_cloud_run_queue_notification.ts";
+import * as runToolCapabilitySnapshots from "./065_run_tool_capability_snapshots.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -131,6 +132,7 @@ export const migrationProvider: MigrationProvider = {
       "062_postgres_session_storage_only": postgresSessionStorageOnly,
       "063_pi_cloud_environment_profile": piCloudEnvironmentProfile,
       "064_pi_cloud_run_queue_notification": piCloudRunQueueNotification,
+      "065_run_tool_capability_snapshots": runToolCapabilitySnapshots,
     };
   },
 };
@@ -367,3 +369,7 @@ export {
   down as downPiCloudRunQueueNotification,
   up as upPiCloudRunQueueNotification,
 } from "./064_pi_cloud_run_queue_notification.ts";
+export {
+  down as downRunToolCapabilitySnapshots,
+  up as upRunToolCapabilitySnapshots,
+} from "./065_run_tool_capability_snapshots.ts";
