@@ -420,7 +420,7 @@ export class PostgresSubagentJobProvider {
           workspace_id: childWorkspaceId,
           desired_model_profile_id: parent.modelProfileId,
           state: "cold",
-          sandbox_retention_policy: parent.sandboxRetention,
+          sandbox_retention_policy: "ephemeral",
           session_kind: "subagent",
           tool_capabilities: sql<unknown[]>`${JSON.stringify(tools)}::jsonb`,
           workspace_snapshot_key:
