@@ -128,9 +128,11 @@ Workspace modes are explicit:
   shared Workspace-head commit;
 - upstream `worktree:true` maps to `isolated`: Tool Broker quiesces the parent,
   the trusted Volume gateway makes an idempotent revision-bound internal
-  Workspace copy, and the child runs concurrently in another Cube. Its settled
+  Workspace copy, and a fresh-context child runs concurrently in another Cube.
+  Its settled
   patch is returned to the parent, while the internal Workspace is hidden from
-  product lists and retired after terminal settlement.
+  product lists and retired after terminal settlement. Child Sandbox retention
+  is always ephemeral even when the parent conversation is persistent.
 
 RunAttempt fences remain the database-side effect authority. A separate
 monotonic Cube authority epoch rotates the in-guest secret across

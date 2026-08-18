@@ -53,7 +53,9 @@ normal user conversation.
   waiting slot as an optimization, but correctness does not depend on it.
 - Shared mode preserves live files, dependencies and processes but must retain
   a single writer. Isolated mode permits parallel mutations but requires a
-  trusted Volume fork and an explicit result/merge contract.
+  trusted Volume fork and an explicit result/merge contract. Isolated children
+  intentionally use fresh model context so inherited orchestration requests
+  cannot become executable child instructions.
 - Project-controlled agent or extension code remains outside the trusted Host.
   Only deployment-owned profiles are enabled until a separate extension trust
   policy is accepted.

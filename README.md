@@ -105,7 +105,7 @@ leaf `pi` process boundary is replaced by a PostgreSQL-backed Child Session and
 Child Run on the same Worker pool. Tool-free reviewers consume no Cube;
 `shared_serialized` children temporarily receive the parent's Cube authority;
 `worktree:true` creates a trusted persistent-Volume fork and an independent
-Cube, then returns the settled patch to the parent. Child Session entries and
+Cube with fresh model context, then returns the settled patch to the parent. Child Session entries and
 compaction remain native Pi PostgreSQL records. Parent cancellation is relayed
 to admitted children, and Worker capacity reserves a child lane so a pool of
 waiting parents cannot starve every delegated Run.
@@ -172,6 +172,7 @@ configure the model. Useful operations:
 npm run production:ps
 npm run production:logs
 npm run production:check
+npm run production:subagents-check
 npm run production:long-context-check
 npm run production:backup
 ```
