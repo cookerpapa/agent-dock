@@ -1,8 +1,8 @@
 # Pi subagent production acceptance
 
-- Checked at: 2026-08-19 01:02 CST
+- Checked at: 2026-08-19 01:11 CST
 - Provider/model: DeepSeek / `deepseek-v4-flash`
-- Parent Session: `d8d018d7-fc99-434a-9378-088a529ebe3e`
+- Parent Session: `e782a941-0f57-4a0a-bd93-6f0545fc691c`
 - Upstream contract: `pi-subagents@0.50.0`
 
 | Mode | Child Session/Run | Workspace evidence | Result |
