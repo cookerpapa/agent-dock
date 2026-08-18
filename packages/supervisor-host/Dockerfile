@@ -37,6 +37,7 @@ LABEL org.opencontainers.image.title="PiCloud trusted Supervisor host" \
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=dependencies /app/node_modules /app/node_modules
+COPY --from=dependencies /app/packages/tool-broker/node_modules /app/packages/tool-broker/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 COPY packages/control-plane/package.json packages/control-plane/package.json

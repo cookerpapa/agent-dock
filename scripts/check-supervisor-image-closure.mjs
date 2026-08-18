@@ -60,9 +60,14 @@ assert.equal(
   "Supervisor image must copy the complete installed production dependency tree",
 );
 assert(
-  !dockerfile.includes("/app/packages/sandbox-supervisor/node_modules") &&
-    !dockerfile.includes("/app/packages/tool-broker/node_modules"),
-  "Supervisor image must not assume npm creates per-Workspace node_modules directories",
+  !dockerfile.includes("/app/packages/sandbox-supervisor/node_modules"),
+  "Supervisor image must not assume npm creates a sandbox-supervisor node_modules directory",
+);
+assert(
+  dockerfile.includes(
+    "COPY --from=dependencies /app/packages/tool-broker/node_modules /app/packages/tool-broker/node_modules",
+  ),
+  "Supervisor image must preserve Tool Broker's version-isolated undici dependency",
 );
 assert(
   dockerfile.includes("await import('pi-subagents')") &&
