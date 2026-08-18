@@ -122,6 +122,11 @@ function providerFixture() {
       environment: environmentValidation,
     };
   });
+  const forkWorkspace = vi.fn<NonNullable<SandboxProvider["forkWorkspace"]>>(async (handle) => ({
+    sourceHandle: handle,
+    sourceRevision: "a".repeat(64),
+    targetRevision: "b".repeat(64),
+  }));
   const provider: SandboxProvider = {
     providerId: "cubesandbox",
     async checkHealth() {},
@@ -161,6 +166,7 @@ function providerFixture() {
       };
     },
     snapshot,
+    forkWorkspace,
     async stop() {
       stopped = true;
     },
@@ -208,6 +214,7 @@ function providerFixture() {
     exec,
     rebind,
     snapshot,
+    forkWorkspace,
     terminalInput,
     terminalResize,
     get createSpec() {
@@ -603,6 +610,40 @@ describe("provider-backed Tool Tool Broker", () => {
     expect(fixture.createCount).toBe(1);
     expect(fixture.snapshot).toHaveBeenCalledTimes(2);
     expect(fixture.rebind).toHaveBeenCalledTimes(2);
+    await manager.stop(parent.activationId, assignment);
+  });
+
+  it("creates an isolated Workspace fork without revoking the parent capability", async () => {
+    const fixture = providerFixture();
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const parent = await manager.create(createRequest);
+    await manager.execute(parent.capability, operation("73400000-0000-4000-8000-000000000001"));
+    const forked = await manager.forkWorkspace({
+      toolBrokerProtocolVersion: 1,
+      type: "workspace.fork",
+      requestId: "73400000-0000-4000-8000-000000000002",
+      sourceActivationId: parent.activationId,
+      sourceAssignment: assignment,
+      target: {
+        tenantId: assignment.tenantId,
+        projectId: assignment.projectId,
+        workspaceId: "73400000-0000-4000-8000-000000000003",
+        sessionId: "73400000-0000-4000-8000-000000000004",
+      },
+    });
+    expect(forked).toMatchObject({
+      type: "workspace.forked",
+      sourceRevision: "a".repeat(64),
+      targetRevision: "b".repeat(64),
+    });
+    await expect(
+      manager.execute(parent.capability, operation("73400000-0000-4000-8000-000000000005")),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    expect(fixture.forkWorkspace).toHaveBeenCalledTimes(1);
     await manager.stop(parent.activationId, assignment);
   });
 

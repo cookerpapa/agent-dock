@@ -102,6 +102,9 @@ function toolBroker(): SupervisorToolBroker {
     async capture() {
       throw new Error("unused");
     },
+    async forkWorkspace() {
+      throw new Error("unused");
+    },
     async release() {
       throw new Error("unused");
     },

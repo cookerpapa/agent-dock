@@ -67,6 +67,7 @@ import * as runToolCapabilitySnapshots from "./065_run_tool_capability_snapshots
 import * as durableSubagentExecutions from "./066_durable_subagent_executions.ts";
 import * as toollessRunCapabilities from "./067_toolless_run_capabilities.ts";
 import * as subagentRunSystemPrompt from "./068_subagent_run_system_prompt.ts";
+import * as isolatedSubagentWorkspaces from "./069_isolated_subagent_workspaces.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -139,6 +140,7 @@ export const migrationProvider: MigrationProvider = {
       "066_durable_subagent_executions": durableSubagentExecutions,
       "067_toolless_run_capabilities": toollessRunCapabilities,
       "068_subagent_run_system_prompt": subagentRunSystemPrompt,
+      "069_isolated_subagent_workspaces": isolatedSubagentWorkspaces,
     };
   },
 };
@@ -391,3 +393,7 @@ export {
   down as downSubagentRunSystemPrompt,
   up as upSubagentRunSystemPrompt,
 } from "./068_subagent_run_system_prompt.ts";
+export {
+  down as downIsolatedSubagentWorkspaces,
+  up as upIsolatedSubagentWorkspaces,
+} from "./069_isolated_subagent_workspaces.ts";

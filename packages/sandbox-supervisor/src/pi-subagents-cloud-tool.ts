@@ -40,6 +40,7 @@ export type PiSubagentCloudCoordinator = Readonly<{
   status(providerJobId: string): Promise<ExternalJobHandle> | ExternalJobHandle;
   result(providerJobId: string): Promise<ExternalJobResult> | ExternalJobResult;
   reattach(providerJobId: string): Promise<ExternalJobHandle> | ExternalJobHandle;
+  cancel(providerJobId: string): Promise<ExternalJobHandle> | ExternalJobHandle;
 }>;
 
 export type PiSubagentCloudToolContext = Readonly<{
@@ -52,7 +53,7 @@ type Contract = Pick<ToolDefinition, "name" | "label" | "description" | "paramet
 type WorkerProviderRequest = Readonly<{
   type: "provider.request";
   requestId: string;
-  operation: "start" | "status" | "result" | "reattach";
+  operation: "start" | "status" | "result" | "reattach" | "cancel";
   input?: ExternalJobStartInput;
   providerJobId?: string;
 }>;
@@ -126,6 +127,10 @@ async function executeProviderRequest(
       if (request.providerJobId === undefined)
         throw new Error("Subagent provider job ID is missing");
       return coordinator.reattach(request.providerJobId);
+    case "cancel":
+      if (request.providerJobId === undefined)
+        throw new Error("Subagent provider job ID is missing");
+      return coordinator.cancel(request.providerJobId);
   }
 }
 
@@ -150,14 +155,44 @@ export async function createPiSubagentsCloudTool(options: {
           },
         });
         let settled = false;
-        const settle = (result: AgentToolResult<unknown>) => {
+        let settling = false;
+        let aborting = false;
+        const admittedJobs = new Set<string>();
+        const cancelledJobs = new Set<string>();
+        const providerOperations = new Set<Promise<unknown>>();
+        const finalize = (result: AgentToolResult<unknown>) => {
           if (settled) return;
           settled = true;
           signal?.removeEventListener("abort", abort);
           void worker.terminate();
           resolvePromise(result);
         };
-        const abort = () => worker.postMessage({ type: "abort" });
+        const cancelAdmitted = async (): Promise<void> => {
+          while (providerOperations.size > 0) {
+            await Promise.allSettled([...providerOperations]);
+          }
+          await Promise.allSettled(
+            [...admittedJobs]
+              .filter((providerJobId) => !cancelledJobs.has(providerJobId))
+              .map(async (providerJobId) => {
+                await options.coordinator.cancel(providerJobId);
+                cancelledJobs.add(providerJobId);
+              }),
+          );
+        };
+        const settle = (result: AgentToolResult<unknown>) => {
+          if (settled || settling) return;
+          if (!aborting) {
+            finalize(result);
+            return;
+          }
+          settling = true;
+          void cancelAdmitted().finally(() => finalize(result));
+        };
+        const abort = () => {
+          aborting = true;
+          worker.postMessage({ type: "abort" });
+        };
         signal?.addEventListener("abort", abort, { once: true });
         worker.on("message", (message: WorkerMessage) => {
           if (message.type === "progress") {
@@ -172,15 +207,21 @@ export async function createPiSubagentsCloudTool(options: {
             settle(failure(message.message));
             return;
           }
-          void executeProviderRequest(options.coordinator, message, toolCallId)
-            .then((result) =>
+          const operation = executeProviderRequest(options.coordinator, message, toolCallId);
+          providerOperations.add(operation);
+          void operation
+            .then((result) => {
+              if (message.operation === "start") admittedJobs.add(result.providerJobId);
+              if (message.operation === "cancel" && message.providerJobId !== undefined) {
+                cancelledJobs.add(message.providerJobId);
+              }
               worker.postMessage({
                 type: "provider.response",
                 requestId: message.requestId,
                 ok: true,
                 result,
-              }),
-            )
+              });
+            })
             .catch((error: unknown) =>
               worker.postMessage({
                 type: "provider.response",
@@ -188,7 +229,8 @@ export async function createPiSubagentsCloudTool(options: {
                 ok: false,
                 message: error instanceof Error ? error.message : String(error),
               }),
-            );
+            )
+            .finally(() => providerOperations.delete(operation));
         });
         worker.on("error", (error) => settle(failure(`Subagent host failed: ${error.message}`)));
         worker.on("exit", (code) => {

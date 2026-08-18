@@ -32,6 +32,7 @@ export {
   type TenantApiCredentialRole,
   type TurnInputKind,
   type WorkspaceImportStatus,
+  type WorkspaceKind,
   type WorkspaceSourceKind,
   type WorkspaceTerminalState,
 } from "./database-types.ts";
@@ -114,6 +115,8 @@ export {
   downToollessRunCapabilities,
   upSubagentRunSystemPrompt,
   downSubagentRunSystemPrompt,
+  upIsolatedSubagentWorkspaces,
+  downIsolatedSubagentWorkspaces,
 } from "./migrations/index.ts";
 
 export {

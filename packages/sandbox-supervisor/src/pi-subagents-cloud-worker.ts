@@ -45,10 +45,13 @@ const input = workerData as WorkerInput;
 if (parentPort === null) throw new Error("Pi subagent cloud Worker requires a parent port");
 const abort = new AbortController();
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
+const activeProviderJobs = new Set<string>();
 
 parentPort.on("message", (message: ProviderResponse | { type: "abort" }) => {
   if (message.type === "abort") {
-    abort.abort(new Error("Subagent execution was cancelled"));
+    void Promise.allSettled(
+      [...activeProviderJobs].map((providerJobId) => request("cancel", { providerJobId })),
+    ).finally(() => abort.abort(new Error("Subagent execution was cancelled")));
     return;
   }
   const requestState = pending.get(message.requestId);
@@ -204,6 +207,7 @@ function parseChildInvocation(value: unknown): ExternalJobStartInput {
       : values.has("--session")
         ? "fork"
         : "fresh";
+  const isolatedWorkspace = env.PI_SUBAGENT_CLOUD_WORKSPACE_MODE === "isolated";
   return {
     prompt,
     promptDigest: createHash("sha256").update(prompt, "utf8").digest("hex"),
@@ -213,7 +217,12 @@ function parseChildInvocation(value: unknown): ExternalJobStartInput {
     agent,
     options: {
       contextMode,
-      workspaceMode: requestedToolCapabilities.length === 0 ? "none" : "shared_serialized",
+      workspaceMode:
+        requestedToolCapabilities.length === 0
+          ? "none"
+          : isolatedWorkspace
+            ? "isolated"
+            : "shared_serialized",
       requestedToolCapabilities,
       ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
       ...(values.get("--model")?.at(-1) === undefined
@@ -236,6 +245,12 @@ async function waitForCloudResult(
     providerJobId: string;
     state: string;
   };
+  activeProviderJobs.add(started.providerJobId);
+  if (abort.signal.aborted) {
+    await request("cancel", { providerJobId: started.providerJobId }).catch(() => undefined);
+    activeProviderJobs.delete(started.providerJobId);
+    throw abort.signal.reason;
+  }
   let state = started.state;
   const deadline = Date.now() + 120_000;
   while (!new Set(["completed", "failed", "stopped", "blocked"]).has(state)) {
@@ -248,10 +263,14 @@ async function waitForCloudResult(
     };
     state = status.state;
   }
-  return (await request("result", { providerJobId: started.providerJobId })) as Record<
-    string,
-    unknown
-  >;
+  try {
+    return (await request("result", { providerJobId: started.providerJobId })) as Record<
+      string,
+      unknown
+    >;
+  } finally {
+    activeProviderJobs.delete(started.providerJobId);
+  }
 }
 
 async function startShimBridge(socketPath: string): Promise<Server> {
@@ -358,6 +377,8 @@ async function main(): Promise<void> {
   process.env.PI_CODING_AGENT_DIR = directories.agentDir;
   process.env.PI_SUBAGENTS_TEMP_ROOT = directories.stateDir;
   process.env.PI_SUBAGENT_PI_BINARY = directories.shimPath;
+  process.env.PI_SUBAGENT_CLOUD_WORKSPACE_MODE =
+    input.arguments.worktree === true ? "isolated" : "shared_serialized";
   process.env.PI_CLOUD_SUBAGENT_BRIDGE_SOCKET = directories.socketPath;
   const bridge = await startShimBridge(directories.socketPath);
   const extensionSpecifier: string = "pi-subagents";

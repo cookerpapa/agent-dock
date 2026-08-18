@@ -7,6 +7,7 @@ import {
   type EnvironmentToolchainReport,
   type ToolBrokerMaterializeFileRequest,
   type ToolBrokerMaterializeFileResponse,
+  type ToolBrokerWorkspaceForkRequest,
   type SupervisorRuntimeAssignment,
   type ToolSandboxAssignment,
   type ToolSandboxCaptureResponse,
@@ -1136,6 +1137,72 @@ export class CubeSandboxProvider implements SandboxProvider {
             true,
           );
         }
+      }
+      throw error;
+    }
+  }
+
+  async forkWorkspace(
+    handle: SandboxHandle,
+    request: ToolBrokerWorkspaceForkRequest,
+  ): Promise<{
+    sourceHandle: SandboxHandle;
+    sourceRevision: string;
+    targetRevision: string;
+  }> {
+    if (
+      request.sourceActivationId !== handle.activationId ||
+      !sameAssignment(request.sourceAssignment, handle.assignment) ||
+      request.target.tenantId !== handle.assignment.tenantId ||
+      request.target.projectId !== handle.assignment.projectId ||
+      request.target.workspaceId === handle.assignment.workspaceId ||
+      request.target.sessionId === handle.assignment.sessionId
+    ) {
+      throw new ToolBrokerError(
+        "workspace_fork_identity_invalid",
+        "Isolated Workspace fork identity did not match its parent activation",
+        false,
+      );
+    }
+    const captured = await this.snapshot(handle, request.requestId);
+    if (captured.type !== "tool_sandbox.captured") {
+      throw new ToolBrokerError(
+        "workspace_fork_capture_invalid",
+        "Parent Workspace did not produce an isolated fork boundary",
+        true,
+      );
+    }
+    const source = parsePersistentVolumeReference(decodeWorkspaceSnapshotBlob(captured.workspace));
+    if (source === undefined) {
+      throw new ToolBrokerError(
+        "workspace_fork_capture_invalid",
+        "Parent Workspace fork boundary was invalid",
+        false,
+      );
+    }
+    const targetVolumeId = workspaceVolumeId(request.target);
+    try {
+      await this.#client.ensureVolume(targetVolumeId, "picloud-posix");
+      const forked = await this.#workspaceVolumeGateway.fork({
+        tenantId: request.target.tenantId,
+        sourceWorkspaceId: handle.assignment.workspaceId,
+        sourceSessionId: handle.assignment.sessionId,
+        sourceVolumeId: source.volumeId,
+        expectedSourceRevision: source.volumeRevision,
+        targetWorkspaceId: request.target.workspaceId,
+        targetSessionId: request.target.sessionId,
+        targetVolumeId,
+      });
+      const sourceHandle = await this.rebind(handle, handle.assignment);
+      return {
+        sourceHandle,
+        sourceRevision: forked.sourceRevision,
+        targetRevision: forked.volumeRevision,
+      };
+    } catch (error: unknown) {
+      const activation = this.#activations.get(handle.activationId);
+      if (activation?.state === "idle") {
+        await this.rebind(handle, handle.assignment).catch(() => undefined);
       }
       throw error;
     }

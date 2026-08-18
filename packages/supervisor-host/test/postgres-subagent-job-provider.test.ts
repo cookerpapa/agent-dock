@@ -299,6 +299,124 @@ describe.sequential("PostgresSubagentJobProvider", () => {
     });
   });
 
+  it("prepares an isolated internal Workspace before dispatching the Child Run", async () => {
+    const parent = await database
+      .selectFrom("runs")
+      .select(["project_id", "workspace_id", "turn_id", "command_id"])
+      .where("id", "=", parentRunId)
+      .executeTakeFirstOrThrow();
+    const requests: Array<{ targetWorkspaceId: string; targetSessionId: string }> = [];
+    const provider = new PostgresSubagentJobProvider({
+      database,
+      forkWorkspace: async (request) => {
+        requests.push({
+          targetWorkspaceId: request.target.workspaceId,
+          targetSessionId: request.target.sessionId,
+        });
+        return {
+          toolBrokerProtocolVersion: 1,
+          type: "workspace.forked",
+          requestId: request.requestId,
+          sourceActivationId: request.sourceActivationId,
+          targetWorkspaceId: request.target.workspaceId,
+          sourceRevision: "a".repeat(64),
+          targetRevision: "b".repeat(64),
+        };
+      },
+    });
+    const started = await provider.start({
+      tenantId,
+      parentSessionId,
+      parentRunId,
+      parentAttemptId,
+      parentFencingToken: FENCE,
+      parentToolCallId: "subagent-tool-isolated",
+      workflowRunId: "workflow-isolated",
+      stepIndex: 2,
+      agentName: "worker",
+      prompt: "Implement an independent approach",
+      contextMode: "fork",
+      workspaceMode: "isolated",
+      requestedToolCapabilities: ["read", "write", "edit", "bash"],
+      parentActivation: {
+        activationId: crypto.randomUUID(),
+        assignment: {
+          tenantId,
+          projectId: parent.project_id,
+          workspaceId: parent.workspace_id,
+          supervisorId: "test-worker",
+          bootId: crypto.randomUUID(),
+          sandboxId: parentSandboxId,
+          commandId: parent.command_id,
+          sessionId: parentSessionId,
+          turnId: parent.turn_id,
+          attemptId: parentAttemptId,
+          leaseId: crypto.randomUUID(),
+          fencingToken: FENCE,
+        },
+      },
+    });
+    expect(started.state).toBe("queued");
+    expect(requests).toHaveLength(1);
+    const isolated = await database
+      .selectFrom("subagent_executions as execution")
+      .innerJoin("workspaces as workspace", "workspace.id", "execution.child_workspace_id")
+      .innerJoin("runs as child_run", "child_run.id", "execution.child_run_id")
+      .select([
+        "execution.state",
+        "execution.workspace_mode as workspaceMode",
+        "workspace.id as workspaceId",
+        "workspace.workspace_kind as workspaceKind",
+        "workspace.parent_workspace_id as parentWorkspaceId",
+        "child_run.workspace_id as runWorkspaceId",
+      ])
+      .where("execution.id", "=", started.executionId)
+      .executeTakeFirstOrThrow();
+    expect(isolated).toEqual({
+      state: "queued",
+      workspaceMode: "isolated",
+      workspaceId: requests[0]!.targetWorkspaceId,
+      workspaceKind: "subagent_isolated",
+      parentWorkspaceId: parent.workspace_id,
+      runWorkspaceId: requests[0]!.targetWorkspaceId,
+    });
+    await expect(
+      database
+        .selectFrom("outbox")
+        .select(({ fn }) => fn.countAll<string>().as("count"))
+        .where("aggregate_id", "=", started.childSessionId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ count: "1" });
+  });
+
+  it("cancels a queued Child Run durably before it consumes a Worker slot", async () => {
+    const provider = new PostgresSubagentJobProvider({ database });
+    const started = await provider.start({
+      tenantId,
+      parentSessionId,
+      parentRunId,
+      parentAttemptId,
+      parentFencingToken: FENCE,
+      parentToolCallId: "subagent-tool-cancel",
+      workflowRunId: "workflow-cancel",
+      stepIndex: 3,
+      agentName: "oracle",
+      prompt: "Cancel this queued review",
+      contextMode: "fresh",
+      workspaceMode: "none",
+    });
+    await expect(provider.cancel(tenantId, started.executionId)).resolves.toMatchObject({
+      state: "cancelled",
+    });
+    await expect(
+      database
+        .selectFrom("runs")
+        .select("state")
+        .where("id", "=", started.childRunId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ state: "cancelled" });
+  });
+
   it("rejects dispatch after the parent fencing authority changes", async () => {
     const provider = new PostgresSubagentJobProvider({ database });
     await expect(

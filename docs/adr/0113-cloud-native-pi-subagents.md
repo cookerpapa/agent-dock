@@ -48,11 +48,17 @@ normal user conversation.
 
 - Subagent Runs consume the same tenant quota and Worker capacity as ordinary
   Runs and can scale by adding Agent Host replicas.
-- Parent Runs must eventually support a durable waiting boundary so a small
-  Worker pool cannot deadlock while every parent waits for a child.
+- Worker admission reserves a child lane so waiting parents cannot consume
+  every local slot. A future durable parent-wait boundary may reclaim the
+  waiting slot as an optimization, but correctness does not depend on it.
 - Shared mode preserves live files, dependencies and processes but must retain
   a single writer. Isolated mode permits parallel mutations but requires a
   trusted Volume fork and an explicit result/merge contract.
 - Project-controlled agent or extension code remains outside the trusted Host.
   Only deployment-owned profiles are enabled until a separate extension trust
   policy is accepted.
+- Parent cancellation is propagated to durable Child Runs. The package's
+  cross-invocation management actions (including standalone steer/resume UI)
+  remain intentionally unavailable until their local run registry is replaced
+  by a PostgreSQL control contract; PiCloud does not pretend local process IDs
+  survive Worker replacement.

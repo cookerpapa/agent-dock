@@ -189,6 +189,39 @@ export const ToolSandboxCaptureResponseSchema = Type.Union([
   ),
 ]);
 
+export const ToolBrokerWorkspaceForkRequestSchema = Type.Object(
+  {
+    ...ToolSandboxEnvelope,
+    type: Type.Literal("workspace.fork"),
+    requestId: UuidSchema,
+    sourceActivationId: UuidSchema,
+    sourceAssignment: ToolSandboxAssignmentSchema,
+    target: Type.Object(
+      {
+        tenantId: OpaqueIdSchema,
+        projectId: OpaqueIdSchema,
+        workspaceId: UuidSchema,
+        sessionId: UuidSchema,
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export const ToolBrokerWorkspaceForkResponseSchema = Type.Object(
+  {
+    ...ToolSandboxEnvelope,
+    type: Type.Literal("workspace.forked"),
+    requestId: UuidSchema,
+    sourceActivationId: UuidSchema,
+    targetWorkspaceId: UuidSchema,
+    sourceRevision: Sha256Schema,
+    targetRevision: Sha256Schema,
+  },
+  { additionalProperties: false },
+);
+
 export const ToolSandboxReleaseRequestSchema = Type.Union([
   Type.Object(
     {
@@ -314,6 +347,7 @@ export const ToolBrokerRequestSchema = Type.Union([
   ToolSandboxReleaseRequestSchema,
   ToolSandboxStopRequestSchema,
   ToolBrokerGitHubImportRequestSchema,
+  ToolBrokerWorkspaceForkRequestSchema,
 ]);
 
 export const ToolBrokerResponseSchema = Type.Union([
@@ -323,6 +357,7 @@ export const ToolBrokerResponseSchema = Type.Union([
   ToolSandboxReleaseResponseSchema,
   ToolSandboxStopResponseSchema,
   ToolBrokerGitHubImportResponseSchema,
+  ToolBrokerWorkspaceForkResponseSchema,
 ]);
 
 const OperationEnvelope = {
@@ -582,6 +617,8 @@ export type ToolSandboxStopRequest = Static<typeof ToolSandboxStopRequestSchema>
 export type ToolSandboxStopResponse = Static<typeof ToolSandboxStopResponseSchema>;
 export type ToolBrokerGitHubImportRequest = Static<typeof ToolBrokerGitHubImportRequestSchema>;
 export type ToolBrokerGitHubImportResponse = Static<typeof ToolBrokerGitHubImportResponseSchema>;
+export type ToolBrokerWorkspaceForkRequest = Static<typeof ToolBrokerWorkspaceForkRequestSchema>;
+export type ToolBrokerWorkspaceForkResponse = Static<typeof ToolBrokerWorkspaceForkResponseSchema>;
 export type ToolBrokerMaterializeFileRequest = Static<
   typeof ToolBrokerMaterializeFileRequestSchema
 >;

@@ -28,6 +28,7 @@ export const WORKSPACE_VOLUME_GATEWAY_PREPARE_PATH = "/v1/workspaces/prepare";
 export const WORKSPACE_VOLUME_GATEWAY_INITIALIZE_BASELINE_PATH =
   "/v1/workspaces/initialize-baseline";
 export const WORKSPACE_VOLUME_GATEWAY_SNAPSHOT_PATH = "/v1/workspaces/snapshot";
+export const WORKSPACE_VOLUME_GATEWAY_FORK_PATH = "/v1/workspaces/fork";
 export const WORKSPACE_VOLUME_GATEWAY_MATERIALIZE_PATH = "/v1/workspaces/materialize";
 export const WORKSPACE_VOLUME_GATEWAY_DELETE_PATH = "/v1/workspaces/delete";
 
@@ -60,6 +61,17 @@ export type WorkspaceVolumeGatewayMaterializeInput = WorkspaceVolumeGatewayIdent
     maximumBytes: number;
   }>;
 
+export type WorkspaceVolumeGatewayForkInput = Readonly<{
+  tenantId: string;
+  sourceWorkspaceId: string;
+  sourceSessionId: string;
+  sourceVolumeId: string;
+  expectedSourceRevision: string;
+  targetWorkspaceId: string;
+  targetSessionId: string;
+  targetVolumeId: string;
+}>;
+
 export type WorkspaceVolumeGatewayDeleteInput = WorkspaceVolumeGatewayVolumeIdentity;
 
 export interface WorkspaceVolumeGateway {
@@ -72,6 +84,12 @@ export interface WorkspaceVolumeGateway {
     volumeRevision: string;
     gitBaselineCommit: string;
     workspacePatch: WorkspacePatch;
+    files: readonly import("@pi-cloud/workspace-runtime").WorkspaceSnapshotFileMetadata[];
+  }>;
+  fork(input: WorkspaceVolumeGatewayForkInput): Promise<{
+    sourceRevision: string;
+    volumeRevision: string;
+    gitBaselineCommit: string;
     files: readonly import("@pi-cloud/workspace-runtime").WorkspaceSnapshotFileMetadata[];
   }>;
   materialize(
@@ -97,6 +115,7 @@ export type VolumeState = Readonly<{
   volumeId: string;
   volumeGeneration: string;
   gitBaselineCommit: string;
+  forkedFrom?: Readonly<{ workspaceId: string; volumeRevision: string }>;
 }>;
 
 export class WorkspaceVolumeGatewayError extends Error {

@@ -46,6 +46,7 @@ export type ToolBrokerBackend = Pick<
   | "checkHealth"
   | "create"
   | "capture"
+  | "forkWorkspace"
   | "release"
   | "stop"
   | "execute"
@@ -444,6 +445,18 @@ export class ToolBrokerServer {
             requestId: message.requestId,
             activationId: message.activationId,
           });
+          return;
+        }
+        if (message.type === "workspace.fork") {
+          await reply.code(200).send(
+            await this.#observed({
+              request,
+              spanName: "workspace.fork",
+              operation: "workspace_fork",
+              kind: "sandbox",
+              run: () => this.#broker.forkWorkspace(message),
+            }),
+          );
           return;
         }
         const controller = new AbortController();

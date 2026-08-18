@@ -17,7 +17,31 @@ const DEFAULT_SCAN_MULTIPLIER = 4;
 
 type ExecutionReference = {
   commandId: string;
+  subagent: boolean;
 };
+
+export function selectPiWorkerExecutionReferences(
+  candidates: readonly ExecutionReference[],
+  active: readonly ExecutionReference[],
+  maximumConcurrentRuns: number,
+): ExecutionReference[] {
+  positiveInteger(maximumConcurrentRuns, "maximumConcurrentRuns");
+  let activeCount = active.length;
+  let activeParents = active.filter((entry) => !entry.subagent).length;
+  const activeIds = new Set(active.map((entry) => entry.commandId));
+  const maximumParents = maximumConcurrentRuns < 2 ? 1 : maximumConcurrentRuns - 1;
+  const selected: ExecutionReference[] = [];
+  for (const candidate of candidates) {
+    if (activeCount >= maximumConcurrentRuns) break;
+    if (activeIds.has(candidate.commandId)) continue;
+    if (!candidate.subagent && activeParents >= maximumParents) continue;
+    selected.push(candidate);
+    activeIds.add(candidate.commandId);
+    activeCount += 1;
+    if (!candidate.subagent) activeParents += 1;
+  }
+  return selected;
+}
 
 type CancellationReference = {
   targetCommandId: string;
@@ -68,7 +92,10 @@ export class PostgresPiWorker {
   readonly #cancellationExecutor: RunCancellationExecutor;
   readonly #onFailure:
     ((operation: "listen" | "scan" | "execute" | "cancel", error: unknown) => void) | undefined;
-  readonly #activeCommands = new Map<string, Promise<void>>();
+  readonly #activeCommands = new Map<
+    string,
+    Readonly<{ execution: Promise<void>; subagent: boolean }>
+  >();
   #state: PostgresPiWorkerState = "idle";
   #controller: AbortController | undefined;
   #listener: Client | undefined;
@@ -127,7 +154,7 @@ export class PostgresPiWorker {
     this.#controller?.abort();
     this.#wake?.();
     await this.#loop;
-    await Promise.allSettled(this.#activeCommands.values());
+    await Promise.allSettled([...this.#activeCommands.values()].map((entry) => entry.execution));
     await this.#listener?.end().catch(() => undefined);
     this.#state = "stopped";
   }
@@ -164,14 +191,20 @@ export class PostgresPiWorker {
     const references = await this.#executionReferences(
       Math.max(available, available * DEFAULT_SCAN_MULTIPLIER),
     );
-    for (const reference of references) {
-      if (this.#activeCommands.size >= this.#maximumConcurrentRuns) return;
-      if (this.#activeCommands.has(reference.commandId)) continue;
+    const selected = selectPiWorkerExecutionReferences(
+      references,
+      [...this.#activeCommands.entries()].map(([commandId, entry]) => ({
+        commandId,
+        subagent: entry.subagent,
+      })),
+      this.#maximumConcurrentRuns,
+    );
+    for (const reference of selected) {
       const execution = this.#execute(reference).finally(() => {
         this.#activeCommands.delete(reference.commandId);
         this.#wake?.();
       });
-      this.#activeCommands.set(reference.commandId, execution);
+      this.#activeCommands.set(reference.commandId, { execution, subagent: reference.subagent });
     }
   }
 
@@ -221,7 +254,12 @@ export class PostgresPiWorker {
           .onRef("run.command_id", "=", "command.id"),
       )
       .innerJoin("tenant_runtime_policies as policy", "policy.tenant_id", "command.tenant_id")
-      .select("command.id as commandId")
+      .innerJoin("sessions as session_row", (join) =>
+        join
+          .onRef("session_row.tenant_id", "=", "command.tenant_id")
+          .onRef("session_row.id", "=", "command.session_id"),
+      )
+      .select(["command.id as commandId", "session_row.session_kind as sessionKind"])
       .where("outbox.topic", "=", TURN_COMMAND_OUTBOX_TOPIC)
       .where("outbox.published_at", "is", null)
       .where("outbox.available_at", "<=", now)
@@ -229,11 +267,18 @@ export class PostgresPiWorker {
       .where("command.state", "in", ["pending", "dispatched"])
       .where("run.state", "in", ["queued", "claimed"])
       .where("policy.enabled", "=", true)
+      .orderBy(
+        sql<number>`case when ${sql.ref("session_row.session_kind")} = 'subagent' then 0 else 1 end`,
+        "asc",
+      )
       .orderBy("policy.last_scheduled_at", "asc")
       .orderBy("outbox.available_at", "asc")
       .orderBy("outbox.created_at", "asc")
       .limit(positiveInteger(limit, "limit"))
-      .execute();
+      .execute()
+      .then((rows) =>
+        rows.map((row) => ({ commandId: row.commandId, subagent: row.sessionKind === "subagent" })),
+      );
   }
 
   async #cancellationReferences(): Promise<CancellationReference[]> {

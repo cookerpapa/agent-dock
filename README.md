@@ -35,6 +35,8 @@ schema or maintained deployment. The current sources of truth are this README,
 - browser registration/login with tenant-isolated conversations and Workspaces;
 - Chat-style multi-round Pi conversations and resumable streaming;
 - Pi Session tree navigation with focused/full-tree views and conversation forks;
+- the pinned community `pi-subagents` workflow contract, with durable Child
+  Sessions/Runs and shared or isolated Cube execution;
 - pure chat without Sandbox activation;
 - lazy Cube activation, warm reuse and optional persistent Sandbox retention;
 - a Workspace directory/source browser, isolated Web Terminal, and safe deletion;
@@ -96,6 +98,17 @@ Built-in Tool visibility is also Run-scoped. A Session grant is frozen into the
 accepted Run, the Agent Host registers only those Pi Tool proxies, and Tool
 Broker independently verifies both the granted Tool name and its low-level
 operation. Concurrent Agent runtimes in one Host never share a global Tool set.
+
+Pi subagents use the maintained `pi-subagents` workflow and agent-profile
+contract rather than a PiCloud-specific orchestration language. The package's
+leaf `pi` process boundary is replaced by a PostgreSQL-backed Child Session and
+Child Run on the same Worker pool. Tool-free reviewers consume no Cube;
+`shared_serialized` children temporarily receive the parent's Cube authority;
+`worktree:true` creates a trusted persistent-Volume fork and an independent
+Cube, then returns the settled patch to the parent. Child Session entries and
+compaction remain native Pi PostgreSQL records. Parent cancellation is relayed
+to admitted children, and Worker capacity reserves a child lane so a pool of
+waiting parents cannot starve every delegated Run.
 
 The first Tool call attaches the Workspace's stable Cube Volume to a fresh or
 warm KVM. Stopping a Cube loses processes, sockets and memory, but not files.

@@ -13,6 +13,7 @@ import {
   MAXIMUM_RESPONSE_BYTES,
   TOKEN_PATTERN,
   WORKSPACE_VOLUME_GATEWAY_INITIALIZE_BASELINE_PATH,
+  WORKSPACE_VOLUME_GATEWAY_FORK_PATH,
   WORKSPACE_VOLUME_GATEWAY_MATERIALIZE_PATH,
   WORKSPACE_VOLUME_GATEWAY_DELETE_PATH,
   WORKSPACE_VOLUME_GATEWAY_PREPARE_PATH,
@@ -25,6 +26,7 @@ import {
   type WorkspaceVolumeGatewayInitializeBaselineInput,
   type WorkspaceVolumeGatewayMaterializeInput,
   type WorkspaceVolumeGatewayDeleteInput,
+  type WorkspaceVolumeGatewayForkInput,
   type WorkspaceVolumeGatewayPrepareInput,
   type WorkspaceVolumeGatewaySnapshotInput,
 } from "./workspace-volume-gateway-contract.ts";
@@ -41,7 +43,7 @@ export type WorkspaceVolumeGatewayServerOptions = Readonly<{
 }>;
 
 type WorkspaceVolumeGatewayOperation =
-  "prepare" | "initialize_baseline" | "snapshot" | "materialize" | "delete";
+  "prepare" | "initialize_baseline" | "snapshot" | "fork" | "materialize" | "delete";
 
 function boundedInteger(value: number, name: string, minimum: number, maximum: number): number {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
@@ -164,6 +166,15 @@ export class WorkspaceVolumeGatewayServer {
       try {
         return await this.#run("snapshot", () =>
           this.#gateway.snapshot(request.body as WorkspaceVolumeGatewaySnapshotInput),
+        );
+      } catch (error: unknown) {
+        return this.#failure(reply, error);
+      }
+    });
+    this.#server.post(WORKSPACE_VOLUME_GATEWAY_FORK_PATH, async (request, reply) => {
+      try {
+        return await this.#run("fork", () =>
+          this.#gateway.fork(request.body as WorkspaceVolumeGatewayForkInput),
         );
       } catch (error: unknown) {
         return this.#failure(reply, error);
@@ -416,6 +427,37 @@ export class HttpWorkspaceVolumeGateway implements WorkspaceVolumeGateway {
         patch: response.workspacePatch.patch,
         truncated: response.workspacePatch.truncated,
       },
+    };
+  }
+
+  async fork(input: WorkspaceVolumeGatewayForkInput): Promise<{
+    sourceRevision: string;
+    volumeRevision: string;
+    gitBaselineCommit: string;
+    files: readonly WorkspaceSnapshotFileMetadata[];
+  }> {
+    const response = await this.#request(WORKSPACE_VOLUME_GATEWAY_FORK_PATH, input);
+    if (
+      !isRecord(response) ||
+      Object.keys(response).sort().join("\0") !==
+        ["files", "gitBaselineCommit", "sourceRevision", "volumeRevision"].sort().join("\0") ||
+      typeof response.sourceRevision !== "string" ||
+      !/^[0-9a-f]{64}$/.test(response.sourceRevision) ||
+      typeof response.volumeRevision !== "string" ||
+      !/^[0-9a-f]{64}$/.test(response.volumeRevision) ||
+      typeof response.gitBaselineCommit !== "string"
+    ) {
+      throw new WorkspaceVolumeGatewayError(
+        "workspace_volume_gateway_response_invalid",
+        "Workspace Volume Gateway response was invalid",
+        false,
+      );
+    }
+    return {
+      sourceRevision: response.sourceRevision,
+      volumeRevision: response.volumeRevision,
+      gitBaselineCommit: validatedGitBaselineCommit(response.gitBaselineCommit),
+      files: validateWorkspaceFileList(response.files),
     };
   }
 

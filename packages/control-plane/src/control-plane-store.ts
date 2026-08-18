@@ -907,6 +907,7 @@ export class ControlPlaneStore {
         .where("workspace.tenant_id", "=", this.#tenantId)
         .where("workspace.project_id", "=", projectId)
         .where("workspace.id", "=", workspaceId)
+        .where("workspace.workspace_kind", "=", "user")
         .where("workspace.deleted_at", "is", null)
         .forUpdate("workspace")
         .executeTakeFirst();
@@ -1016,6 +1017,7 @@ export class ControlPlaneStore {
         join
           .onRef("session_row.tenant_id", "=", "workspace.tenant_id")
           .onRef("session_row.workspace_id", "=", "workspace.id")
+          .on("session_row.session_kind", "=", "conversation")
           .on("session_row.archived_at", "is", null),
       )
       .select([
@@ -1031,6 +1033,7 @@ export class ControlPlaneStore {
         )})`.as("lastActiveAt"),
       ])
       .where("workspace.tenant_id", "=", this.#tenantId)
+      .where("workspace.workspace_kind", "=", "user")
       .where("workspace.deleted_at", "is", null)
       .where((expression) =>
         expression.or([
@@ -1095,6 +1098,7 @@ export class ControlPlaneStore {
           .select(["id", "project_id", "sandbox_domain_id", "deleted_at", "storage_purged_at"])
           .where("tenant_id", "=", this.#tenantId)
           .where("id", "=", workspaceId)
+          .where("workspace_kind", "=", "user")
           .forUpdate()
           .executeTakeFirst();
         if (workspace === undefined) {

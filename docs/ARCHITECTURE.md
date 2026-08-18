@@ -109,6 +109,36 @@ Broker rejects both ungranted names and invalid Tool/operation combinations.
 Model visibility is therefore an affordance, while Broker authorization is the
 security boundary.
 
+### Durable Pi subagents
+
+PiCloud pins the public `pi-subagents` package and preserves its model-visible
+Tool schema, deployment-owned profiles and workflow-script runtime. A narrow
+`PI_SUBAGENT_PI_BINARY` adapter replaces only local leaf execution. Every leaf
+becomes a hidden `session_kind=subagent` Pi Session, Run and RunAttempt in
+PostgreSQL and is claimed by the ordinary shared Worker pool. A child never
+inherits more Tools than the immutable parent Run snapshot, and subagent
+Sessions cannot recursively register the orchestration Tool.
+
+Workspace modes are explicit:
+
+- `none` creates a Tool-free child and never reserves Cube capacity;
+- `shared_serialized` keeps separate Pi contexts while handing the same Cube
+  and Volume from parent to child under a rotated guest authority; the parent
+  capability is invalid during the handoff and the parent owns the final
+  shared Workspace-head commit;
+- upstream `worktree:true` maps to `isolated`: Tool Broker quiesces the parent,
+  the trusted Volume gateway makes an idempotent revision-bound internal
+  Workspace copy, and the child runs concurrently in another Cube. Its settled
+  patch is returned to the parent, while the internal Workspace is hidden from
+  product lists and retired after terminal settlement.
+
+RunAttempt fences remain the database-side effect authority. A separate
+monotonic Cube authority epoch rotates the in-guest secret across
+parent→child→parent handoffs; Session-local fence numbers are never compared as
+if they were one global sequence. Each Worker Host keeps at least one slot out
+of ordinary-parent admission when subagents are enabled, so parents waiting in
+the upstream workflow cannot occupy every slot needed by their children.
+
 ### Worker Control Channel
 
 The authenticated Supervisor WebSocket carries registration, heartbeat,
@@ -166,7 +196,8 @@ Volume gateway. It does not copy Workspaces to Kopia or object storage. It:
 - purges a deleted Workspace only after every live Cube activation has retired;
 - captures a bounded file/hash index and external Git patch;
 - reads selected current files for the UI without following symlink escapes;
-- serializes operations with a process lock and PostgreSQL advisory lock.
+- serializes operations with a process lock and PostgreSQL advisory lock;
+- creates revision-bound internal Volume copies for isolated Subagent lanes.
 
 Stopping a Cube loses its processes and memory. A new Cube attaches the same
 persistent Volume, so files and dependencies remain. A Workspace revision is a

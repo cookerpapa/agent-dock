@@ -11,8 +11,12 @@ import {
 } from "@pi-cloud/pi-session-postgres";
 import {
   parseCloudToolCapabilitySnapshot,
+  TURN_CANCELLATION_OUTBOX_TOPIC,
   TURN_COMMAND_OUTBOX_TOPIC,
   type CloudToolCapabilitySnapshot,
+  type ToolBrokerWorkspaceForkRequest,
+  type ToolBrokerWorkspaceForkResponse,
+  type ToolSandboxAssignment,
 } from "@pi-cloud/protocol";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { sql, type Kysely } from "kysely";
@@ -30,8 +34,12 @@ export type StartCloudSubagentJobInput = Readonly<{
   prompt: string;
   systemPrompt?: string;
   contextMode: SubagentContextMode;
-  workspaceMode: Exclude<SubagentWorkspaceMode, "isolated">;
+  workspaceMode: SubagentWorkspaceMode;
   requestedToolCapabilities?: CloudToolCapabilitySnapshot;
+  parentActivation?: Readonly<{
+    activationId: string;
+    assignment: ToolSandboxAssignment;
+  }>;
 }>;
 
 export type CloudSubagentJobHandle = Readonly<{
@@ -59,6 +67,9 @@ export class PostgresSubagentJobError extends Error {
 }
 
 type IdGenerator = () => string;
+type IsolatedWorkspaceForker = (
+  request: ToolBrokerWorkspaceForkRequest,
+) => Promise<ToolBrokerWorkspaceForkResponse>;
 
 function nonEmpty(value: string, name: string, maximum: number): string {
   if (value.length === 0 || value.length > maximum || value.trim() !== value) {
@@ -153,10 +164,16 @@ function assistantText(message: AgentMessage): string | undefined {
 export class PostgresSubagentJobProvider {
   readonly #database: Kysely<Database>;
   readonly #id: IdGenerator;
+  readonly #forkWorkspace: IsolatedWorkspaceForker | undefined;
 
-  constructor(options: { database: Kysely<Database>; idGenerator?: IdGenerator }) {
+  constructor(options: {
+    database: Kysely<Database>;
+    idGenerator?: IdGenerator;
+    forkWorkspace?: IsolatedWorkspaceForker;
+  }) {
     this.#database = options.database;
     this.#id = options.idGenerator ?? randomUUID;
+    this.#forkWorkspace = options.forkWorkspace;
   }
 
   async start(input: StartCloudSubagentJobInput): Promise<CloudSubagentJobHandle> {
@@ -172,11 +189,21 @@ export class PostgresSubagentJobProvider {
     if (input.contextMode !== "fresh" && input.contextMode !== "fork") {
       throw new TypeError("Subagent context mode is invalid");
     }
-    if (input.workspaceMode !== "none" && input.workspaceMode !== "shared_serialized") {
+    if (
+      input.workspaceMode !== "none" &&
+      input.workspaceMode !== "shared_serialized" &&
+      input.workspaceMode !== "isolated"
+    ) {
       throw new TypeError("Subagent Workspace mode is invalid");
     }
+    if (input.workspaceMode === "isolated" && input.parentActivation === undefined) {
+      throw new PostgresSubagentJobError(
+        "parent_sandbox_unavailable",
+        "Isolated Subagent execution requires an active parent Sandbox",
+      );
+    }
 
-    return this.#database.transaction().execute(async (transaction) => {
+    const pending = await this.#database.transaction().execute(async (transaction) => {
       const replay = await transaction
         .selectFrom("subagent_executions")
         .select(["id", "child_session_id", "child_run_id", "state", "request_sha256"])
@@ -227,6 +254,7 @@ export class PostgresSubagentJobProvider {
           "parent_session.current_workspace_version_id as sessionWorkspaceVersionId",
           "parent_session.forked_from_session_id as forkedFromSessionId",
           "parent_workspace.current_workspace_version_id as workspaceVersionId",
+          "parent_workspace.sandbox_domain_id as sandboxDomainId",
           "parent_turn.model_profile_id as turnModelProfileId",
           "parent_turn.provider as provider",
           "parent_turn.model_id as modelId",
@@ -261,6 +289,7 @@ export class PostgresSubagentJobProvider {
           childSessionId: replay.child_session_id,
           childRunId: replay.child_run_id,
           state: replay.state,
+          prepareIsolated: replay.state === "preparing",
         };
       }
 
@@ -317,12 +346,56 @@ export class PostgresSubagentJobProvider {
       const childTurnId = this.#id();
       const childCommandId = this.#id();
       const childRunId = this.#id();
-      const outboxId = this.#id();
+      const childWorkspaceId = input.workspaceMode === "isolated" ? this.#id() : parent.workspaceId;
       const idempotencyKey = `subagent:${executionId}`;
       const effectiveWorkspaceVersionId =
-        parent.forkedFromSessionId === null
-          ? parent.workspaceVersionId
-          : parent.sessionWorkspaceVersionId;
+        input.workspaceMode === "isolated"
+          ? null
+          : parent.forkedFromSessionId === null
+            ? parent.workspaceVersionId
+            : parent.sessionWorkspaceVersionId;
+
+      if (input.workspaceMode === "isolated") {
+        await transaction
+          .insertInto("workspaces")
+          .values({
+            id: childWorkspaceId,
+            tenant_id: input.tenantId,
+            project_id: parent.projectId,
+            sandbox_domain_id: parent.sandboxDomainId,
+            object_snapshot_key: null,
+            workspace_kind: "subagent_isolated",
+            parent_workspace_id: parent.workspaceId,
+          })
+          .executeTakeFirstOrThrow();
+        await transaction
+          .insertInto("workspace_sources")
+          .values({
+            tenant_id: input.tenantId,
+            workspace_id: childWorkspaceId,
+            kind: "empty",
+            repository: null,
+            commit_sha: null,
+            status: "ready",
+            object_key: null,
+            sha256: null,
+            size_bytes: null,
+            import_lease_id: null,
+            lease_expires_at: null,
+            failure_code: null,
+            github_installation_id: null,
+            github_repository_id: null,
+          })
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("sandbox_domains")
+          .set({
+            assigned_workspaces: sql<string>`${sql.ref("assigned_workspaces")} + 1`,
+            updated_at: sql<Date>`now()`,
+          })
+          .where("id", "=", parent.sandboxDomainId)
+          .executeTakeFirstOrThrow();
+      }
 
       await transaction
         .insertInto("sessions")
@@ -331,13 +404,14 @@ export class PostgresSubagentJobProvider {
           title: `${input.agentName} · subagent`,
           tenant_id: input.tenantId,
           project_id: parent.projectId,
-          workspace_id: parent.workspaceId,
+          workspace_id: childWorkspaceId,
           desired_model_profile_id: parent.modelProfileId,
           state: "cold",
           sandbox_retention_policy: parent.sandboxRetention,
           session_kind: "subagent",
           tool_capabilities: sql<unknown[]>`${JSON.stringify(tools)}::jsonb`,
-          workspace_snapshot_key: parent.workspaceSnapshotKey,
+          workspace_snapshot_key:
+            input.workspaceMode === "isolated" ? null : parent.workspaceSnapshotKey,
           current_workspace_version_id: effectiveWorkspaceVersionId,
           forked_from_session_id: null,
           conversation_parent_session_id: null,
@@ -443,7 +517,7 @@ export class PostgresSubagentJobProvider {
           trace_id: traceId(childRunId),
           tenant_id: input.tenantId,
           project_id: parent.projectId,
-          workspace_id: parent.workspaceId,
+          workspace_id: childWorkspaceId,
           session_id: childSessionId,
           turn_id: childTurnId,
           command_id: childCommandId,
@@ -465,25 +539,27 @@ export class PostgresSubagentJobProvider {
           settled_at: null,
         })
         .executeTakeFirstOrThrow();
-      await transaction
-        .insertInto("outbox")
-        .values({
-          id: outboxId,
-          tenant_id: input.tenantId,
-          aggregate_type: "session",
-          aggregate_id: childSessionId,
-          topic: TURN_COMMAND_OUTBOX_TOPIC,
-          payload: {
-            schemaVersion: 1,
-            commandId: childCommandId,
-            sessionId: childSessionId,
-            turnId: childTurnId,
-            kind: "turn.execute",
-          },
-          published_at: null,
-          last_error: null,
-        })
-        .executeTakeFirstOrThrow();
+      if (input.workspaceMode !== "isolated") {
+        await transaction
+          .insertInto("outbox")
+          .values({
+            id: this.#id(),
+            tenant_id: input.tenantId,
+            aggregate_type: "session",
+            aggregate_id: childSessionId,
+            topic: TURN_COMMAND_OUTBOX_TOPIC,
+            payload: {
+              schemaVersion: 1,
+              commandId: childCommandId,
+              sessionId: childSessionId,
+              turnId: childTurnId,
+              kind: "turn.execute",
+            },
+            published_at: null,
+            last_error: null,
+          })
+          .executeTakeFirstOrThrow();
+      }
       await transaction
         .updateTable("sessions")
         .set({ next_mailbox_position: 2, updated_at: command.created_at })
@@ -504,10 +580,11 @@ export class PostgresSubagentJobProvider {
           request_sha256: fingerprint,
           child_session_id: childSessionId,
           child_run_id: childRunId,
+          child_workspace_id: input.workspaceMode === "isolated" ? childWorkspaceId : null,
           agent_name: input.agentName,
           context_mode: input.contextMode,
           workspace_mode: input.workspaceMode,
-          state: "queued",
+          state: input.workspaceMode === "isolated" ? "preparing" : "queued",
           result_entry_id: null,
           failure_code: null,
           failure_message: null,
@@ -515,7 +592,253 @@ export class PostgresSubagentJobProvider {
         })
         .executeTakeFirstOrThrow();
 
-      return { executionId, childSessionId, childRunId, state: "queued" };
+      return {
+        executionId,
+        childSessionId,
+        childRunId,
+        state: input.workspaceMode === "isolated" ? ("preparing" as const) : ("queued" as const),
+        prepareIsolated: input.workspaceMode === "isolated",
+      };
+    });
+    if (pending.prepareIsolated) return this.#prepareIsolated(input, pending);
+    return pending;
+  }
+
+  async #prepareIsolated(
+    input: StartCloudSubagentJobInput,
+    pending: CloudSubagentJobHandle,
+  ): Promise<CloudSubagentJobHandle> {
+    const activation = input.parentActivation;
+    const forkWorkspace = this.#forkWorkspace;
+    if (activation === undefined || forkWorkspace === undefined) {
+      await this.#failPreparation(input.tenantId, pending, "workspace_fork_unavailable");
+      throw new PostgresSubagentJobError(
+        "workspace_fork_unavailable",
+        "Isolated Workspace fork service is unavailable",
+      );
+    }
+    const target = await this.#database
+      .selectFrom("subagent_executions as execution")
+      .innerJoin("sessions as child", (join) =>
+        join
+          .onRef("child.tenant_id", "=", "execution.tenant_id")
+          .onRef("child.id", "=", "execution.child_session_id"),
+      )
+      .select([
+        "execution.state",
+        "execution.child_workspace_id as workspaceId",
+        "child.project_id as projectId",
+        "child.id as sessionId",
+      ])
+      .where("execution.tenant_id", "=", input.tenantId)
+      .where("execution.id", "=", pending.executionId)
+      .executeTakeFirstOrThrow();
+    if (target.state !== "preparing") return { ...pending, state: target.state };
+    if (
+      target.workspaceId === null ||
+      activation.assignment.tenantId !== input.tenantId ||
+      activation.assignment.projectId !== target.projectId ||
+      activation.assignment.workspaceId === target.workspaceId ||
+      activation.assignment.sessionId !== input.parentSessionId ||
+      activation.assignment.attemptId !== input.parentAttemptId ||
+      activation.assignment.fencingToken !== input.parentFencingToken
+    ) {
+      await this.#failPreparation(input.tenantId, pending, "workspace_fork_identity_invalid");
+      throw new PostgresSubagentJobError(
+        "workspace_fork_identity_invalid",
+        "Isolated Workspace fork did not match the parent Run authority",
+      );
+    }
+    try {
+      await forkWorkspace({
+        toolBrokerProtocolVersion: 1,
+        type: "workspace.fork",
+        requestId: pending.executionId,
+        sourceActivationId: activation.activationId,
+        sourceAssignment: activation.assignment,
+        target: {
+          tenantId: input.tenantId,
+          projectId: target.projectId,
+          workspaceId: target.workspaceId,
+          sessionId: target.sessionId,
+        },
+      });
+      return await this.#database.transaction().execute(async (transaction) => {
+        const authority = await transaction
+          .selectFrom("runs as parent_run")
+          .innerJoin("run_attempts as parent_attempt", (join) =>
+            join
+              .onRef("parent_attempt.tenant_id", "=", "parent_run.tenant_id")
+              .onRef("parent_attempt.run_id", "=", "parent_run.id")
+              .onRef("parent_attempt.id", "=", "parent_run.current_attempt_id"),
+          )
+          .select([
+            "parent_run.state as runState",
+            "parent_run.current_attempt_id as attemptId",
+            "parent_attempt.state as attemptState",
+            "parent_attempt.fencing_token as fencingToken",
+          ])
+          .where("parent_run.tenant_id", "=", input.tenantId)
+          .where("parent_run.id", "=", input.parentRunId)
+          .forUpdate(["parent_run", "parent_attempt"])
+          .executeTakeFirst();
+        const execution = await transaction
+          .selectFrom("subagent_executions")
+          .select(["state", "child_session_id", "child_run_id"])
+          .where("tenant_id", "=", input.tenantId)
+          .where("id", "=", pending.executionId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        if (execution.state !== "preparing") {
+          return { ...pending, state: execution.state };
+        }
+        if (
+          authority?.runState !== "running" ||
+          authority.attemptState !== "running" ||
+          authority.attemptId !== input.parentAttemptId ||
+          Number(authority.fencingToken) !== input.parentFencingToken
+        ) {
+          throw new PostgresSubagentJobError(
+            "parent_authority_expired",
+            "Parent Agent Run lost authority while preparing the isolated Workspace",
+          );
+        }
+        await transaction
+          .insertInto("outbox")
+          .values({
+            id: this.#id(),
+            tenant_id: input.tenantId,
+            aggregate_type: "session",
+            aggregate_id: execution.child_session_id,
+            topic: TURN_COMMAND_OUTBOX_TOPIC,
+            payload: {
+              schemaVersion: 1,
+              commandId: await transaction
+                .selectFrom("runs")
+                .select("command_id")
+                .where("id", "=", execution.child_run_id)
+                .executeTakeFirstOrThrow()
+                .then((run) => run.command_id),
+              sessionId: execution.child_session_id,
+              turnId: await transaction
+                .selectFrom("runs")
+                .select("turn_id")
+                .where("id", "=", execution.child_run_id)
+                .executeTakeFirstOrThrow()
+                .then((run) => run.turn_id),
+              kind: "turn.execute",
+            },
+            published_at: null,
+            last_error: null,
+          })
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("subagent_executions")
+          .set({ state: "queued", updated_at: sql<Date>`now()` })
+          .where("tenant_id", "=", input.tenantId)
+          .where("id", "=", pending.executionId)
+          .where("state", "=", "preparing")
+          .executeTakeFirstOrThrow();
+        return { ...pending, state: "queued" as const };
+      });
+    } catch (error: unknown) {
+      await this.#failPreparation(input.tenantId, pending, "workspace_fork_failed").catch(
+        () => undefined,
+      );
+      throw error;
+    }
+  }
+
+  async #failPreparation(
+    tenantId: string,
+    pending: CloudSubagentJobHandle,
+    failureCode: string,
+  ): Promise<void> {
+    const now = new Date();
+    await this.#database.transaction().execute(async (transaction) => {
+      const execution = await transaction
+        .selectFrom("subagent_executions")
+        .select(["state", "child_session_id", "child_run_id", "child_workspace_id"])
+        .where("tenant_id", "=", tenantId)
+        .where("id", "=", pending.executionId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (execution === undefined || execution.state !== "preparing") return;
+      const run = await transaction
+        .selectFrom("runs")
+        .select(["turn_id", "command_id"])
+        .where("tenant_id", "=", tenantId)
+        .where("id", "=", execution.child_run_id)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("subagent_executions")
+        .set({
+          state: "failed",
+          failure_code: failureCode,
+          failure_message: "Isolated Workspace preparation failed",
+          settled_at: now,
+          updated_at: now,
+        })
+        .where("tenant_id", "=", tenantId)
+        .where("id", "=", pending.executionId)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("runs")
+        .set({
+          state: "failed",
+          failure_code: failureCode,
+          failure_message: "Isolated Workspace preparation failed",
+          failure_retryable: false,
+          settled_at: now,
+          updated_at: now,
+        })
+        .where("tenant_id", "=", tenantId)
+        .where("id", "=", execution.child_run_id)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("turns")
+        .set({
+          state: "failed",
+          failure_code: failureCode,
+          failure_message: "Isolated Workspace preparation failed",
+          failure_retryable: false,
+          settled_at: now,
+        })
+        .where("tenant_id", "=", tenantId)
+        .where("id", "=", run.turn_id)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("commands")
+        .set({ state: "failed", failure_code: failureCode, completed_at: now })
+        .where("tenant_id", "=", tenantId)
+        .where("id", "=", run.command_id)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("sessions")
+        .set({ state: "failed", updated_at: now })
+        .where("tenant_id", "=", tenantId)
+        .where("id", "=", execution.child_session_id)
+        .executeTakeFirstOrThrow();
+      if (execution.child_workspace_id !== null) {
+        const workspace = await transaction
+          .updateTable("workspaces")
+          .set({ deleted_at: now, updated_at: now })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", execution.child_workspace_id)
+          .where("deleted_at", "is", null)
+          .returning("sandbox_domain_id")
+          .executeTakeFirst();
+        if (workspace !== undefined) {
+          await transaction
+            .updateTable("sandbox_domains")
+            .set({
+              assigned_workspaces: sql<string>`greatest(${sql.ref("assigned_workspaces")} - 1, 0)`,
+              updated_at: now,
+            })
+            .where("id", "=", workspace.sandbox_domain_id)
+            .executeTakeFirst();
+        }
+      }
     });
   }
 
@@ -531,6 +854,9 @@ export class PostgresSubagentJobProvider {
         "execution.id as executionId",
         "execution.child_session_id as childSessionId",
         "execution.child_run_id as childRunId",
+        "execution.child_workspace_id as childWorkspaceId",
+        "execution.workspace_mode as workspaceMode",
+        "execution.state as executionState",
         "child_run.state as runState",
         "child_run.failure_code as failureCode",
         "child_run.failure_message as failureMessage",
@@ -541,20 +867,50 @@ export class PostgresSubagentJobProvider {
     if (row === undefined) {
       throw new PostgresSubagentJobError("not_found", "Subagent execution was not found");
     }
+    if (row.executionState === "preparing") {
+      return {
+        executionId: row.executionId,
+        childSessionId: row.childSessionId,
+        childRunId: row.childRunId,
+        state: "preparing",
+      };
+    }
     const state = mapRunState(row.runState);
     const terminal = ["completed", "failed", "cancelled", "unknown"].includes(state);
-    await this.#database
-      .updateTable("subagent_executions")
-      .set({
-        state,
-        failure_code: state === "failed" ? (row.failureCode ?? "child_run_failed") : null,
-        failure_message: state === "failed" ? row.failureMessage : null,
-        ...(terminal ? { settled_at: sql<Date>`coalesce(settled_at, now())` } : {}),
-        updated_at: sql<Date>`now()`,
-      })
-      .where("tenant_id", "=", tenantId)
-      .where("id", "=", executionId)
-      .executeTakeFirst();
+    await this.#database.transaction().execute(async (transaction) => {
+      await transaction
+        .updateTable("subagent_executions")
+        .set({
+          state,
+          failure_code: state === "failed" ? (row.failureCode ?? "child_run_failed") : null,
+          failure_message: state === "failed" ? row.failureMessage : null,
+          ...(terminal ? { settled_at: sql<Date>`coalesce(settled_at, now())` } : {}),
+          updated_at: sql<Date>`now()`,
+        })
+        .where("tenant_id", "=", tenantId)
+        .where("id", "=", executionId)
+        .executeTakeFirst();
+      if (terminal && row.workspaceMode === "isolated" && row.childWorkspaceId !== null) {
+        const workspace = await transaction
+          .updateTable("workspaces")
+          .set({ deleted_at: sql<Date>`coalesce(deleted_at, now())`, updated_at: sql<Date>`now()` })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", row.childWorkspaceId)
+          .where("deleted_at", "is", null)
+          .returning("sandbox_domain_id")
+          .executeTakeFirst();
+        if (workspace !== undefined) {
+          await transaction
+            .updateTable("sandbox_domains")
+            .set({
+              assigned_workspaces: sql<string>`greatest(${sql.ref("assigned_workspaces")} - 1, 0)`,
+              updated_at: sql<Date>`now()`,
+            })
+            .where("id", "=", workspace.sandbox_domain_id)
+            .executeTakeFirst();
+        }
+      }
+    });
     return {
       executionId: row.executionId,
       childSessionId: row.childSessionId,
@@ -579,7 +935,220 @@ export class PostgresSubagentJobProvider {
         message: Extract<AgentMessage, { role: "assistant" }>;
       } => entry.type === "message" && entry.message.role === "assistant",
     );
-    const output = final === undefined ? undefined : assistantText(final.message);
+    const assistantOutput = final === undefined ? undefined : assistantText(final.message);
+    const patch = await this.#database
+      .selectFrom("workspace_versions as version")
+      .innerJoin("artifacts as artifact", "artifact.id", "version.patch_artifact_id")
+      .innerJoin("checkpoint_objects as object", "object.object_key", "artifact.object_key")
+      .select(["object.bytes", "object.sha256", "object.size_bytes as sizeBytes"])
+      .where("version.tenant_id", "=", tenantId)
+      .where("version.run_id", "=", status.childRunId)
+      .where("version.state", "=", "settled")
+      .executeTakeFirst();
+    let patchOutput: string | undefined;
+    if (patch !== undefined) {
+      const bytes = Buffer.from(patch.bytes);
+      if (
+        Number(patch.sizeBytes) === bytes.byteLength &&
+        createHash("sha256").update(bytes).digest("hex") === patch.sha256
+      ) {
+        const maximumPatchBytes = 128 * 1_024;
+        const visible = bytes.subarray(0, maximumPatchBytes).toString("utf8");
+        patchOutput = [
+          "Isolated Workspace patch:",
+          "```diff",
+          visible,
+          bytes.byteLength > maximumPatchBytes
+            ? "\n[patch truncated; inspect the child artifact for the complete diff]"
+            : "",
+          "```",
+        ].join("\n");
+      }
+    }
+    const outputParts = [assistantOutput, patchOutput].filter(
+      (value): value is string => value !== undefined,
+    );
+    const output = outputParts.length === 0 ? undefined : outputParts.join("\n\n");
     return { ...status, ...(output === undefined ? {} : { output }) };
+  }
+
+  async cancel(tenantId: string, executionId: string): Promise<CloudSubagentJobResult> {
+    await this.#database.transaction().execute(async (transaction) => {
+      const row = await transaction
+        .selectFrom("subagent_executions as execution")
+        .innerJoin("runs as run", (join) =>
+          join
+            .onRef("run.tenant_id", "=", "execution.tenant_id")
+            .onRef("run.id", "=", "execution.child_run_id"),
+        )
+        .innerJoin("commands as target", (join) =>
+          join
+            .onRef("target.tenant_id", "=", "run.tenant_id")
+            .onRef("target.id", "=", "run.command_id"),
+        )
+        .innerJoin("sessions as child", (join) =>
+          join
+            .onRef("child.tenant_id", "=", "execution.tenant_id")
+            .onRef("child.id", "=", "execution.child_session_id"),
+        )
+        .select([
+          "execution.state as executionState",
+          "execution.child_session_id as sessionId",
+          "execution.child_run_id as runId",
+          "run.state as runState",
+          "run.turn_id as turnId",
+          "target.id as targetCommandId",
+          "target.state as targetCommandState",
+          "child.next_mailbox_position as mailboxPosition",
+        ])
+        .where("execution.tenant_id", "=", tenantId)
+        .where("execution.id", "=", executionId)
+        .forUpdate(["execution", "run", "target", "child"])
+        .executeTakeFirst();
+      if (row === undefined) {
+        throw new PostgresSubagentJobError("not_found", "Subagent execution was not found");
+      }
+      if (["completed", "failed", "cancelled", "unknown"].includes(row.executionState)) return;
+      const now = new Date();
+      if (
+        row.executionState === "preparing" ||
+        (row.runState === "queued" && row.targetCommandState !== "acknowledged")
+      ) {
+        await transaction
+          .updateTable("outbox")
+          .set({ published_at: now, last_error: "subagent_cancelled_before_start" })
+          .where("tenant_id", "=", tenantId)
+          .where("aggregate_id", "=", row.sessionId)
+          .where("published_at", "is", null)
+          .execute();
+        await transaction
+          .updateTable("commands")
+          .set({ state: "failed", failure_code: "subagent_cancelled", completed_at: now })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", row.targetCommandId)
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("runs")
+          .set({ state: "cancelled", settled_at: now, updated_at: now })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", row.runId)
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("turns")
+          .set({ state: "cancelled", settled_at: now })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", row.turnId)
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("subagent_executions")
+          .set({ state: "cancelled", settled_at: now, updated_at: now })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", executionId)
+          .executeTakeFirstOrThrow();
+        return;
+      }
+      const existing = await transaction
+        .selectFrom("commands")
+        .select("id")
+        .where("tenant_id", "=", tenantId)
+        .where("session_id", "=", row.sessionId)
+        .where("turn_id", "=", row.turnId)
+        .where("kind", "=", "turn.cancel")
+        .where("state", "in", ["pending", "dispatched", "acknowledged"])
+        .executeTakeFirst();
+      if (existing !== undefined) return;
+      const commandId = this.#id();
+      await transaction
+        .insertInto("commands")
+        .values({
+          id: commandId,
+          tenant_id: tenantId,
+          session_id: row.sessionId,
+          turn_id: row.turnId,
+          idempotency_key: `subagent-cancel:${executionId}`,
+          kind: "turn.cancel",
+          state: "pending",
+          mailbox_position: row.mailboxPosition,
+          payload: {
+            schemaVersion: 1,
+            targetCommandId: row.targetCommandId,
+            reason: "user_request",
+            gracePeriodMs: 2_000,
+          },
+          dispatched_at: null,
+          acknowledged_at: null,
+          completed_at: null,
+          failure_code: null,
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("outbox")
+        .values({
+          id: this.#id(),
+          tenant_id: tenantId,
+          aggregate_type: "session",
+          aggregate_id: row.sessionId,
+          topic: TURN_CANCELLATION_OUTBOX_TOPIC,
+          payload: {
+            schemaVersion: 1,
+            commandId,
+            targetCommandId: row.targetCommandId,
+            sessionId: row.sessionId,
+            turnId: row.turnId,
+            kind: "turn.cancel",
+          },
+          published_at: null,
+          last_error: null,
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("sessions")
+        .set({
+          next_mailbox_position: sql<string>`${sql.ref("next_mailbox_position")} + 1`,
+          updated_at: now,
+        })
+        .where("tenant_id", "=", tenantId)
+        .where("id", "=", row.sessionId)
+        .executeTakeFirstOrThrow();
+    });
+    return this.status(tenantId, executionId);
+  }
+
+  async reapStalePreparations(maximumAgeMs = 20 * 60_000, limit = 32): Promise<number> {
+    if (!Number.isSafeInteger(maximumAgeMs) || maximumAgeMs < 60_000) {
+      throw new TypeError("Subagent preparation maximum age is invalid");
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) {
+      throw new TypeError("Subagent preparation reaper limit is invalid");
+    }
+    const stale = await this.#database
+      .selectFrom("subagent_executions")
+      .select([
+        "tenant_id as tenantId",
+        "id",
+        "child_session_id as childSessionId",
+        "child_run_id as childRunId",
+        "state",
+      ])
+      .where("state", "=", "preparing")
+      .where("updated_at", "<", new Date(Date.now() - maximumAgeMs))
+      .orderBy("updated_at", "asc")
+      .limit(limit)
+      .execute();
+    let reaped = 0;
+    for (const row of stale) {
+      await this.#failPreparation(
+        row.tenantId,
+        {
+          executionId: row.id,
+          childSessionId: row.childSessionId,
+          childRunId: row.childRunId,
+          state: row.state,
+        },
+        "workspace_fork_abandoned",
+      );
+      reaped += 1;
+    }
+    return reaped;
   }
 }

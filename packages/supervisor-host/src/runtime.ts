@@ -111,6 +111,7 @@ export type SupervisorToolBroker = Pick<
   | "listAssignments"
   | "terminateAndConfirmAbsent"
   | "confirmAbsent"
+  | "forkWorkspace"
 >;
 
 export type SupervisorHostTerminalReason = "owner_stopped" | "connection_failed";
@@ -181,6 +182,7 @@ export class SupervisorHostRuntime {
   #managementServer: SupervisorManagementServer | undefined;
   #modelGateway: TenantModelGateway | undefined;
   #runWorker: SupervisorRunWorker | undefined;
+  #subagentPreparationReaper: NodeJS.Timeout | undefined;
   #closing: Promise<void> | undefined;
   #ownerStopSettled = false;
   #terminalSettled = false;
@@ -402,7 +404,16 @@ export class SupervisorHostRuntime {
       await modelGateway.start();
       this.#modelGateway = modelGateway;
       const runWorkerIdentity = `postgres:${identity.supervisorId}:${identity.bootId}`;
-      const subagentJobs = new PostgresSubagentJobProvider({ database: this.#database });
+      const subagentJobs = new PostgresSubagentJobProvider({
+        database: this.#database,
+        forkWorkspace: (request) => this.#toolBroker.forkWorkspace(request),
+      });
+      await subagentJobs.reapStalePreparations().catch(() => undefined);
+      this.#subagentPreparationReaper = setInterval(
+        () => void subagentJobs.reapStalePreparations().catch(() => undefined),
+        60_000,
+      );
+      this.#subagentPreparationReaper.unref();
       const runner = new RemoteToolSandboxTurnRunner({
         broker: this.#toolBroker,
         runtimeIdentity: identity,
@@ -420,14 +431,16 @@ export class SupervisorHostRuntime {
             claimOwnerId: runWorkerIdentity,
             fencingToken: command.payload.fencingToken,
           }),
-        createOrchestrationTools: async (command) => {
+        createOrchestrationTools: async (command, orchestrationContext) => {
           const session = await this.#database
             .selectFrom("sessions")
             .select("session_kind")
             .where("tenant_id", "=", command.payload.tenantId)
             .where("id", "=", command.payload.sessionId)
             .executeTakeFirstOrThrow();
-          if (session.session_kind === "subagent") return [];
+          if (session.session_kind === "subagent" || this.#config.maxConcurrentSessions < 2) {
+            return [];
+          }
           return [
             await createPiSubagentsCloudTool({
               context: {
@@ -445,8 +458,20 @@ export class SupervisorHostRuntime {
                   if (contextMode !== "fresh" && contextMode !== "fork") {
                     throw new Error("pi-subagents provided an invalid context mode");
                   }
-                  if (workspaceMode !== "none" && workspaceMode !== "shared_serialized") {
+                  if (
+                    workspaceMode !== "none" &&
+                    workspaceMode !== "shared_serialized" &&
+                    workspaceMode !== "isolated"
+                  ) {
                     throw new Error("pi-subagents provided an unsupported Workspace mode");
+                  }
+                  if (
+                    workspaceMode === "isolated" &&
+                    orchestrationContext.activation === undefined
+                  ) {
+                    throw new Error(
+                      "Isolated Subagent execution requires an active parent Sandbox",
+                    );
                   }
                   const tools = parseCloudToolCapabilitySnapshot(
                     input.options.requestedToolCapabilities,
@@ -467,6 +492,10 @@ export class SupervisorHostRuntime {
                     contextMode,
                     workspaceMode,
                     requestedToolCapabilities: tools,
+                    ...(workspaceMode !== "isolated" ||
+                    orchestrationContext.activation === undefined
+                      ? {}
+                      : { parentActivation: orchestrationContext.activation }),
                   });
                   return {
                     providerJobId: child.executionId,
@@ -498,6 +527,10 @@ export class SupervisorHostRuntime {
                 },
                 reattach: async (providerJobId) => {
                   const child = await subagentJobs.status(command.payload.tenantId, providerJobId);
+                  return { providerJobId, state: subagentExternalState(child.state) };
+                },
+                cancel: async (providerJobId) => {
+                  const child = await subagentJobs.cancel(command.payload.tenantId, providerJobId);
                   return { providerJobId, state: subagentExternalState(child.state) };
                 },
               },
@@ -654,6 +687,10 @@ export class SupervisorHostRuntime {
   async #close(): Promise<void> {
     if (this.#state !== "failed") this.#state = "draining";
     this.#client?.setAcceptingAssignments(false);
+    if (this.#subagentPreparationReaper !== undefined) {
+      clearInterval(this.#subagentPreparationReaper);
+      this.#subagentPreparationReaper = undefined;
+    }
     // A Kubernetes scale-in is a drain, not a fencing event. Stop queue
     // polling first and give the active Runs their bounded settlement window;
     // owner replacement still uses stopCurrentBoot(), which revokes immediately.

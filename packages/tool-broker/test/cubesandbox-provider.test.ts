@@ -93,6 +93,19 @@ function fakeWorkspaceVolumeGateway(): WorkspaceVolumeGateway {
         truncated: false,
       },
     })),
+    fork: vi.fn(async () => ({
+      sourceRevision: "a".repeat(64),
+      volumeRevision: "c".repeat(64),
+      gitBaselineCommit: "b".repeat(40),
+      files: [
+        {
+          path: "result.txt",
+          executable: false,
+          sizeBytes: 5,
+          sha256: createHash("sha256").update("cube\n").digest("hex"),
+        },
+      ],
+    })),
     materialize: vi.fn(async () => {
       const bytes = Buffer.from("cube\n");
       return {
@@ -684,6 +697,56 @@ describe("CubeSandbox Provider contract", () => {
     expect(epochs).toEqual([42, 43]);
     expect(restored.assignment.sessionId).toBe(assignment.sessionId);
     await provider.destroy(restored);
+    await provider.close();
+  });
+
+  it("forks an isolated persistent Volume while keeping the parent Cube usable", async () => {
+    const runtime = new FakeCubeRuntimeClient();
+    const gateway = fakeWorkspaceVolumeGateway();
+    const provider = new CubeSandboxProvider({
+      templateId: "pi-cloud-tool-v1",
+      imageRevision: "development",
+      webProxy: WEB_PROXY,
+      runtimeClient: runtime,
+      workspaceVolumeGateway: gateway,
+    });
+    const parent = await provider.create({
+      activationId: ACTIVATION_ID,
+      assignment,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      policy: provider.defaultPolicy,
+    });
+    const targetWorkspaceId = "20000000-0000-4000-8000-000000000060";
+    const forked = await provider.forkWorkspace(parent, {
+      toolBrokerProtocolVersion: 1,
+      type: "workspace.fork",
+      requestId: "20000000-0000-4000-8000-000000000061",
+      sourceActivationId: ACTIVATION_ID,
+      sourceAssignment: assignment,
+      target: {
+        tenantId: assignment.tenantId,
+        projectId: assignment.projectId,
+        workspaceId: targetWorkspaceId,
+        sessionId: "20000000-0000-4000-8000-000000000062",
+      },
+    });
+    expect(forked).toMatchObject({
+      sourceRevision: "a".repeat(64),
+      targetRevision: "c".repeat(64),
+    });
+    expect(gateway.fork).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceWorkspaceId: assignment.workspaceId,
+        targetWorkspaceId,
+      }),
+    );
+    await expect(
+      provider.exec(forked.sourceHandle, operation(ACTIVATION_ID)),
+    ).resolves.toMatchObject({ exitCode: 0 });
+    expect(runtime.creates).toHaveLength(1);
+    expect(runtime.requests.filter(({ input }) => input.path === "/v1/rebind")).toHaveLength(1);
+    await provider.destroy(forked.sourceHandle);
     await provider.close();
   });
 

@@ -74,10 +74,11 @@ export type EnvironmentOperationKind = "create" | "activate" | "rollback" | "val
 export type SandboxDomainState = "active" | "draining" | "disabled";
 export type SandboxRetentionPolicy = "ephemeral" | "persistent";
 export type SessionKind = "conversation" | "subagent";
+export type WorkspaceKind = "user" | "subagent_isolated";
 export type SubagentContextMode = "fresh" | "fork";
 export type SubagentWorkspaceMode = "none" | "shared_serialized" | "isolated";
 export type SubagentExecutionState =
-  "queued" | "running" | "completed" | "failed" | "cancelled" | "unknown";
+  "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "unknown";
 
 export interface SandboxDomainTable {
   id: string;
@@ -306,6 +307,8 @@ export interface WorkspaceTable {
   project_id: string;
   sandbox_domain_id: string;
   object_snapshot_key: string | null;
+  workspace_kind: Generated<WorkspaceKind>;
+  parent_workspace_id: GeneratedNullable<string>;
   current_workspace_version_id: GeneratedNullable<string>;
   row_version: GeneratedInt8;
   deleted_at: NullableTimestamp;
@@ -433,6 +436,7 @@ export interface SubagentExecutionTable {
   request_sha256: string;
   child_session_id: string;
   child_run_id: string;
+  child_workspace_id: GeneratedNullable<string>;
   agent_name: string;
   context_mode: SubagentContextMode;
   workspace_mode: SubagentWorkspaceMode;

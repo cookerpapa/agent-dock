@@ -13,6 +13,8 @@ import type {
   ToolSandboxReleaseResponse,
   ToolBrokerMaterializeFileRequest,
   ToolBrokerMaterializeFileResponse,
+  ToolBrokerWorkspaceForkRequest,
+  ToolBrokerWorkspaceForkResponse,
   CloudToolName,
 } from "@pi-cloud/protocol";
 import { parseCloudToolCapabilitySnapshot } from "@pi-cloud/protocol";
@@ -74,6 +76,7 @@ type ManagedActivation = {
   materializing?: Promise<SandboxHandle>;
   materializedForCurrentAssignment: boolean;
   activeOperations: number;
+  exclusiveOperation: boolean;
   operations: Map<
     string,
     Readonly<{ requestSha256: string; result: Promise<ToolSandboxOperationResponse> }>
@@ -542,7 +545,12 @@ export class ToolBroker {
         currentSessionId: active.assignment.sessionId,
         nextSessionId: request.assignment.sessionId,
       });
-      if (!delegated || active.activeOperations !== 0 || active.materializing !== undefined) {
+      if (
+        !delegated ||
+        active.activeOperations !== 0 ||
+        active.exclusiveOperation ||
+        active.materializing !== undefined
+      ) {
         throw new ToolBrokerError(
           "tool_sandbox_workspace_busy",
           "Workspace already has a Tool Sandbox reservation",
@@ -703,6 +711,7 @@ export class ToolBroker {
         : { handle: delegatedParent.handle }),
       materializedForCurrentAssignment: false,
       activeOperations: 0,
+      exclusiveOperation: false,
       operations: new Map(),
       seenCaptureIds: new Set(),
     });
@@ -725,6 +734,13 @@ export class ToolBroker {
     signal?: AbortSignal,
   ): Promise<ToolSandboxOperationResponse> {
     const activation = this.#authorized(request.activationId, capability);
+    if (activation.exclusiveOperation) {
+      throw new ToolBrokerError(
+        "tool_sandbox_workspace_busy",
+        "Workspace is establishing an isolated Subagent fork",
+        true,
+      );
+    }
     if (!activation.allowedTools.has(request.toolName)) {
       throw new ToolBrokerError(
         "tool_not_granted",
@@ -840,6 +856,48 @@ export class ToolBroker {
       };
     }
     return this.#provider.snapshot(await this.#materialize(activationId, activation), requestId);
+  }
+
+  async forkWorkspace(
+    request: ToolBrokerWorkspaceForkRequest,
+  ): Promise<ToolBrokerWorkspaceForkResponse> {
+    if (this.#provider.forkWorkspace === undefined) {
+      throw new ToolBrokerError(
+        "workspace_fork_unsupported",
+        "The configured Sandbox Provider cannot create isolated Workspace forks",
+        false,
+      );
+    }
+    const activation = this.#owned(request.sourceActivationId, request.sourceAssignment);
+    if (
+      activation.exclusiveOperation ||
+      activation.activeOperations !== 0 ||
+      activation.materializing !== undefined
+    ) {
+      throw new ToolBrokerError(
+        "tool_sandbox_workspace_busy",
+        "Parent Workspace is busy and cannot be isolated",
+        true,
+      );
+    }
+    activation.exclusiveOperation = true;
+    try {
+      const handle = await this.#materialize(request.sourceActivationId, activation);
+      const forked = await this.#provider.forkWorkspace(handle, request);
+      activation.handle = forked.sourceHandle;
+      activation.materializedForCurrentAssignment = true;
+      return {
+        toolBrokerProtocolVersion: 1,
+        type: "workspace.forked",
+        requestId: request.requestId,
+        sourceActivationId: request.sourceActivationId,
+        targetWorkspaceId: request.target.workspaceId,
+        sourceRevision: forked.sourceRevision,
+        targetRevision: forked.targetRevision,
+      };
+    } finally {
+      activation.exclusiveOperation = false;
+    }
   }
 
   async release(request: ToolSandboxReleaseRequest): Promise<ToolSandboxReleaseResponse> {

@@ -32,6 +32,9 @@ describe("pi-subagents cloud Tool adapter", () => {
         reattach(providerJobId): ExternalJobHandle {
           return { providerJobId, state: "completed" };
         },
+        cancel(providerJobId): ExternalJobHandle {
+          return { providerJobId, state: "stopped" };
+        },
       },
     });
 
@@ -83,6 +86,9 @@ describe("pi-subagents cloud Tool adapter", () => {
         reattach: async () => {
           throw new Error("not expected");
         },
+        cancel: async () => {
+          throw new Error("not expected");
+        },
       },
     });
     const result = await tool.execute(
@@ -95,5 +101,75 @@ describe("pi-subagents cloud Tool adapter", () => {
       .map((part) => part.text)
       .join("\n");
     expect(output).toContain("not local profile management");
+  }, 30_000);
+
+  it("maps upstream worktree isolation onto an isolated cloud Workspace", async () => {
+    const starts: ExternalJobStartInput[] = [];
+    const tool = await createPiSubagentsCloudTool({
+      context: { parentSessionId: "00000000-0000-4000-8000-000000000003" },
+      coordinator: {
+        start(input): ExternalJobHandle {
+          starts.push(input);
+          return { providerJobId: "job-isolated", state: "completed" };
+        },
+        status: () => ({ providerJobId: "job-isolated", state: "completed" }),
+        result: () => ({
+          providerJobId: "job-isolated",
+          state: "completed",
+          output: "isolated result",
+        }),
+        reattach: () => ({ providerJobId: "job-isolated", state: "completed" }),
+        cancel: () => ({ providerJobId: "job-isolated", state: "stopped" }),
+      },
+    });
+    await tool.execute(
+      "tool-call-isolated",
+      {
+        workflowScript: `return runs.run("isolated", {agent:"worker", task:"Try another implementation"})`,
+        worktree: true,
+      },
+      new AbortController().signal,
+    );
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.options).toMatchObject({
+      workspaceMode: "isolated",
+      requestedToolCapabilities: expect.arrayContaining(["read", "write", "edit", "bash"]),
+    });
+  }, 30_000);
+
+  it("propagates parent Tool cancellation to every admitted cloud child", async () => {
+    let notifyStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+    const cancelled: string[] = [];
+    const tool = await createPiSubagentsCloudTool({
+      context: { parentSessionId: "00000000-0000-4000-8000-000000000004" },
+      coordinator: {
+        start: () => {
+          notifyStarted();
+          return { providerJobId: "job-cancel", state: "running" };
+        },
+        status: () => ({ providerJobId: "job-cancel", state: "running" }),
+        result: () => ({ providerJobId: "job-cancel", state: "stopped" }),
+        reattach: () => ({ providerJobId: "job-cancel", state: "running" }),
+        cancel: (providerJobId) => {
+          cancelled.push(providerJobId);
+          return { providerJobId, state: "stopped" };
+        },
+      },
+    });
+    const controller = new AbortController();
+    const execution = tool.execute(
+      "tool-call-cancel",
+      {
+        workflowScript: `return runs.run("cancel", {agent:"worker", task:"Wait"})`,
+      },
+      controller.signal,
+    );
+    await started;
+    controller.abort();
+    await execution;
+    expect(cancelled).toEqual(["job-cancel"]);
   }, 30_000);
 });

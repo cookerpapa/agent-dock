@@ -10,6 +10,7 @@ import type {
   ToolSandboxCaptureResponse,
   ToolSandboxOperationRequest,
   ToolSandboxOperationResponse,
+  ToolBrokerWorkspaceForkRequest,
 } from "@pi-cloud/protocol";
 
 export const SANDBOX_PROVIDER_API_VERSION = 1 as const;
@@ -104,6 +105,12 @@ export type SandboxHandle = Readonly<{
   assignment: ToolSandboxAssignment;
   environment: EnvironmentRuntimeSnapshot;
   environmentValidation: EnvironmentValidationReport;
+}>;
+
+export type SandboxWorkspaceForkResult = Readonly<{
+  sourceHandle: SandboxHandle;
+  sourceRevision: string;
+  targetRevision: string;
 }>;
 
 type SandboxRuntimeIsolation = Readonly<{
@@ -212,6 +219,10 @@ export interface SandboxProvider {
   /** Open a human-operated PTY without granting Agent Tool authority. */
   openTerminal?(handle: SandboxHandle, size: SandboxTerminalSize): Promise<SandboxTerminalSession>;
   snapshot(handle: SandboxHandle, requestId: string): Promise<ToolSandboxCaptureResponse>;
+  forkWorkspace?(
+    handle: SandboxHandle,
+    request: ToolBrokerWorkspaceForkRequest,
+  ): Promise<SandboxWorkspaceForkResult>;
   stop(handle: SandboxHandle): Promise<void>;
   destroy(handle: SandboxHandle): Promise<void>;
   inspect(handle: SandboxHandle): Promise<SandboxInspection>;

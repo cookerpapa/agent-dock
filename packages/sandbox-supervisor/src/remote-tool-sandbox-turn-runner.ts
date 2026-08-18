@@ -106,6 +106,9 @@ export type RemoteToolSandboxTurnRunnerOptions = {
   openAgentSession: (command: ExecuteTurnCommandMessage) => Promise<PiCloudSessionHandle>;
   createOrchestrationTools?: (
     command: ExecuteTurnCommandMessage,
+    context: Readonly<{
+      activation?: Readonly<{ activationId: string; assignment: ToolSandboxAssignment }>;
+    }>,
   ) => Promise<readonly AgentTool[]> | readonly AgentTool[];
   runAttemptPhaseObserver?: RunAttemptPhaseObserver;
   requestTimeoutMs?: number;
@@ -585,7 +588,16 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           ? undefined
           : new PiSettlementGateController(settlementPolicy);
       const orchestrationTools =
-        (await this.#createOrchestrationTools?.(command)) ?? ([] as readonly AgentTool[]);
+        (await this.#createOrchestrationTools?.(command, {
+          ...(activeSandbox === undefined
+            ? {}
+            : {
+                activation: {
+                  activationId: activeSandbox.activationId,
+                  assignment: toolAssignment,
+                },
+              }),
+        })) ?? ([] as readonly AgentTool[]);
       const commonRunnerOptions = {
         resolveModelRuntime,
         openSession: this.#openAgentSession,

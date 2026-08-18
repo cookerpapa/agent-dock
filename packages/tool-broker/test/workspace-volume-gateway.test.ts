@@ -92,6 +92,53 @@ describe("PersistentVolumeWorkspaceVolumeGateway", () => {
     await expect(mover.prepare(first)).resolves.toEqual({ attached: true });
   });
 
+  it("creates an idempotent isolated Volume copy that no longer follows the parent", async () => {
+    const workspaceRoot = await root();
+    const mover = new PersistentVolumeWorkspaceVolumeGateway({ workspaceRoot });
+    const source = identity("session-parent");
+    await mover.prepare(source);
+    const sourceRoot = join(workspaceRoot, `picloud-posix-${source.volumeId}`, "workspace");
+    await writeFile(join(sourceRoot, "answer.txt"), "parent-v1\n");
+    await mover.initializeBaseline(source);
+    const captured = await mover.snapshot({
+      ...source,
+      activationId: randomUUID(),
+      fencingToken: 1,
+      bindingSha256: "a".repeat(64),
+    });
+    const target = {
+      tenantId: source.tenantId,
+      workspaceId: "workspace-volume-isolated",
+      sessionId: "session-child",
+      volumeId: workspaceVolumeId({
+        tenantId: source.tenantId,
+        workspaceId: "workspace-volume-isolated",
+      }),
+    };
+    await mkdir(join(workspaceRoot, `picloud-posix-${target.volumeId}`, "workspace"), {
+      recursive: true,
+    });
+    const request = {
+      tenantId: source.tenantId,
+      sourceWorkspaceId: source.workspaceId,
+      sourceSessionId: source.sessionId,
+      sourceVolumeId: source.volumeId,
+      expectedSourceRevision: captured.volumeRevision,
+      targetWorkspaceId: target.workspaceId,
+      targetSessionId: target.sessionId,
+      targetVolumeId: target.volumeId,
+    };
+    const first = await mover.fork(request);
+    await writeFile(join(sourceRoot, "answer.txt"), "parent-v2\n");
+    await expect(mover.fork(request)).resolves.toEqual(first);
+    await expect(
+      readFile(
+        join(workspaceRoot, `picloud-posix-${target.volumeId}`, "workspace", "answer.txt"),
+        "utf8",
+      ),
+    ).resolves.toBe("parent-v1\n");
+  });
+
   it("rejects an unbound Cube workspace that already contains user bytes", async () => {
     const workspaceRoot = await root();
     const mover = new PersistentVolumeWorkspaceVolumeGateway({ workspaceRoot });
@@ -150,6 +197,14 @@ describe("HttpWorkspaceVolumeGateway", () => {
           volumeRevision: "2".repeat(64),
           gitBaselineCommit: "1".repeat(40),
           workspacePatch: { format: "unified_diff" as const, patch: "", truncated: false },
+          files,
+        };
+      },
+      async fork() {
+        return {
+          sourceRevision: "2".repeat(64),
+          volumeRevision: "3".repeat(64),
+          gitBaselineCommit: "1".repeat(40),
           files,
         };
       },

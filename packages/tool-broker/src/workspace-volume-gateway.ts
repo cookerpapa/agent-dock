@@ -7,6 +7,7 @@ export {
   type WorkspaceVolumeGatewayInitializeBaselineInput,
   type WorkspaceVolumeGatewayMaterializeInput,
   type WorkspaceVolumeGatewayDeleteInput,
+  type WorkspaceVolumeGatewayForkInput,
   type WorkspaceVolumeGatewayLock,
   type WorkspaceVolumeGatewayPrepareInput,
   type WorkspaceVolumeGatewaySnapshotInput,

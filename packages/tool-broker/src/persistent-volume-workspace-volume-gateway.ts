@@ -9,6 +9,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import {
   chmod,
+  cp,
   lstat,
   mkdir,
   open,
@@ -42,6 +43,7 @@ import {
   type WorkspaceVolumeGatewayInitializeBaselineInput,
   type WorkspaceVolumeGatewayMaterializeInput,
   type WorkspaceVolumeGatewayDeleteInput,
+  type WorkspaceVolumeGatewayForkInput,
   type WorkspaceVolumeGatewayPrepareInput,
   type WorkspaceVolumeGatewaySnapshotInput,
 } from "./workspace-volume-gateway-contract.ts";
@@ -186,18 +188,149 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
         captureWorkspaceIndex(join(directory, VOLUME_WORKSPACE_DIRECTORY)),
         collectExternalGitWorkspacePatch(this.#externalGitWorkspace(directory)),
       ]);
-      const volumeRevision = createHash("sha256")
-        .update("pi-cloud.workspace-volume-revision.v1\0")
-        .update(state.volumeGeneration)
-        .update("\0")
-        .update(JSON.stringify(index.files))
-        .digest("hex");
+      const volumeRevision = this.#volumeRevision(state.volumeGeneration, index.files);
       return {
         volumeRevision,
         gitBaselineCommit: state.gitBaselineCommit,
         workspacePatch,
         files: index.files,
       };
+    });
+  }
+
+  async fork(input: WorkspaceVolumeGatewayForkInput): Promise<{
+    sourceRevision: string;
+    volumeRevision: string;
+    gitBaselineCommit: string;
+    files: Awaited<ReturnType<typeof captureWorkspaceIndex>>["files"];
+  }> {
+    if (!SHA256_PATTERN.test(input.expectedSourceRevision)) {
+      throw new WorkspaceVolumeGatewayError(
+        "workspace_fork_revision_invalid",
+        "Workspace fork source revision was invalid",
+        false,
+      );
+    }
+    const source = validatedIdentity({
+      tenantId: input.tenantId,
+      workspaceId: input.sourceWorkspaceId,
+      sessionId: input.sourceSessionId,
+      volumeId: input.sourceVolumeId,
+    });
+    const target = validatedIdentity({
+      tenantId: input.tenantId,
+      workspaceId: input.targetWorkspaceId,
+      sessionId: input.targetSessionId,
+      volumeId: input.targetVolumeId,
+    });
+    if (source.workspaceId === target.workspaceId || source.volumeId === target.volumeId) {
+      throw new WorkspaceVolumeGatewayError(
+        "workspace_fork_identity_invalid",
+        "Workspace fork target must be independent",
+        false,
+      );
+    }
+    return this.#withVolumeLocks([source.volumeId, target.volumeId], async () => {
+      await this.checkHealth();
+      const sourceDirectory = await this.#validatedVolume(source);
+      const sourceState = (await this.#readState(sourceDirectory))!;
+      const targetDirectory = await this.#ensureVolumeDirectory(target.volumeId);
+      const existingState = await this.#readState(targetDirectory);
+      const existingGeneration = await this.#readVolumeGeneration(targetDirectory);
+      if (existingState !== undefined || existingGeneration !== undefined) {
+        if (
+          existingState === undefined ||
+          existingGeneration === undefined ||
+          existingState.tenantId !== target.tenantId ||
+          existingState.workspaceId !== target.workspaceId ||
+          existingState.volumeId !== target.volumeId ||
+          existingState.volumeGeneration !== existingGeneration ||
+          existingState.forkedFrom?.workspaceId !== source.workspaceId
+        ) {
+          throw new WorkspaceVolumeGatewayError(
+            "workspace_fork_target_conflict",
+            "Workspace fork target was already bound to another source",
+            false,
+          );
+        }
+        const existingIndex = await captureWorkspaceIndex(
+          join(targetDirectory, VOLUME_WORKSPACE_DIRECTORY),
+        );
+        return {
+          sourceRevision: existingState.forkedFrom.volumeRevision,
+          volumeRevision: this.#volumeRevision(existingGeneration, existingIndex.files),
+          gitBaselineCommit: existingState.gitBaselineCommit,
+          files: existingIndex.files,
+        };
+      }
+      const sourceIndex = await captureWorkspaceIndex(
+        join(sourceDirectory, VOLUME_WORKSPACE_DIRECTORY),
+      );
+      const sourceRevision = this.#volumeRevision(sourceState.volumeGeneration, sourceIndex.files);
+      if (sourceRevision !== input.expectedSourceRevision) {
+        throw new WorkspaceVolumeGatewayError(
+          "workspace_fork_source_changed",
+          "Workspace changed before the isolated fork was captured",
+          true,
+        );
+      }
+      const targetEntries = await readdir(targetDirectory);
+      const pristine =
+        targetEntries.length === 0 ||
+        (targetEntries.length === 1 &&
+          targetEntries[0] === VOLUME_WORKSPACE_DIRECTORY &&
+          (await readdir(join(targetDirectory, VOLUME_WORKSPACE_DIRECTORY))).length === 0);
+      if (!pristine) {
+        throw new WorkspaceVolumeGatewayError(
+          "workspace_fork_target_conflict",
+          "Workspace fork target was not pristine",
+          false,
+        );
+      }
+
+      const temporary = `${targetDirectory}.fork-${process.pid}-${randomBytes(8).toString("hex")}`;
+      try {
+        await cp(sourceDirectory, temporary, {
+          recursive: true,
+          force: false,
+          errorOnExist: true,
+          preserveTimestamps: true,
+          verbatimSymlinks: true,
+        });
+        const volumeGeneration = randomBytes(32).toString("hex");
+        const generationPath = join(temporary, VOLUME_METADATA_DIRECTORY, VOLUME_GENERATION_FILE);
+        await rm(generationPath, { force: true });
+        await writeFile(generationPath, `${volumeGeneration}\n`, { mode: 0o400, flag: "wx" });
+        await this.#writeState(temporary, {
+          schemaVersion: 1,
+          tenantId: target.tenantId,
+          workspaceId: target.workspaceId,
+          volumeId: target.volumeId,
+          volumeGeneration,
+          gitBaselineCommit: sourceState.gitBaselineCommit,
+          forkedFrom: { workspaceId: source.workspaceId, volumeRevision: sourceRevision },
+        });
+        const copiedIndex = await captureWorkspaceIndex(
+          join(temporary, VOLUME_WORKSPACE_DIRECTORY),
+        );
+        if (JSON.stringify(copiedIndex.files) !== JSON.stringify(sourceIndex.files)) {
+          throw new WorkspaceVolumeGatewayError(
+            "workspace_fork_copy_invalid",
+            "Isolated Workspace copy did not match its source revision",
+            false,
+          );
+        }
+        await rm(targetDirectory, { recursive: true, force: true });
+        await rename(temporary, targetDirectory);
+        return {
+          sourceRevision,
+          volumeRevision: this.#volumeRevision(volumeGeneration, copiedIndex.files),
+          gitBaselineCommit: sourceState.gitBaselineCommit,
+          files: copiedIndex.files,
+        };
+      } finally {
+        await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
+      }
     });
   }
 
@@ -416,6 +549,14 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
         !/^(?:[0-9a-f]{40})$/.test(value.gitBaselineCommit)
       )
         return undefined;
+      if (
+        value.forkedFrom !== undefined &&
+        (!isRecord(value.forkedFrom) ||
+          typeof value.forkedFrom.workspaceId !== "string" ||
+          typeof value.forkedFrom.volumeRevision !== "string" ||
+          !SHA256_PATTERN.test(value.forkedFrom.volumeRevision))
+      )
+        return undefined;
       return value as unknown as VolumeState;
     } catch {
       return undefined;
@@ -442,5 +583,28 @@ export class PersistentVolumeWorkspaceVolumeGateway implements WorkspaceVolumeGa
     return this.#distributedLock === undefined
       ? run()
       : this.#distributedLock.withLock(volumeId, run);
+  }
+
+  async #withVolumeLocks<T>(volumeIds: readonly string[], operation: () => Promise<T>): Promise<T> {
+    const ordered = [...new Set(volumeIds)].sort();
+    const acquire = (index: number): Promise<T> => {
+      const volumeId = ordered[index];
+      return volumeId === undefined
+        ? operation()
+        : this.#withVolumeLock(volumeId, () => acquire(index + 1));
+    };
+    return acquire(0);
+  }
+
+  #volumeRevision(
+    volumeGeneration: string,
+    files: readonly import("@pi-cloud/workspace-runtime").WorkspaceSnapshotFileMetadata[],
+  ): string {
+    return createHash("sha256")
+      .update("pi-cloud.workspace-volume-revision.v1\0")
+      .update(volumeGeneration)
+      .update("\0")
+      .update(JSON.stringify(files))
+      .digest("hex");
   }
 }
