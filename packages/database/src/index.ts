@@ -110,6 +110,8 @@ export {
   downRunToolCapabilitySnapshots,
   upDurableSubagentExecutions,
   downDurableSubagentExecutions,
+  upToollessRunCapabilities,
+  downToollessRunCapabilities,
 } from "./migrations/index.ts";
 
 export {

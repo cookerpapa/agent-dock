@@ -430,6 +430,7 @@ export interface SubagentExecutionTable {
   parent_tool_call_id: string;
   workflow_run_id: string;
   step_index: number;
+  request_sha256: string;
   child_session_id: string;
   child_run_id: string;
   agent_name: string;

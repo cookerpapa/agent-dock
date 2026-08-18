@@ -40,6 +40,13 @@ export {
   TenantModelGatewayError,
   type TenantModelGatewayOptions,
 } from "./model-gateway.ts";
+export {
+  PostgresSubagentJobError,
+  PostgresSubagentJobProvider,
+  type CloudSubagentJobHandle,
+  type CloudSubagentJobResult,
+  type StartCloudSubagentJobInput,
+} from "./postgres-subagent-job-provider.ts";
 
 export {
   PostgresWorkspaceSeedResolver,

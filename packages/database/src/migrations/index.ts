@@ -65,6 +65,7 @@ import * as piCloudEnvironmentProfile from "./063_pi_cloud_environment_profile.t
 import * as piCloudRunQueueNotification from "./064_pi_cloud_run_queue_notification.ts";
 import * as runToolCapabilitySnapshots from "./065_run_tool_capability_snapshots.ts";
 import * as durableSubagentExecutions from "./066_durable_subagent_executions.ts";
+import * as toollessRunCapabilities from "./067_toolless_run_capabilities.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -135,6 +136,7 @@ export const migrationProvider: MigrationProvider = {
       "064_pi_cloud_run_queue_notification": piCloudRunQueueNotification,
       "065_run_tool_capability_snapshots": runToolCapabilitySnapshots,
       "066_durable_subagent_executions": durableSubagentExecutions,
+      "067_toolless_run_capabilities": toollessRunCapabilities,
     };
   },
 };
@@ -379,3 +381,7 @@ export {
   down as downDurableSubagentExecutions,
   up as upDurableSubagentExecutions,
 } from "./066_durable_subagent_executions.ts";
+export {
+  down as downToollessRunCapabilities,
+  up as upToollessRunCapabilities,
+} from "./067_toolless_run_capabilities.ts";

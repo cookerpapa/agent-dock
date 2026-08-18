@@ -52,11 +52,12 @@ describe("durable Subagent executions migration", () => {
         insert into subagent_executions (
           id, tenant_id, parent_session_id, parent_run_id, parent_attempt_id,
           parent_tool_call_id, workflow_run_id, step_index, child_session_id,
-          child_run_id, agent_name, context_mode, workspace_mode, state
+          child_run_id, agent_name, context_mode, workspace_mode, state, request_sha256
         ) values (
           '00000000-0000-4000-8000-000000000007', '${TENANT}', '${PARENT_SESSION}',
           '${PARENT_RUN}', '${PARENT_ATTEMPT}', 'tool-1', 'workflow-1', 0,
-          '${CHILD_SESSION}', '${CHILD_RUN}', 'scout', 'fresh', 'shared_serialized', 'queued'
+          '${CHILD_SESSION}', '${CHILD_RUN}', 'scout', 'fresh', 'shared_serialized', 'queued',
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
         );
       `);
 

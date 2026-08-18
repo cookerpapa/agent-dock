@@ -1235,6 +1235,7 @@ export class ControlPlaneStore {
       ])
       .select((expression) => expression.fn.count<string>("turn.id").as("turnCount"))
       .where("session_row.tenant_id", "=", this.#tenantId)
+      .where("session_row.session_kind", "=", "conversation")
       .where("session_row.archived_at", "is", null)
       .groupBy([
         "session_row.id",
@@ -1318,6 +1319,7 @@ export class ControlPlaneStore {
       ])
       .where("session_row.tenant_id", "=", this.#tenantId)
       .where("session_row.id", "=", sessionId)
+      .where("session_row.session_kind", "=", "conversation")
       .where("session_row.archived_at", "is", null)
       .executeTakeFirst();
     if (conversation === undefined) {

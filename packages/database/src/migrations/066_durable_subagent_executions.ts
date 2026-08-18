@@ -20,6 +20,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("parent_tool_call_id", "text", (column) => column.notNull())
     .addColumn("workflow_run_id", "text", (column) => column.notNull())
     .addColumn("step_index", "integer", (column) => column.notNull())
+    .addColumn("request_sha256", "text", (column) => column.notNull())
     .addColumn("child_session_id", "uuid", (column) => column.notNull())
     .addColumn("child_run_id", "uuid", (column) => column.notNull())
     .addColumn("agent_name", "text", (column) => column.notNull())
@@ -88,6 +89,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       sql`char_length(agent_name) between 1 and 128`,
     )
     .addCheckConstraint("subagent_executions_step_index_valid", sql`step_index >= 0`)
+    .addCheckConstraint(
+      "subagent_executions_request_sha256_valid",
+      sql`request_sha256 ~ '^[0-9a-f]{64}$'`,
+    )
     .addCheckConstraint(
       "subagent_executions_context_mode_valid",
       sql`context_mode in ('fresh', 'fork')`,

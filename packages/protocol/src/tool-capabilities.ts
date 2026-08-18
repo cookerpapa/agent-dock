@@ -12,7 +12,7 @@ export const CloudToolNameSchema = Type.Union([
 export type CloudToolName = (typeof CLOUD_TOOL_NAMES)[number];
 
 export const CloudToolCapabilitySnapshotSchema = Type.Array(CloudToolNameSchema, {
-  minItems: 1,
+  minItems: 0,
   maxItems: CLOUD_TOOL_NAMES.length,
   uniqueItems: true,
 });
