@@ -438,9 +438,7 @@ export class SupervisorHostRuntime {
             .where("tenant_id", "=", command.payload.tenantId)
             .where("id", "=", command.payload.sessionId)
             .executeTakeFirstOrThrow();
-          if (session.session_kind === "subagent" || this.#config.maxConcurrentSessions < 2) {
-            return [];
-          }
+          if (session.session_kind === "subagent") return [];
           return [
             await createPiSubagentsCloudTool({
               context: {
