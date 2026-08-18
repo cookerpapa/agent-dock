@@ -569,6 +569,7 @@ if (application.changeOwnership) {
 const environment = [
   `PI_CLOUD_RUNTIME_DIRECTORY=${runtimeDirectory}`,
   `PI_CLOUD_IMAGE_VERSION=${imageVersion}`,
+  "NPM_CONFIG_REGISTRY=https://registry.npmjs.org",
   `PI_CLOUD_HTTP_BIND_ADDRESS=${bindAddress}`,
   `PI_CLOUD_HTTP_PORT=${httpPort()}`,
   `PI_CLOUD_APPLICATION_UID=${String(application.uid)}`,

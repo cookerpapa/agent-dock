@@ -12,6 +12,7 @@ x-application-build-args: &application-build-args
   HTTP_PROXY: ${HTTP_PROXY:-}
   HTTPS_PROXY: ${HTTPS_PROXY:-}
   NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}
+  NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}
 
 x-application-security: &application-security
   read_only: true
