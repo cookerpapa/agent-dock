@@ -20,11 +20,19 @@ LABEL org.opencontainers.image.title="PiCloud Tool Broker" \
       org.opencontainers.image.version="${PI_CLOUD_VERSION}" \
       org.opencontainers.image.revision="${PI_CLOUD_REVISION}"
 ENV NODE_ENV=production
-RUN set -eu; \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    set -eu; \
+    rm -f /etc/apt/apt.conf.d/docker-clean; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i \
+        -e 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' \
+        -e 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' \
+        /etc/apt/sources.list.d/debian.sources; \
+    fi; \
     installed=0; \
     attempt=1; \
     while [ "$attempt" -le 3 ]; do \
-      rm -rf /var/lib/apt/lists/*; \
       if apt-get \
           -o Acquire::Retries=3 \
           -o Acquire::http::Timeout=30 \
@@ -40,8 +48,7 @@ RUN set -eu; \
       sleep "$((attempt * 2))"; \
       attempt="$((attempt + 1))"; \
     done; \
-    test "$installed" = 1; \
-    rm -rf /var/lib/apt/lists/*
+    test "$installed" = 1
 WORKDIR /app
 COPY --from=dependencies /app/node_modules /app/node_modules
 COPY --from=dependencies /app/packages/tool-broker/node_modules /app/packages/tool-broker/node_modules
