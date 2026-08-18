@@ -1,0 +1,50 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-08-18T17:02:14.948Z",
+  "model": {
+    "provider": "deepseek",
+    "modelId": "deepseek-v4-flash"
+  },
+  "parentSessionId": "d8d018d7-fc99-434a-9378-088a529ebe3e",
+  "modes": {
+    "none": {
+      "executionId": "6b97d5a4-948f-4cd3-82f6-4465866a21ce",
+      "workspaceMode": "none",
+      "state": "completed",
+      "childSessionId": "e9eb5b28-0a2d-4507-813e-f8fb17ef375d",
+      "childRunId": "fd7a8012-0ea6-4368-bdac-129f9eea0767",
+      "parentWorkspaceId": "460f5e5d-8153-499f-9cb8-6c019db216f9",
+      "childWorkspaceId": "460f5e5d-8153-499f-9cb8-6c019db216f9",
+      "childRunState": "completed",
+      "workspaceKind": "user",
+      "workspaceDeleted": false,
+      "patchContainsIsolatedFile": false
+    },
+    "shared": {
+      "executionId": "cb432233-6258-4487-9edf-b23f6a40cbcc",
+      "workspaceMode": "shared_serialized",
+      "state": "completed",
+      "childSessionId": "0cb54cfa-d80b-4183-9c41-9d65b0791352",
+      "childRunId": "0eaf2948-6cd3-4ebc-98cd-c89a58730b26",
+      "parentWorkspaceId": "460f5e5d-8153-499f-9cb8-6c019db216f9",
+      "childWorkspaceId": "460f5e5d-8153-499f-9cb8-6c019db216f9",
+      "childRunState": "completed",
+      "workspaceKind": "user",
+      "workspaceDeleted": false,
+      "patchContainsIsolatedFile": false
+    },
+    "isolated": {
+      "executionId": "e7de1d9e-6032-4938-bda4-8e619cc4e953",
+      "workspaceMode": "isolated",
+      "state": "completed",
+      "childSessionId": "0a55fd4f-9197-4dfa-b747-8c2a059b545c",
+      "childRunId": "8745bb26-0940-4d0f-a38d-1fb20ee5783d",
+      "parentWorkspaceId": "460f5e5d-8153-499f-9cb8-6c019db216f9",
+      "childWorkspaceId": "984da738-9821-4c76-a307-7608c7246811",
+      "childRunState": "completed",
+      "workspaceKind": "subagent_isolated",
+      "workspaceDeleted": true,
+      "patchContainsIsolatedFile": true
+    }
+  }
+}

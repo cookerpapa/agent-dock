@@ -1134,6 +1134,27 @@ export class PostgresSubagentJobProvider {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) {
       throw new TypeError("Subagent preparation reaper limit is invalid");
     }
+    const terminal = await this.#database
+      .selectFrom("subagent_executions as execution")
+      .innerJoin("runs as child_run", (join) =>
+        join
+          .onRef("child_run.tenant_id", "=", "execution.tenant_id")
+          .onRef("child_run.id", "=", "execution.child_run_id"),
+      )
+      .select(["execution.tenant_id as tenantId", "execution.id"])
+      .where("execution.state", "in", ["queued", "running"])
+      .where("child_run.state", "in", [
+        "completed",
+        "failed",
+        "cancelled",
+        "timed_out",
+        "superseded",
+      ])
+      .orderBy("child_run.settled_at", "asc")
+      .limit(limit)
+      .execute();
+    for (const row of terminal) await this.status(row.tenantId, row.id);
+
     const stale = await this.#database
       .selectFrom("subagent_executions")
       .select([
@@ -1148,7 +1169,7 @@ export class PostgresSubagentJobProvider {
       .orderBy("updated_at", "asc")
       .limit(limit)
       .execute();
-    let reaped = 0;
+    let reaped = terminal.length;
     for (const row of stale) {
       await this.#failPreparation(
         row.tenantId,

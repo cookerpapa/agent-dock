@@ -418,6 +418,15 @@ describe.sequential("PostgresSubagentJobProvider", () => {
         .where("id", "=", started.childRunId)
         .executeTakeFirstOrThrow(),
     ).resolves.toEqual({ state: "cancelled" });
+    await database
+      .updateTable("subagent_executions")
+      .set({ state: "running", settled_at: null, updated_at: new Date(0) })
+      .where("id", "=", started.executionId)
+      .executeTakeFirstOrThrow();
+    await expect(provider.reapStalePreparations()).resolves.toBeGreaterThanOrEqual(1);
+    await expect(provider.status(tenantId, started.executionId)).resolves.toMatchObject({
+      state: "cancelled",
+    });
   });
 
   it("rejects dispatch after the parent fencing authority changes", async () => {
