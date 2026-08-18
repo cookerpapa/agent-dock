@@ -44,7 +44,6 @@ RUN set -eu; \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=dependencies /app/node_modules /app/node_modules
-COPY --from=dependencies /app/packages/tool-broker/node_modules /app/packages/tool-broker/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 COPY packages/database/package.json packages/database/package.json

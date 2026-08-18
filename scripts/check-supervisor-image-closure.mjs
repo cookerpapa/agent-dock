@@ -54,13 +54,21 @@ for (const name of [...closure].sort()) {
   );
 }
 
-for (const runtimeDependency of ["sandbox-supervisor", "tool-broker"]) {
-  const dependencyNodeModulesCopy = `COPY --from=dependencies /app/packages/${runtimeDependency}/node_modules /app/packages/${runtimeDependency}/node_modules`;
-  assert(
-    dockerfile.includes(dependencyNodeModulesCopy),
-    `Supervisor image must preserve nested production dependencies for ${runtimeDependency}`,
-  );
-}
+assert.equal(
+  dockerfile.split("COPY --from=dependencies /app/node_modules /app/node_modules").length - 1,
+  1,
+  "Supervisor image must copy the complete installed production dependency tree",
+);
+assert(
+  !dockerfile.includes("/app/packages/sandbox-supervisor/node_modules") &&
+    !dockerfile.includes("/app/packages/tool-broker/node_modules"),
+  "Supervisor image must not assume npm creates per-Workspace node_modules directories",
+);
+assert(
+  dockerfile.includes("await import('pi-subagents')") &&
+    dockerfile.includes("await import('@earendil-works/pi-coding-agent')"),
+  "Supervisor image must verify the pinned Subagent runtime closure",
+);
 
 const dockerfileCandidates = [
   resolve(repositoryRoot, "deploy", "cubesandbox", "Dockerfile.tool"),

@@ -37,8 +37,6 @@ LABEL org.opencontainers.image.title="PiCloud trusted Supervisor host" \
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=dependencies /app/node_modules /app/node_modules
-COPY --from=dependencies /app/packages/sandbox-supervisor/node_modules /app/packages/sandbox-supervisor/node_modules
-COPY --from=dependencies /app/packages/tool-broker/node_modules /app/packages/tool-broker/node_modules
 COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 COPY packages/control-plane/package.json packages/control-plane/package.json
@@ -69,7 +67,9 @@ COPY packages/supervisor-host/tsconfig.json packages/supervisor-host/tsconfig.js
 COPY packages/supervisor-host/src packages/supervisor-host/src
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
-RUN cd /app/packages/tool-broker \
+RUN cd /app/packages/sandbox-supervisor \
+    && node --input-type=module --eval "await import('pi-subagents'); await import('@earendil-works/pi-coding-agent')" \
+    && cd /app/packages/tool-broker \
     && node --input-type=module --eval "await import('undici')" \
     && rm -rf /usr/local/lib/node_modules/npm \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
