@@ -4,7 +4,10 @@ import { constants } from "node:fs";
 import { access, mkdir, open, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { workspaceVolumeId } from "../packages/tool-broker/src/index.ts";
+import {
+  OfficialCubeSandboxRuntimeClient,
+  workspaceVolumeId,
+} from "../packages/tool-broker/src/index.ts";
 import { PiCloudApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
@@ -51,6 +54,16 @@ const databaseUrl = new URL(
     )
   ).trim(),
 );
+const cluster = JSON.parse(
+  await readPrivate(
+    resolve(runtimeDirectory, "cubesandbox/cluster.json"),
+    64 * 1_024,
+    "Cube cluster evidence",
+  ),
+);
+const cubeApiKey = (
+  await readPrivate(resolve(runtimeDirectory, "secrets/cubesandbox-api-key"), 4_096, "Cube API key")
+).trim();
 const databaseUser = decodeURIComponent(databaseUrl.username);
 const databaseName = decodeURIComponent(databaseUrl.pathname.slice(1));
 const bindAddress = environment.PI_CLOUD_HTTP_BIND_ADDRESS;
@@ -104,6 +117,38 @@ async function psql(query) {
     "--command",
     query,
   ]);
+}
+
+async function retireHistoricalAcceptanceCubes() {
+  const rows = await psql(`
+    select id::text from sessions where title like 'Subagent production acceptance %'
+    union
+    select execution.child_session_id::text
+    from subagent_executions as execution
+    join sessions as parent on parent.id = execution.parent_session_id
+    where parent.title like 'Subagent production acceptance %'
+  `);
+  const acceptanceSessions = new Set(rows ? rows.split(/\r?\n/) : []);
+  if (acceptanceSessions.size === 0) return;
+  const cube = new OfficialCubeSandboxRuntimeClient({
+    apiUrl: `http://${cluster.api.host}:${String(cluster.api.port)}`,
+    apiKey: cubeApiKey,
+    proxyNodeIp: cluster.proxy.host,
+    proxyPort: cluster.proxy.port,
+    proxyScheme: "http",
+    sandboxDomain: cluster.sandboxDomain,
+    egressProxyIp: environment.PI_CLOUD_CUBESANDBOX_EGRESS_PROXY_HOST ?? "10.255.255.254",
+    requestTimeoutMs: 30_000,
+  });
+  try {
+    for (const sandbox of await cube.list()) {
+      if (acceptanceSessions.has(sandbox.metadata["picloud.session_id"] ?? "")) {
+        await cube.destroy(sandbox.sandboxId);
+      }
+    }
+  } finally {
+    await cube.close();
+  }
 }
 
 function wait(delayMs) {
@@ -195,6 +240,7 @@ async function executionEvidence(parentRunId) {
   return JSON.parse(value);
 }
 
+await retireHistoricalAcceptanceCubes();
 const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production tenant must use a real model");
 const suffix = `${Date.now().toString(36)}`;
