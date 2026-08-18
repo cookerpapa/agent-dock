@@ -42,6 +42,8 @@ type ExternalJobStartInput = Readonly<{
   sessionId?: string;
 }>;
 
+const ISOLATED_WORKSPACE_TASK_PREFIX = "[pi-cloud-workspace-mode:isolated]\n";
+
 const input = workerData as WorkerInput;
 const cloudShimPath = fileURLToPath(new URL("./pi-subagents-cloud-shim.cjs", import.meta.url));
 if (parentPort === null) throw new Error("Pi subagent cloud Worker requires a parent port");
@@ -134,9 +136,16 @@ function parseChildInvocation(value: unknown): ExternalJobStartInput {
   }
   const taskArgument = positionals.at(-1);
   if (taskArgument === undefined) throw new Error("Cloud Subagent task was missing");
-  const prompt = taskArgument.startsWith("@")
+  let prompt = taskArgument.startsWith("@")
     ? readFileSync(taskArgument.slice(1), "utf8")
     : taskArgument;
+  const isolationMarker = prompt.indexOf(ISOLATED_WORKSPACE_TASK_PREFIX);
+  const isolatedWorkspace = isolationMarker >= 0;
+  if (isolatedWorkspace) {
+    prompt = `${prompt.slice(0, isolationMarker)}${prompt.slice(
+      isolationMarker + ISOLATED_WORKSPACE_TASK_PREFIX.length,
+    )}`;
+  }
   const systemPromptFiles = [
     ...(values.get("--system-prompt") ?? []),
     ...(values.get("--append-system-prompt") ?? []),
@@ -168,7 +177,6 @@ function parseChildInvocation(value: unknown): ExternalJobStartInput {
       : values.has("--session")
         ? "fork"
         : "fresh";
-  const isolatedWorkspace = env.PI_SUBAGENT_CLOUD_WORKSPACE_MODE === "isolated";
   return {
     prompt,
     promptDigest: createHash("sha256").update(prompt, "utf8").digest("hex"),
@@ -195,6 +203,28 @@ function parseChildInvocation(value: unknown): ExternalJobStartInput {
     },
     sessionId: input.parentSessionId,
   };
+}
+
+function cloudWorkflowScript(script: string, defaultIsolated: boolean): string {
+  const marker = JSON.stringify(ISOLATED_WORKSPACE_TASK_PREFIX);
+  return [
+    `const __piCloudDefaultIsolated = ${String(defaultIsolated)};`,
+    `const __piCloudTaskMarker = ${marker};`,
+    "const __piCloudChild = (spec) => {",
+    "  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return spec;",
+    "  const isolated = spec.worktree === undefined ? __piCloudDefaultIsolated : spec.worktree === true;",
+    "  const task = isolated && typeof spec.task === 'string' ? __piCloudTaskMarker + spec.task : spec.task;",
+    "  return { ...spec, worktree: false, ...(task === undefined ? {} : { task }) };",
+    "};",
+    "const __piCloudRuns = Object.freeze({",
+    "  run: (key, spec) => runs.run(key, __piCloudChild(spec)),",
+    "  all: (specs) => runs.all(specs.map(__piCloudChild)),",
+    "  status: (keyOrRunId) => runs.status(keyOrRunId),",
+    "  ref: (result) => runs.ref(result),",
+    "  refs: (results) => runs.refs(results),",
+    "});",
+    `return await (async (runs) => { ${script}\n})(__piCloudRuns);`,
+  ].join("\n");
 }
 
 let directoriesForBridge: ReturnType<typeof prepareAgentDir> | undefined;
@@ -338,8 +368,6 @@ async function main(): Promise<void> {
   process.env.PI_CODING_AGENT_DIR = directories.agentDir;
   process.env.PI_SUBAGENTS_TEMP_ROOT = directories.stateDir;
   process.env.PI_SUBAGENT_PI_BINARY = directories.shimPath;
-  process.env.PI_SUBAGENT_CLOUD_WORKSPACE_MODE =
-    input.arguments.worktree === true ? "isolated" : "shared_serialized";
   process.env.PI_CLOUD_SUBAGENT_BRIDGE_SOCKET = directories.socketPath;
   const bridge = await startShimBridge(directories.socketPath);
   const extensionSpecifier: string = "pi-subagents";
@@ -427,6 +455,10 @@ async function main(): Promise<void> {
     }
     const argumentsForCloud = {
       ...input.arguments,
+      workflowScript: cloudWorkflowScript(
+        input.arguments.workflowScript,
+        input.arguments.worktree === true,
+      ),
       async: true,
       mission: false,
       chatProgress: "off",

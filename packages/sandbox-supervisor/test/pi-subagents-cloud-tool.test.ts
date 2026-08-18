@@ -125,8 +125,7 @@ describe("pi-subagents cloud Tool adapter", () => {
     await tool.execute(
       "tool-call-isolated",
       {
-        workflowScript: `return runs.run("isolated", {agent:"worker", task:"Try another implementation"})`,
-        worktree: true,
+        workflowScript: `return runs.run("isolated", {agent:"worker", task:"Try another implementation", worktree:true})`,
       },
       new AbortController().signal,
     );
