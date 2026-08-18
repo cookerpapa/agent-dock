@@ -642,6 +642,51 @@ describe("CubeSandbox Provider contract", () => {
     await provider.close();
   });
 
+  it("rotates Cube authority across a parent and child Session without comparing Session fences", async () => {
+    const runtime = new FakeCubeRuntimeClient();
+    const provider = new CubeSandboxProvider({
+      templateId: "pi-cloud-tool-v1",
+      imageRevision: "development",
+      webProxy: WEB_PROXY,
+      runtimeClient: runtime,
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
+    });
+    const parent = await provider.create({
+      activationId: ACTIVATION_ID,
+      assignment: { ...assignment, fencingToken: 41 },
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      policy: provider.defaultPolicy,
+    });
+    await provider.snapshot(parent, "10000000-0000-4000-8000-000000000051");
+
+    const childAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      sessionId: "session-cube-subagent",
+      commandId: "command-cube-subagent",
+      turnId: "turn-cube-subagent",
+      attemptId: "20000000-0000-4000-8000-000000000052",
+      leaseId: "20000000-0000-4000-8000-000000000053",
+      fencingToken: 1,
+    };
+    const child = await provider.rebind(parent, childAssignment);
+    await expect(provider.exec(child, operation(ACTIVATION_ID))).resolves.toMatchObject({
+      type: "tool_sandbox.operation_result",
+      exitCode: 0,
+    });
+    await provider.snapshot(child, "10000000-0000-4000-8000-000000000054");
+
+    const restored = await provider.rebind(child, { ...assignment, fencingToken: 41 });
+    await expect(provider.inspect(restored)).resolves.toMatchObject({ state: "running" });
+    const epochs = runtime.requests
+      .filter(({ input }) => input.path === "/v1/rebind")
+      .map(({ input }) => (input.body as { fencingToken: number }).fencingToken);
+    expect(epochs).toEqual([42, 43]);
+    expect(restored.assignment.sessionId).toBe(assignment.sessionId);
+    await provider.destroy(restored);
+    await provider.close();
+  });
+
   it("captures a lightweight persistent Volume reference for a Cube Workspace", async () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({

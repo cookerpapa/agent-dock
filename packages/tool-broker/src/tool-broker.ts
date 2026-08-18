@@ -34,6 +34,7 @@ import {
 } from "./sandbox-provider.ts";
 import {
   InMemorySandboxActivationStateRepository,
+  type SandboxActivationReservation,
   type SandboxActivationStateRepository,
 } from "./activation-state-repository.ts";
 
@@ -68,9 +69,11 @@ type ManagedActivation = {
   capabilityDigest: Buffer;
   allowedTools: ReadonlySet<CloudToolName>;
   spec: Parameters<SandboxProvider["create"]>[0];
+  reservation: SandboxActivationReservation;
   handle?: SandboxHandle;
   materializing?: Promise<SandboxHandle>;
   materializedForCurrentAssignment: boolean;
+  activeOperations: number;
   operations: Map<
     string,
     Readonly<{ requestSha256: string; result: Promise<ToolSandboxOperationResponse> }>
@@ -86,6 +89,11 @@ type WarmActivation = {
   expiresAt: number | null;
   lastUsedAt: number;
 };
+
+type SuspendedActivation = Readonly<{
+  activation: ManagedActivation;
+  reservation: SandboxActivationReservation;
+}>;
 
 export type WorkspaceTerminalOpenInput = Readonly<{
   tenantId: string;
@@ -292,6 +300,7 @@ export class ToolBroker {
   readonly #imageRevision: string;
   readonly #activations = new Map<string, ManagedActivation>();
   readonly #warm = new Map<string, WarmActivation>();
+  readonly #suspended = new Map<string, SuspendedActivation>();
   readonly #terminals = new Map<string, ManagedWorkspaceTerminal>();
   readonly #admitted = new Map<string, ToolSandboxAssignment>();
   readonly #admissionWaiters: AdmissionWaiter[] = [];
@@ -521,12 +530,33 @@ export class ToolBroker {
       );
     }
     const key = workspaceKey(request.assignment);
-    if ([...this.#activations.values()].some((entry) => workspaceKey(entry.assignment) === key)) {
-      throw new ToolBrokerError(
-        "tool_sandbox_workspace_busy",
-        "Workspace already has a Tool Sandbox reservation",
-        true,
-      );
+    const activeWorkspace = [...this.#activations.entries()].find(
+      ([, entry]) => workspaceKey(entry.assignment) === key,
+    );
+    let delegatedParent: ManagedActivation | undefined;
+    if (activeWorkspace !== undefined) {
+      const [activeId, active] = activeWorkspace;
+      const delegated = await this.#stateRepository.allowsDelegatedSandboxHandoff({
+        tenantId: request.assignment.tenantId,
+        workspaceId: request.assignment.workspaceId,
+        currentSessionId: active.assignment.sessionId,
+        nextSessionId: request.assignment.sessionId,
+      });
+      if (!delegated || active.activeOperations !== 0 || active.materializing !== undefined) {
+        throw new ToolBrokerError(
+          "tool_sandbox_workspace_busy",
+          "Workspace already has a Tool Sandbox reservation",
+          true,
+        );
+      }
+      if (active.handle !== undefined && active.materializedForCurrentAssignment) {
+        await this.#provider.snapshot(active.handle, request.requestId);
+        active.materializedForCurrentAssignment = false;
+      }
+      delegatedParent = active;
+      this.#activations.delete(activeId);
+      if (this.#admitted.has(activeId)) this.#admitted.set(activeId, request.assignment);
+      this.#suspended.set(key, { activation: active, reservation: active.reservation });
     }
 
     let inherited = this.#warm.get(key);
@@ -535,7 +565,7 @@ export class ToolBroker {
       inherited !== undefined &&
       inherited.handle.assignment.sessionId !== request.assignment.sessionId
     ) {
-      crossSessionHandoffAllowed = await this.#stateRepository.allowsPersistentConversationHandoff({
+      crossSessionHandoffAllowed = await this.#stateRepository.allowsDelegatedSandboxHandoff({
         tenantId: request.assignment.tenantId,
         workspaceId: request.assignment.workspaceId,
         currentSessionId: inherited.handle.assignment.sessionId,
@@ -546,7 +576,15 @@ export class ToolBroker {
       inherited?.retention === "persistent" &&
       inherited.handle.assignment.sessionId !== request.assignment.sessionId
     ) {
-      if (!crossSessionHandoffAllowed) {
+      const persistentHandoffAllowed =
+        crossSessionHandoffAllowed ||
+        (await this.#stateRepository.allowsPersistentConversationHandoff({
+          tenantId: request.assignment.tenantId,
+          workspaceId: request.assignment.workspaceId,
+          currentSessionId: inherited.handle.assignment.sessionId,
+          nextSessionId: request.assignment.sessionId,
+        }));
+      if (!persistentHandoffAllowed) {
         throw new ToolBrokerError(
           "tool_sandbox_workspace_pinned",
           "Workspace is pinned to another persistent Sandbox conversation",
@@ -567,7 +605,9 @@ export class ToolBroker {
     }
     if (inherited !== undefined) this.#warm.delete(key);
 
-    const activationId = validActivationId(inherited?.handle.activationId ?? this.#idGenerator());
+    const activationId = validActivationId(
+      delegatedParent?.spec.activationId ?? inherited?.handle.activationId ?? this.#idGenerator(),
+    );
     if (this.#activations.has(activationId)) {
       throw new ToolBrokerError(
         "tool_sandbox_identity_collision",
@@ -588,7 +628,7 @@ export class ToolBroker {
         : { workspaceRestore: request.workspaceRestore }),
       policy: this.#provider.defaultPolicy ?? DEFAULT_TOOL_SANDBOX_POLICY,
     } as const;
-    const reservation = await this.#stateRepository.reserve({
+    const reservationInput: SandboxActivationReservation = {
       activationId,
       assignment: request.assignment,
       capabilitySha256,
@@ -606,7 +646,24 @@ export class ToolBroker {
       ...(request.workspaceRevision === undefined
         ? {}
         : { workspaceRevision: request.workspaceRevision }),
+    };
+    const reservation = await this.#stateRepository.reserve(reservationInput).catch((error) => {
+      if (delegatedParent !== undefined) {
+        this.#suspended.delete(key);
+        this.#activations.set(delegatedParent.spec.activationId, delegatedParent);
+        if (this.#admitted.has(delegatedParent.spec.activationId)) {
+          this.#admitted.set(delegatedParent.spec.activationId, delegatedParent.assignment);
+        }
+      }
+      throw error;
     });
+    if (reservation.status !== "reserved" && delegatedParent !== undefined) {
+      this.#suspended.delete(key);
+      this.#activations.set(delegatedParent.spec.activationId, delegatedParent);
+      if (this.#admitted.has(delegatedParent.spec.activationId)) {
+        this.#admitted.set(delegatedParent.spec.activationId, delegatedParent.assignment);
+      }
+    }
     if (reservation.status === "redirect") {
       throw new ToolBrokerOwnerRedirectError(reservation.ownerBaseUrl);
     }
@@ -638,8 +695,14 @@ export class ToolBroker {
       capabilityDigest: Buffer.from(capabilitySha256, "hex"),
       allowedTools: new Set(allowedTools),
       spec,
-      ...(inherited === undefined ? {} : { handle: inherited.handle }),
+      reservation: reservationInput,
+      ...(delegatedParent?.handle === undefined
+        ? inherited === undefined
+          ? {}
+          : { handle: inherited.handle }
+        : { handle: delegatedParent.handle }),
       materializedForCurrentAssignment: false,
+      activeOperations: 0,
       operations: new Map(),
       seenCaptureIds: new Set(),
     });
@@ -651,7 +714,8 @@ export class ToolBroker {
       ownerBaseUrl: this.#ownerBaseUrl,
       capability,
       workspaceRoot: "/workspace",
-      continuity: inherited === undefined ? "cold_restore" : "warm_reuse",
+      continuity:
+        delegatedParent === undefined && inherited === undefined ? "cold_restore" : "warm_reuse",
     };
   }
 
@@ -718,19 +782,20 @@ export class ToolBroker {
       );
     }
     const durable = (async (): Promise<ToolSandboxOperationResponse> => {
-      const started = await this.#stateRepository.beginOperation(
-        request.activationId,
-        request.operationId,
-        requestSha256,
-      );
-      if (started !== "started") {
-        throw new ToolBrokerError(
-          "tool_operation_outcome_unknown",
-          "Tool operation may already have produced side effects",
-          false,
-        );
-      }
+      activation.activeOperations += 1;
       try {
+        const started = await this.#stateRepository.beginOperation(
+          request.activationId,
+          request.operationId,
+          requestSha256,
+        );
+        if (started !== "started") {
+          throw new ToolBrokerError(
+            "tool_operation_outcome_unknown",
+            "Tool operation may already have produced side effects",
+            false,
+          );
+        }
         const handle = await this.#materialize(request.activationId, activation, signal);
         const response = await this.#provider.exec(handle, request, signal);
         await this.#stateRepository.settleOperation(request.operationId, "succeeded");
@@ -744,6 +809,8 @@ export class ToolBroker {
           )
           .catch(() => undefined);
         throw error;
+      } finally {
+        activation.activeOperations -= 1;
       }
     })();
     activation.operations.set(request.operationId, { requestSha256, result: durable });
@@ -795,8 +862,22 @@ export class ToolBroker {
         }
       }
     }
+    const key = workspaceKey(request.assignment);
+    if (this.#suspended.has(key)) {
+      if (!retainRequested && handle !== undefined) {
+        await this.#provider.stop(handle).catch(() => undefined);
+        handle = undefined;
+      }
+      await this.#restoreSuspended(key, handle);
+      return {
+        toolBrokerProtocolVersion: 1,
+        type: "tool_sandbox.released",
+        requestId: request.requestId,
+        activationId: request.activationId,
+        retained: handle !== undefined,
+      };
+    }
     if (retainRequested && handle !== undefined && this.#provider.supportsWarmRebind !== false) {
-      const key = workspaceKey(request.assignment);
       const previous = this.#warm.get(key);
       if (previous !== undefined && previous.handle.runtimeId !== handle.runtimeId) {
         await this.#discardWarm(key, previous);
@@ -860,6 +941,12 @@ export class ToolBroker {
       activation.materializing === undefined
         ? activation.handle
         : await activation.materializing.catch(() => undefined);
+    const key = workspaceKey(assignment);
+    if (this.#suspended.has(key)) {
+      if (handle !== undefined) await this.#provider.stop(handle).catch(() => undefined);
+      await this.#restoreSuspended(key, undefined);
+      return;
+    }
     if (handle !== undefined) {
       await this.#provider.stop(handle);
       this.#releaseAdmission(handle.activationId);
@@ -1132,6 +1219,50 @@ export class ToolBroker {
     } finally {
       delete activation.materializing;
     }
+  }
+
+  async #restoreSuspended(key: string, handle: SandboxHandle | undefined): Promise<boolean> {
+    const suspended = this.#suspended.get(key);
+    if (suspended === undefined) return false;
+    let restoredHandle: SandboxHandle | undefined;
+    if (handle !== undefined) {
+      try {
+        restoredHandle = await this.#provider.rebind(handle, suspended.activation.assignment);
+      } catch {
+        await this.#provider.stop(handle).catch(() => undefined);
+      }
+    }
+    let reservation: Awaited<ReturnType<SandboxActivationStateRepository["reserve"]>>;
+    try {
+      reservation = await this.#stateRepository.reserve(suspended.reservation);
+    } catch (error: unknown) {
+      if (restoredHandle !== undefined)
+        await this.#provider.stop(restoredHandle).catch(() => undefined);
+      this.#suspended.delete(key);
+      this.#releaseAdmission(suspended.activation.spec.activationId);
+      throw error;
+    }
+    if (reservation.status !== "reserved") {
+      if (restoredHandle !== undefined)
+        await this.#provider.stop(restoredHandle).catch(() => undefined);
+      this.#suspended.delete(key);
+      this.#releaseAdmission(suspended.activation.spec.activationId);
+      throw new ToolBrokerError(
+        "tool_sandbox_parent_restore_failed",
+        "Parent Tool Sandbox authority could not be restored after Subagent execution",
+        true,
+      );
+    }
+    if (restoredHandle === undefined) delete suspended.activation.handle;
+    else suspended.activation.handle = restoredHandle;
+    suspended.activation.materializedForCurrentAssignment = restoredHandle !== undefined;
+    delete suspended.activation.materializing;
+    this.#suspended.delete(key);
+    this.#activations.set(suspended.activation.spec.activationId, suspended.activation);
+    if (this.#admitted.has(suspended.activation.spec.activationId)) {
+      this.#admitted.set(suspended.activation.spec.activationId, suspended.activation.assignment);
+    }
+    return true;
   }
 
   async #enforceWarmLimit(): Promise<void> {

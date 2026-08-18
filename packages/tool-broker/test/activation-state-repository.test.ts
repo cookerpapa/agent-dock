@@ -167,9 +167,9 @@ describe("PostgreSQL Tool Broker ownership", () => {
         supervisorId: "supervisor-reservation",
         bootId: "20000000-0000-4000-8000-000000000006",
         sandboxId: "20000000-0000-4000-8000-000000000007",
-        commandId: "command-reservation",
+        commandId: "20000000-0000-4000-8000-000000000031",
         sessionId: rootSessionId,
-        turnId: "turn-reservation",
+        turnId: forkTurnId,
         attemptId: "20000000-0000-4000-8000-000000000008",
         leaseId: "20000000-0000-4000-8000-000000000009",
         fencingToken: 1,
@@ -210,6 +210,230 @@ describe("PostgreSQL Tool Broker ownership", () => {
         .where("terminal_id", "=", "20000000-0000-4000-8000-000000000021")
         .executeTakeFirstOrThrow(),
     ).resolves.toEqual({ state: "released" });
+
+    const delegatedSessionId = "20000000-0000-4000-8000-000000000017";
+    const environmentId = "20000000-0000-4000-8000-000000000030";
+    const parentCommandId = "20000000-0000-4000-8000-000000000031";
+    const parentRunId = "20000000-0000-4000-8000-000000000032";
+    const childTurnId = "20000000-0000-4000-8000-000000000033";
+    const childCommandId = "20000000-0000-4000-8000-000000000034";
+    const childRunId = "20000000-0000-4000-8000-000000000035";
+    const childAttemptId = "20000000-0000-4000-8000-000000000037";
+    await database
+      .insertInto("environment_versions")
+      .values({
+        id: environmentId,
+        tenant_id: tenantId,
+        project_id: projectId,
+        version_number: 1,
+        profile_key: "pi-cloud-fullstack",
+        profile_version: "1",
+        image_revision: "test",
+        spec_sha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+        state: "validated",
+        active: true,
+        validated_at: new Date(),
+      })
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto("sessions")
+      .values({
+        id: delegatedSessionId,
+        tenant_id: tenantId,
+        project_id: projectId,
+        workspace_id: workspaceId,
+        desired_model_profile_id: profileId,
+        state: "running",
+        session_kind: "subagent",
+        workspace_snapshot_key: null,
+      })
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto("turns")
+      .values({
+        id: childTurnId,
+        tenant_id: tenantId,
+        session_id: delegatedSessionId,
+        state: "running",
+        input_kind: "prompt",
+        input_text: "Inspect the shared Workspace",
+        model_profile_id: profileId,
+        provider: "test",
+        model_id: "test-model",
+        thinking_level: "off",
+        credential_binding_id: credentialId,
+        credential_binding_version: 1,
+        started_at: new Date(),
+      })
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto("commands")
+      .values([
+        {
+          id: parentCommandId,
+          tenant_id: tenantId,
+          session_id: rootSessionId,
+          turn_id: forkTurnId,
+          idempotency_key: "delegated-parent",
+          kind: "turn.execute" as const,
+          state: "acknowledged" as const,
+          mailbox_position: 1,
+          payload: {},
+          dispatched_at: new Date(),
+          acknowledged_at: new Date(),
+        },
+        {
+          id: childCommandId,
+          tenant_id: tenantId,
+          session_id: delegatedSessionId,
+          turn_id: childTurnId,
+          idempotency_key: "delegated-child",
+          kind: "turn.execute" as const,
+          state: "acknowledged" as const,
+          mailbox_position: 1,
+          payload: {},
+          dispatched_at: new Date(),
+          acknowledged_at: new Date(),
+        },
+      ])
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto("runs")
+      .values([
+        {
+          id: parentRunId,
+          tenant_id: tenantId,
+          project_id: projectId,
+          workspace_id: workspaceId,
+          session_id: rootSessionId,
+          turn_id: forkTurnId,
+          command_id: parentCommandId,
+          environment_version_id: environmentId,
+          idempotency_key: "delegated-parent",
+          state: "running" as const,
+          current_attempt_id: null,
+          attempt_count: 0,
+          started_at: new Date(),
+        },
+        {
+          id: childRunId,
+          tenant_id: tenantId,
+          project_id: projectId,
+          workspace_id: workspaceId,
+          session_id: delegatedSessionId,
+          turn_id: childTurnId,
+          command_id: childCommandId,
+          environment_version_id: environmentId,
+          idempotency_key: "delegated-child",
+          state: "queued" as const,
+          current_attempt_id: null,
+          attempt_count: 0,
+        },
+      ])
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto("run_attempts")
+      .values([
+        {
+          id: activation.assignment.attemptId,
+          tenant_id: tenantId,
+          run_id: parentRunId,
+          attempt_number: 1,
+          state: "running" as const,
+          claim_owner_id: "supervisor-reservation",
+          claim_expires_at: new Date(Date.now() + 60_000),
+          running_at: new Date(),
+        },
+        {
+          id: childAttemptId,
+          tenant_id: tenantId,
+          run_id: childRunId,
+          attempt_number: 1,
+          state: "running" as const,
+          claim_owner_id: "supervisor-reservation",
+          claim_expires_at: new Date(Date.now() + 60_000),
+          running_at: new Date(),
+        },
+      ])
+      .executeTakeFirstOrThrow();
+    await database
+      .updateTable("runs")
+      .set({ current_attempt_id: activation.assignment.attemptId, attempt_count: 1 })
+      .where("id", "=", parentRunId)
+      .executeTakeFirstOrThrow();
+    await database
+      .updateTable("runs")
+      .set({
+        state: "running",
+        current_attempt_id: childAttemptId,
+        attempt_count: 1,
+        started_at: new Date(),
+      })
+      .where("id", "=", childRunId)
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto("subagent_executions")
+      .values({
+        id: "20000000-0000-4000-8000-000000000036",
+        tenant_id: tenantId,
+        parent_session_id: rootSessionId,
+        parent_run_id: parentRunId,
+        parent_attempt_id: activation.assignment.attemptId,
+        parent_tool_call_id: "subagent-shared",
+        workflow_run_id: "workflow-shared",
+        step_index: 0,
+        request_sha256: "f".repeat(64),
+        child_session_id: delegatedSessionId,
+        child_run_id: childRunId,
+        agent_name: "scout",
+        context_mode: "fork",
+        workspace_mode: "shared_serialized",
+        state: "queued",
+      })
+      .executeTakeFirstOrThrow();
+
+    await expect(repository.reserve(activation)).resolves.toEqual({ status: "reserved" });
+    await repository.setActivationState(activation.activationId, "active");
+    const childActivation = {
+      ...activation,
+      assignment: {
+        ...activation.assignment,
+        sessionId: delegatedSessionId,
+        turnId: childTurnId,
+        attemptId: childAttemptId,
+        leaseId: "20000000-0000-4000-8000-000000000038",
+        fencingToken: 2,
+      },
+      capabilitySha256: "1".repeat(64),
+      turnContextSha256: "2".repeat(64),
+      attemptContextSha256: "3".repeat(64),
+    } as const;
+    await expect(repository.reserve(childActivation)).resolves.toEqual({ status: "reserved" });
+    await expect(
+      database
+        .selectFrom("tool_broker_activations")
+        .select(["activation_id", "session_id", "capability_sha256", "state"])
+        .where("activation_id", "=", activation.activationId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({
+      activation_id: activation.activationId,
+      session_id: delegatedSessionId,
+      capability_sha256: childActivation.capabilitySha256,
+      state: "reserved",
+    });
+    await repository.setActivationState(activation.activationId, "active");
+    await expect(repository.reserve(activation)).resolves.toEqual({ status: "reserved" });
+    await expect(
+      database
+        .selectFrom("tool_broker_activations")
+        .select(["session_id", "capability_sha256", "state"])
+        .where("activation_id", "=", activation.activationId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({
+      session_id: rootSessionId,
+      capability_sha256: activation.capabilitySha256,
+      state: "reserved",
+    });
   }, 15_000);
 
   it("fences an expired replica before a surviving owner stays Ready", async () => {

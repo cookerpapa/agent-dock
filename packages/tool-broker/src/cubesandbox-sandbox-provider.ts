@@ -141,6 +141,7 @@ type CubeActivation = {
   seenCaptureIds: Set<string>;
   bindingSha256: string;
   handoffSecret: string;
+  authorityEpoch: number;
   state: "running" | "quiesced" | "idle";
   volumeId: string;
 };
@@ -250,14 +251,13 @@ function physicalBindingSha256(
   environment: SandboxCreateSpec["environment"],
 ): string {
   return createHash("sha256")
-    .update("pi-cloud.cubesandbox-binding.v1\0")
+    .update("pi-cloud.cubesandbox-binding.v2\0")
     .update(
       JSON.stringify({
         activationId,
         tenantId: assignment.tenantId,
         projectId: assignment.projectId,
         workspaceId: assignment.workspaceId,
-        sessionId: assignment.sessionId,
         environmentVersionId: environment.environmentVersionId,
         specSha256: environment.specSha256,
         recipeSha256: environment.recipeSha256,
@@ -342,7 +342,6 @@ function metadataMatchesPhysicalBinding(
     current.tenantId === assignment.tenantId &&
     current.projectId === assignment.projectId &&
     current.workspaceId === assignment.workspaceId &&
-    current.sessionId === assignment.sessionId &&
     current.bindingSha256 === bindingSha256
   );
 }
@@ -360,8 +359,7 @@ function metadataMatchesOrphanIdentity(
     current?.activationId === activationId &&
     current.tenantId === assignment.tenantId &&
     current.projectId === assignment.projectId &&
-    current.workspaceId === assignment.workspaceId &&
-    current.sessionId === assignment.sessionId
+    current.workspaceId === assignment.workspaceId
   );
 }
 
@@ -730,6 +728,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         seenCaptureIds: new Set(),
         bindingSha256,
         handoffSecret: authoritySecret,
+        authorityEpoch: spec.assignment.fencingToken,
         state: "running",
         volumeId,
       });
@@ -762,8 +761,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       assignment.tenantId !== handle.assignment.tenantId ||
       assignment.projectId !== handle.assignment.projectId ||
       assignment.workspaceId !== handle.assignment.workspaceId ||
-      assignment.sessionId !== handle.assignment.sessionId ||
-      assignment.fencingToken <= handle.assignment.fencingToken
+      activation.authorityEpoch >= Number.MAX_SAFE_INTEGER
     ) {
       throw new ToolBrokerError(
         "cubesandbox_rebind_identity_invalid",
@@ -772,6 +770,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       );
     }
     const nextSecret = handoffSecret();
+    const nextAuthorityEpoch = activation.authorityEpoch + 1;
     try {
       const response = record(
         await this.#client.request(activation.instance, {
@@ -780,7 +779,7 @@ export class CubeSandboxProvider implements SandboxProvider {
           body: {
             activationId: handle.activationId,
             handoffSecret: nextSecret,
-            fencingToken: assignment.fencingToken,
+            fencingToken: nextAuthorityEpoch,
             bindingSha256: activation.bindingSha256,
           },
           timeoutMs: this.#readyTimeoutMs,
@@ -789,7 +788,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         }),
         "CubeSandbox rebind",
       );
-      if (response.rebound !== true || response.fencingToken !== assignment.fencingToken) {
+      if (response.rebound !== true || response.fencingToken !== nextAuthorityEpoch) {
         throw new ToolBrokerError(
           "cubesandbox_rebind_invalid",
           "CubeSandbox warm rebind did not acknowledge the new fence",
@@ -813,6 +812,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       const rebound: SandboxHandle = Object.freeze({ ...handle, assignment });
       activation.handle = rebound;
       activation.handoffSecret = nextSecret;
+      activation.authorityEpoch = nextAuthorityEpoch;
       activation.toolchain = toolchain;
       activation.state = "running";
       activation.seenOperationIds.clear();
@@ -1030,7 +1030,7 @@ export class CubeSandboxProvider implements SandboxProvider {
       const frozenToolProcesses = raw.frozenToolProcesses;
       if (
         raw.sealed !== true ||
-        raw.fencingToken !== handle.assignment.fencingToken ||
+        raw.fencingToken !== activation.authorityEpoch ||
         !Array.isArray(frozenToolProcesses) ||
         frozenToolProcesses.some((entry) => {
           if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return true;
@@ -1470,7 +1470,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   ): NonNullable<Parameters<CubeSandboxRuntimeClient["request"]>[1]["authority"]> {
     return {
       handoffSecret: activation.handoffSecret,
-      fencingToken: activation.handle.assignment.fencingToken,
+      fencingToken: activation.authorityEpoch,
       bindingSha256: activation.bindingSha256,
     };
   }

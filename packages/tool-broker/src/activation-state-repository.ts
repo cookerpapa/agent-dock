@@ -67,6 +67,7 @@ export interface SandboxActivationStateRepository {
     detail?: { handle?: SandboxHandle; failureCode?: string },
   ): Promise<void>;
   claimOrphanedTerminals(limit: number): Promise<readonly OrphanedWorkspaceTerminal[]>;
+  allowsDelegatedSandboxHandoff(input: PersistentConversationHandoff): Promise<boolean>;
   allowsPersistentConversationHandoff(input: PersistentConversationHandoff): Promise<boolean>;
   setActivationState(
     activationId: string,
@@ -147,6 +148,9 @@ export class InMemorySandboxActivationStateRepository implements SandboxActivati
     return [];
   }
   async allowsPersistentConversationHandoff(): Promise<boolean> {
+    return false;
+  }
+  async allowsDelegatedSandboxHandoff(): Promise<boolean> {
     return false;
   }
   async setActivationState(
@@ -333,7 +337,7 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         ])
         .executeTakeFirst();
       if (existing !== undefined) {
-        if (existing.state === "warm" && existing.owner_instance_id !== this.#instanceId) {
+        if (existing.owner_instance_id !== this.#instanceId) {
           return { status: "redirect", ownerBaseUrl: existing.owner_base_url };
         }
         const delegatedHandoff =
@@ -357,16 +361,28 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
                   ]),
                 )
                 .executeTakeFirst();
-        const reusable =
+        const activeOperation = await transaction
+          .selectFrom("tool_broker_operations")
+          .select("operation_id")
+          .where("activation_id", "=", existing.activation_id)
+          .where("state", "=", "running")
+          .executeTakeFirst();
+        const ordinaryWarmReuse =
           existing.state === "warm" &&
-          (existing.session_id === input.assignment.sessionId || delegatedHandoff !== undefined) &&
+          existing.session_id === input.assignment.sessionId &&
           existing.workspace_revision === (input.workspaceRevision ?? null) &&
           existing.environment_sha256 === input.environmentSha256;
+        const delegatedReuse =
+          delegatedHandoff !== undefined &&
+          ["reserved", "materializing", "active", "warm"].includes(existing.state) &&
+          activeOperation === undefined &&
+          existing.environment_sha256 === input.environmentSha256;
+        const reusable = ordinaryWarmReuse || delegatedReuse;
         if (!reusable) return { status: "busy" };
         if (existing.activation_id !== input.activationId) {
           throw new SandboxActivationStateRepositoryError(
             "state_conflict",
-            "Warm activation identity changed inside one owner",
+            "Delegated activation identity changed inside one owner",
           );
         }
         await transaction
@@ -390,7 +406,7 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
           })
           .where("activation_id", "=", input.activationId)
           .where("owner_instance_id", "=", this.#instanceId)
-          .where("state", "=", "warm")
+          .where("state", "=", existing.state)
           .executeTakeFirstOrThrow();
         return { status: "reserved" };
       }
@@ -790,25 +806,7 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
     input: PersistentConversationHandoff,
   ): Promise<boolean> {
     if (input.currentSessionId === input.nextSessionId) return false;
-    const delegated = await this.#database
-      .selectFrom("subagent_executions")
-      .select("id")
-      .where("tenant_id", "=", input.tenantId)
-      .where("workspace_mode", "=", "shared_serialized")
-      .where((expression) =>
-        expression.or([
-          expression.and([
-            expression("parent_session_id", "=", input.currentSessionId),
-            expression("child_session_id", "=", input.nextSessionId),
-          ]),
-          expression.and([
-            expression("parent_session_id", "=", input.nextSessionId),
-            expression("child_session_id", "=", input.currentSessionId),
-          ]),
-        ]),
-      )
-      .executeTakeFirst();
-    if (delegated !== undefined) return true;
+    if (await this.allowsDelegatedSandboxHandoff(input)) return true;
     const result = await sql<{
       start_session_id: string;
       root_session_id: string;
@@ -854,6 +852,29 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
     const roots = new Map(result.rows.map((row) => [row.start_session_id, row.root_session_id]));
     const currentRoot = roots.get(input.currentSessionId);
     return currentRoot !== undefined && currentRoot === roots.get(input.nextSessionId);
+  }
+
+  async allowsDelegatedSandboxHandoff(input: PersistentConversationHandoff): Promise<boolean> {
+    if (input.currentSessionId === input.nextSessionId) return false;
+    const delegated = await this.#database
+      .selectFrom("subagent_executions")
+      .select("id")
+      .where("tenant_id", "=", input.tenantId)
+      .where("workspace_mode", "=", "shared_serialized")
+      .where((expression) =>
+        expression.or([
+          expression.and([
+            expression("parent_session_id", "=", input.currentSessionId),
+            expression("child_session_id", "=", input.nextSessionId),
+          ]),
+          expression.and([
+            expression("parent_session_id", "=", input.nextSessionId),
+            expression("child_session_id", "=", input.currentSessionId),
+          ]),
+        ]),
+      )
+      .executeTakeFirst();
+    return delegated !== undefined;
   }
 
   async setActivationState(

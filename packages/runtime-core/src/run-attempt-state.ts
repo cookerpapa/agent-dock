@@ -108,6 +108,11 @@ export async function transitionCurrentRunAttempt(
         .onRef("session_row.tenant_id", "=", "run.tenant_id")
         .onRef("session_row.id", "=", "run.session_id"),
     )
+    .leftJoin("subagent_executions as subagent_execution", (join) =>
+      join
+        .onRef("subagent_execution.tenant_id", "=", "run.tenant_id")
+        .onRef("subagent_execution.child_run_id", "=", "run.id"),
+    )
     .select([
       "run.state as runState",
       "run.row_version as runVersion",
@@ -115,6 +120,8 @@ export async function transitionCurrentRunAttempt(
       "run.workspace_id as workspaceId",
       "run.workspace_base_version_id as workspaceBaseVersionId",
       "session_row.forked_from_session_id as forkedFromSessionId",
+      "session_row.session_kind as sessionKind",
+      "subagent_execution.workspace_mode as subagentWorkspaceMode",
       "attempt.state as attemptState",
       "attempt.lease_id as leaseId",
       "attempt.fencing_token as fencingToken",
@@ -143,6 +150,9 @@ export async function transitionCurrentRunAttempt(
   const terminalRun = isTerminalRunState(runState);
   const terminalAttempt = isTerminalRunAttemptState(attemptState);
   const failureRequired = runState === "failed" || runState === "timed_out";
+  const advancesSharedWorkspace =
+    row.forkedFromSessionId === null &&
+    !(row.sessionKind === "subagent" && row.subagentWorkspaceMode === "shared_serialized");
   if (failureRequired !== (input.failure !== undefined)) {
     throw new TypeError("Run failure metadata does not match its target state");
   }
@@ -230,7 +240,7 @@ export async function transitionCurrentRunAttempt(
             "Settled Workspace version artifacts are missing",
           );
         }
-        if (row.forkedFromSessionId === null) {
+        if (advancesSharedWorkspace) {
           let workspaceUpdate = transaction
             .updateTable("workspaces")
             .set({
