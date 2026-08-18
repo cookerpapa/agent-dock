@@ -19,6 +19,11 @@ export {
   type RunTable,
   type SandboxRetirementReason,
   type SandboxRetirementState,
+  type SessionKind,
+  type SubagentContextMode,
+  type SubagentExecutionState,
+  type SubagentExecutionTable,
+  type SubagentWorkspaceMode,
   type ToolBrokerActivationState,
   type ToolBrokerInstanceState,
   type ToolBrokerOperationState,
@@ -103,6 +108,8 @@ export {
   downPiCloudRunQueueNotification,
   upRunToolCapabilitySnapshots,
   downRunToolCapabilitySnapshots,
+  upDurableSubagentExecutions,
+  downDurableSubagentExecutions,
 } from "./migrations/index.ts";
 
 export {

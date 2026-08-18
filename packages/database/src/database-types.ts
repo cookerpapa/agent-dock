@@ -73,6 +73,11 @@ export type EnvironmentValidationStatus = "validated" | "failed";
 export type EnvironmentOperationKind = "create" | "activate" | "rollback" | "validate";
 export type SandboxDomainState = "active" | "draining" | "disabled";
 export type SandboxRetentionPolicy = "ephemeral" | "persistent";
+export type SessionKind = "conversation" | "subagent";
+export type SubagentContextMode = "fresh" | "fork";
+export type SubagentWorkspaceMode = "none" | "shared_serialized" | "isolated";
+export type SubagentExecutionState =
+  "queued" | "running" | "completed" | "failed" | "cancelled" | "unknown";
 
 export interface SandboxDomainTable {
   id: string;
@@ -398,6 +403,7 @@ export interface SessionTable {
   desired_model_profile_id: string;
   state: SessionState;
   sandbox_retention_policy: Generated<SandboxRetentionPolicy>;
+  session_kind: Generated<SessionKind>;
   tool_capabilities: GeneratedJsonArray;
   workspace_snapshot_key: string | null;
   next_event_seq: GeneratedInt8;
@@ -413,6 +419,29 @@ export interface SessionTable {
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
   last_active_at: GeneratedTimestamp;
+}
+
+export interface SubagentExecutionTable {
+  id: string;
+  tenant_id: string;
+  parent_session_id: string;
+  parent_run_id: string;
+  parent_attempt_id: string;
+  parent_tool_call_id: string;
+  workflow_run_id: string;
+  step_index: number;
+  child_session_id: string;
+  child_run_id: string;
+  agent_name: string;
+  context_mode: SubagentContextMode;
+  workspace_mode: SubagentWorkspaceMode;
+  state: SubagentExecutionState;
+  result_entry_id: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+  settled_at: NullableTimestamp;
 }
 
 export interface ConversationForkOperationTable {
@@ -1095,6 +1124,7 @@ export interface Database {
   model_profiles: ModelProfileTable;
   tenant_model_credentials: TenantModelCredentialTable;
   sessions: SessionTable;
+  subagent_executions: SubagentExecutionTable;
   turns: TurnTable;
   runs: RunTable;
   run_attempts: RunAttemptTable;
