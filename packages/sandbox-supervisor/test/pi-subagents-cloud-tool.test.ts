@@ -131,6 +131,7 @@ describe("pi-subagents cloud Tool adapter", () => {
     );
     expect(starts).toHaveLength(1);
     expect(starts[0]?.options).toMatchObject({
+      contextMode: "fresh",
       workspaceMode: "isolated",
       requestedToolCapabilities: expect.arrayContaining(["read", "write", "edit", "bash"]),
     });

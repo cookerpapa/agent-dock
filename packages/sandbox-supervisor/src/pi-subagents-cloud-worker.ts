@@ -172,7 +172,7 @@ function parseChildInvocation(value: unknown): ExternalJobStartInput {
   const childIndex = Number(env.PI_SUBAGENT_CHILD_INDEX ?? 0);
   const stepIndex = Number.isSafeInteger(childIndex) && childIndex >= 0 ? childIndex : 0;
   const contextMode =
-    agent === "scout" || agent === "researcher"
+    isolatedWorkspace || agent === "scout" || agent === "researcher"
       ? "fresh"
       : values.has("--session")
         ? "fork"
