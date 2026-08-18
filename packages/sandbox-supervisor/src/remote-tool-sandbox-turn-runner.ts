@@ -3,6 +3,7 @@ import { activeTraceCarrier, withSpan, type PiCloudMetrics } from "@pi-cloud/obs
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   type ExecuteTurnCommandMessage,
+  modelSamplingHeaders,
   type ToolSandboxAssignment,
   type ToolSandboxCaptureResponse,
   type ToolSandboxCreateRequest,
@@ -641,6 +642,31 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         ...commonRunnerOptions,
         createAgentTools: ({ toolOutputDirectory, stepWorldState, captureSamplingStep }) => {
           if (activeSandbox === undefined) {
+            let stepSequence = 0;
+            let currentStep: Awaited<ReturnType<typeof captureSamplingStep>>["step"] | undefined;
+            let currentSamplingAttempt: number | undefined;
+            let currentSamplingHeadersIssued = false;
+            const captureStep = async (purpose: "agent" | "context_maintenance") => {
+              const captured = await captureSamplingStep(
+                async () => {
+                  const world = await stepWorldState.capture();
+                  const step = createCloudStepContext({
+                    sequence: (stepSequence += 1),
+                    turnContextSha256: cloudTurn.sha256,
+                    attemptContextSha256: cloudAttempt.sha256,
+                    allowedTools: cloudTurn.context.tools.names,
+                    activeTools: [],
+                    worldState: world.worldState,
+                  });
+                  return { step, modelMessages: world.modelMessages };
+                },
+                { publishEvent: purpose === "agent" },
+              );
+              currentStep = captured.step;
+              currentSamplingAttempt = captured.samplingAttempt;
+              currentSamplingHeadersIssued = false;
+              return captured;
+            };
             return {
               tools: [...orchestrationTools],
               async systemPrompt(base: string) {
@@ -652,11 +678,41 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                         "Use stable workflow keys and inspect every returned result.",
                     ].join("\n");
               },
-              async transformContext(messages) {
-                return messages;
+              async transformContext(messages, purpose = "agent") {
+                currentStep = undefined;
+                currentSamplingAttempt = undefined;
+                const captured = await captureStep(purpose);
+                const transformed = [...messages];
+                for (const message of captured.modelMessages) {
+                  const alreadyPresent = transformed.some(
+                    (candidate) =>
+                      candidate.role === "custom" &&
+                      candidate.customType === message.customType &&
+                      typeof candidate.details === "object" &&
+                      candidate.details !== null &&
+                      (candidate.details as { changeSha256?: unknown }).changeSha256 ===
+                        message.details.changeSha256,
+                  );
+                  if (!alreadyPresent) {
+                    transformed.push({ ...message, role: "custom", timestamp: Date.now() });
+                  }
+                }
+                return transformed;
               },
               async transformHeaders(headers = {}) {
-                return headers;
+                if (currentSamplingHeadersIssued) await captureStep("context_maintenance");
+                if (currentStep === undefined || currentSamplingAttempt === undefined) {
+                  throw new Error("Model request preceded its Cloud Step capture");
+                }
+                currentSamplingHeadersIssued = true;
+                return {
+                  ...headers,
+                  ...modelSamplingHeaders({
+                    stepSequence: currentStep.context.sequence,
+                    stepSha256: currentStep.sha256,
+                    samplingAttempt: currentSamplingAttempt,
+                  }),
+                };
               },
             };
           }
