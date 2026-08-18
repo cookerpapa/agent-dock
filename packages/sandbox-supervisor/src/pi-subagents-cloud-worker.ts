@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parentPort, workerData } from "node:worker_threads";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
@@ -42,6 +43,7 @@ type ExternalJobStartInput = Readonly<{
 }>;
 
 const input = workerData as WorkerInput;
+const cloudShimPath = fileURLToPath(new URL("./pi-subagents-cloud-shim.cjs", import.meta.url));
 if (parentPort === null) throw new Error("Pi subagent cloud Worker requires a parent port");
 const abort = new AbortController();
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
@@ -84,48 +86,7 @@ function prepareAgentDir(): {
     { encoding: "utf8", mode: 0o600 },
   );
   const socketPath = join(stateDir, "cloud-runner.sock");
-  const shimPath = join(agentDir, "pi-cloud-subagent-shim.cjs");
-  writeFileSync(
-    shimPath,
-    `#!/usr/bin/env node
-const net = require("node:net");
-const socket = net.createConnection(process.env.PI_CLOUD_SUBAGENT_BRIDGE_SOCKET);
-let buffer = "";
-socket.setEncoding("utf8");
-socket.on("connect", () => socket.write(JSON.stringify({
-  args: process.argv.slice(2),
-  env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith("PI_SUBAGENT_")))
-}) + "\\n"));
-socket.on("data", (chunk) => {
-  buffer += chunk;
-  const newline = buffer.indexOf("\\n");
-  if (newline < 0) return;
-  const response = JSON.parse(buffer.slice(0, newline));
-  const failed = response.state !== "completed";
-  process.stdout.write(JSON.stringify({
-    type: "message_end",
-    message: {
-      role: "assistant",
-      content: [{ type: "text", text: response.output || response.failureMessage || "Subagent finished without output." }],
-      api: "openai-completions",
-      provider: "pi-cloud",
-      model: "cloud-subagent",
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-      stopReason: failed ? "error" : "stop",
-      ...(failed ? { errorMessage: response.failureMessage || "Cloud Subagent failed" } : {}),
-      timestamp: Date.now()
-    }
-  }) + "\\n");
-  socket.end();
-  process.exitCode = failed ? 1 : 0;
-});
-socket.on("error", (error) => { console.error(error.message); process.exitCode = 1; });
-`,
-    { encoding: "utf8", mode: 0o700 },
-  );
-  chmodSync(shimPath, 0o700);
-  return { agentDir, stateDir, shimPath, socketPath };
+  return { agentDir, stateDir, shimPath: cloudShimPath, socketPath };
 }
 
 function parseChildInvocation(value: unknown): ExternalJobStartInput {

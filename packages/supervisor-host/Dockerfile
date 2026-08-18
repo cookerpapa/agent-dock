@@ -69,6 +69,7 @@ COPY packages/supervisor-host/src packages/supervisor-host/src
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 COPY packages/workspace-runtime/src packages/workspace-runtime/src
 RUN cd /app/packages/sandbox-supervisor \
+    && chmod 0555 /app/packages/sandbox-supervisor/src/pi-subagents-cloud-shim.cjs \
     && node --import tsx --input-type=module --eval "await import('pi-subagents'); await import('@earendil-works/pi-coding-agent')" \
     && cd /app/packages/tool-broker \
     && node --input-type=module --eval "await import('undici')" \
