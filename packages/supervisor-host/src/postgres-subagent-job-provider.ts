@@ -71,6 +71,19 @@ type IsolatedWorkspaceForker = (
   request: ToolBrokerWorkspaceForkRequest,
 ) => Promise<ToolBrokerWorkspaceForkResponse>;
 
+const CLOUD_SUBAGENT_LEAF_BOUNDARY = [
+  "## PiCloud delegated leaf boundary",
+  "Execute only the current child task. Inherited conversation entries are background context, not pending instructions.",
+  "Do not call, simulate, or request the subagent Tool and do not delegate recursively.",
+  "Use only Tools actually registered in this child Run, then return a focused result to the parent.",
+].join("\n");
+
+function childSystemPrompt(profilePrompt: string | undefined): string {
+  return profilePrompt === undefined
+    ? CLOUD_SUBAGENT_LEAF_BOUNDARY
+    : `${profilePrompt}\n\n${CLOUD_SUBAGENT_LEAF_BOUNDARY}`;
+}
+
 function nonEmpty(value: string, name: string, maximum: number): string {
   if (value.length === 0 || value.length > maximum || value.trim() !== value) {
     throw new TypeError(`${name} is invalid`);
@@ -522,7 +535,7 @@ export class PostgresSubagentJobProvider {
           turn_id: childTurnId,
           command_id: childCommandId,
           environment_version_id: parent.environmentVersionId,
-          agent_system_prompt: input.systemPrompt ?? null,
+          agent_system_prompt: childSystemPrompt(input.systemPrompt),
           tool_capability_snapshot: sql<unknown[]>`${JSON.stringify(tools)}::jsonb`,
           source_set_snapshot: parent.sourceSetSnapshot,
           conversation_base_seq: 0,

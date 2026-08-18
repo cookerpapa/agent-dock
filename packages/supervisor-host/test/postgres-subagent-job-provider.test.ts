@@ -277,7 +277,8 @@ describe.sequential("PostgresSubagentJobProvider", () => {
       .where("id", "=", started.childRunId)
       .executeTakeFirstOrThrow();
     expect(child.tool_capability_snapshot).toEqual(["read", "bash"]);
-    expect(child.agent_system_prompt).toBe("You are a deployment-owned scout profile.");
+    expect(child.agent_system_prompt).toContain("You are a deployment-owned scout profile.");
+    expect(child.agent_system_prompt).toContain("PiCloud delegated leaf boundary");
     const dispatched: string[] = [];
     const dispatcher = new RunCommandExecutor({
       database,
