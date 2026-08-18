@@ -28,6 +28,7 @@ export type StartCloudSubagentJobInput = Readonly<{
   stepIndex: number;
   agentName: string;
   prompt: string;
+  systemPrompt?: string;
   contextMode: SubagentContextMode;
   workspaceMode: Exclude<SubagentWorkspaceMode, "isolated">;
   requestedToolCapabilities?: CloudToolCapabilitySnapshot;
@@ -89,6 +90,7 @@ function requestSha256(input: StartCloudSubagentJobInput, tools: readonly string
         parentSessionId: input.parentSessionId,
         parentToolCallId: input.parentToolCallId,
         prompt: input.prompt,
+        systemPrompt: input.systemPrompt,
         stepIndex: input.stepIndex,
         tools,
         workflowRunId: input.workflowRunId,
@@ -162,6 +164,9 @@ export class PostgresSubagentJobProvider {
     nonEmpty(input.workflowRunId, "Subagent workflow Run", 256);
     nonEmpty(input.agentName, "Subagent name", 128);
     nonEmpty(input.prompt, "Subagent prompt", 1_000_000);
+    if (input.systemPrompt !== undefined) {
+      nonEmpty(input.systemPrompt, "Subagent system prompt", 100_000);
+    }
     safeStep(input.stepIndex);
     safeFence(input.parentFencingToken);
     if (input.contextMode !== "fresh" && input.contextMode !== "fork") {
@@ -443,6 +448,7 @@ export class PostgresSubagentJobProvider {
           turn_id: childTurnId,
           command_id: childCommandId,
           environment_version_id: parent.environmentVersionId,
+          agent_system_prompt: input.systemPrompt ?? null,
           tool_capability_snapshot: sql<unknown[]>`${JSON.stringify(tools)}::jsonb`,
           source_set_snapshot: parent.sourceSetSnapshot,
           conversation_base_seq: 0,

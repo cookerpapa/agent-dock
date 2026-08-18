@@ -203,6 +203,7 @@ export const ExecuteTurnCommandMessageSchema = Type.Object(
         input: Type.Union([PromptInputSchema, ContinueInputSchema]),
         sandboxRetention: SandboxRetentionPolicySchema,
         toolCapabilities: CloudToolCapabilitySnapshotSchema,
+        agentSystemPrompt: Type.Optional(Type.String({ minLength: 1, maxLength: 100_000 })),
         model: TurnModelSnapshotSchema,
         environment: EnvironmentRuntimeSnapshotSchema,
         budgets: Type.Optional(TurnBudgetSnapshotSchema),

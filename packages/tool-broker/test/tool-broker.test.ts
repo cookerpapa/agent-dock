@@ -707,7 +707,7 @@ describe("provider-backed Tool Tool Broker", () => {
     await manager.stop(second.activationId, nextAssignment);
   });
 
-  it("moves a persistent Workspace only between related conversation branches", async () => {
+  it("rebinds a persistent process world only between related conversation branches", async () => {
     class ConversationTreeStateRepository extends InMemorySandboxActivationStateRepository {
       readonly released: string[] = [];
 
@@ -760,9 +760,10 @@ describe("provider-backed Tool Tool Broker", () => {
       workspaceRevision: "1".repeat(64),
     });
 
-    expect(fixture.stopped).toBe(true);
-    expect(stateRepository.released).toContain(first.activationId);
-    expect(second.activationId).toBe(SECOND_ACTIVATION_ID);
+    expect(fixture.stopped).toBe(false);
+    expect(stateRepository.released).toEqual([]);
+    expect(second.activationId).toBe(first.activationId);
+    expect(second.continuity).toBe("warm_reuse");
     await manager.stop(second.activationId, nextAssignment);
   });
 

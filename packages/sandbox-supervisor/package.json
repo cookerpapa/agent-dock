@@ -15,14 +15,15 @@
     "test": "vitest --run"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
     "@pi-cloud/fake-model-server": "0.1.0",
     "@pi-cloud/observability": "0.1.0",
     "@pi-cloud/pi-session-postgres": "0.1.0",
     "@pi-cloud/protocol": "0.1.0",
     "@pi-cloud/workspace-runtime": "0.1.0",
-    "@earendil-works/pi-agent-core": "0.84.1",
-    "@earendil-works/pi-ai": "0.84.1",
-    "@earendil-works/pi-coding-agent": "0.84.1",
+    "pi-subagents": "0.50.0",
     "ws": "8.21.1"
   },
   "devDependencies": {

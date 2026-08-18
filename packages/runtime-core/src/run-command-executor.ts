@@ -56,6 +56,7 @@ export type TurnExecutionRequest = {
   };
   sandboxRetention: import("@pi-cloud/protocol").SandboxRetentionPolicy;
   toolCapabilities: CloudToolCapabilitySnapshot;
+  agentSystemPrompt?: string;
   model: {
     profileId: string;
     provider: string;
@@ -635,6 +636,7 @@ export class RunCommandExecutor {
           "turn.credential_binding_version as credentialBindingVersion",
           "session_row.id as sessionId",
           "session_row.state as sessionState",
+          "session_row.session_kind as sessionKind",
           "session_row.sandbox_retention_policy as sandboxRetention",
           "session_row.project_id as projectId",
           "session_row.workspace_id as workspaceId",
@@ -645,6 +647,7 @@ export class RunCommandExecutor {
           "run.id as runId",
           "run.trace_id as traceId",
           "run.tool_capability_snapshot as toolCapabilitySnapshot",
+          "run.agent_system_prompt as agentSystemPrompt",
           "run.queued_at as runQueuedAt",
           "run.state as runState",
           "run.current_attempt_id as currentAttemptId",
@@ -724,6 +727,25 @@ export class RunCommandExecutor {
                   'waiting_approval',
                   'cancelling'
                 )
+                and not (
+                  ${sql.ref("session_row.session_kind")} = 'subagent'
+                  and exists (
+                    select 1
+                    from subagent_executions as child_execution
+                    inner join runs as parent_run
+                      on parent_run.tenant_id = child_execution.tenant_id
+                      and parent_run.id = child_execution.parent_run_id
+                    where child_execution.tenant_id = ${sql.ref("run.tenant_id")}
+                      and child_execution.child_run_id = ${sql.ref("run.id")}
+                      and (
+                        child_execution.workspace_mode = 'none'
+                        or (
+                          child_execution.workspace_mode = 'shared_serialized'
+                          and parent_run.turn_id = workspace_active_turn.id
+                        )
+                      )
+                  )
+                )
             )
           )`,
         )
@@ -774,7 +796,28 @@ export class RunCommandExecutor {
                     "running",
                     "waiting_approval",
                     "cancelling",
-                  ]),
+                  ])
+                  .where(
+                    sql<boolean>`not (
+                      ${row.sessionKind} = 'subagent'
+                      and exists (
+                        select 1
+                        from subagent_executions as child_execution
+                        inner join runs as parent_run
+                          on parent_run.tenant_id = child_execution.tenant_id
+                          and parent_run.id = child_execution.parent_run_id
+                        where child_execution.tenant_id = ${row.tenantId}
+                          and child_execution.child_run_id = ${row.runId}
+                          and (
+                            child_execution.workspace_mode = 'none'
+                            or (
+                              child_execution.workspace_mode = 'shared_serialized'
+                              and parent_run.turn_id = ${sql.ref("active_turn.id")}
+                            )
+                          )
+                      )
+                    )`,
+                  ),
               )
               .as("blocked"),
           )
@@ -982,6 +1025,7 @@ export class RunCommandExecutor {
           input: { kind: "prompt", prompt: row.inputText },
           sandboxRetention: row.sandboxRetention,
           toolCapabilities,
+          ...(row.agentSystemPrompt === null ? {} : { agentSystemPrompt: row.agentSystemPrompt }),
           model: {
             profileId: row.modelProfileId,
             provider: row.provider,

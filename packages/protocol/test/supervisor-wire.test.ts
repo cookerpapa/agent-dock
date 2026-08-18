@@ -174,6 +174,7 @@ describe("supervisor/control-plane wire protocol", () => {
         input: { kind: "prompt", text: "Fix the failing test" },
         sandboxRetention: "ephemeral",
         toolCapabilities: ["read", "write", "edit", "bash"],
+        agentSystemPrompt: "Review the delegated task independently.",
         model: modelSnapshot(),
         environment: environmentSnapshot(),
         traceContext: {

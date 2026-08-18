@@ -299,6 +299,9 @@ export class LocalSupervisorExecutionBackend
           input: { kind: "prompt", text: request.input.prompt },
           sandboxRetention: request.sandboxRetention,
           toolCapabilities: request.toolCapabilities,
+          ...(request.agentSystemPrompt === undefined
+            ? {}
+            : { agentSystemPrompt: request.agentSystemPrompt }),
           model: {
             profileId: request.model.profileId,
             provider: request.model.provider,

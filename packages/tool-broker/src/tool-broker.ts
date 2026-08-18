@@ -530,17 +530,23 @@ export class ToolBroker {
     }
 
     let inherited = this.#warm.get(key);
+    let crossSessionHandoffAllowed = false;
     if (
-      inherited?.retention === "persistent" &&
+      inherited !== undefined &&
       inherited.handle.assignment.sessionId !== request.assignment.sessionId
     ) {
-      const handoffAllowed = await this.#stateRepository.allowsPersistentConversationHandoff({
+      crossSessionHandoffAllowed = await this.#stateRepository.allowsPersistentConversationHandoff({
         tenantId: request.assignment.tenantId,
         workspaceId: request.assignment.workspaceId,
         currentSessionId: inherited.handle.assignment.sessionId,
         nextSessionId: request.assignment.sessionId,
       });
-      if (!handoffAllowed) {
+    }
+    if (
+      inherited?.retention === "persistent" &&
+      inherited.handle.assignment.sessionId !== request.assignment.sessionId
+    ) {
+      if (!crossSessionHandoffAllowed) {
         throw new ToolBrokerError(
           "tool_sandbox_workspace_pinned",
           "Workspace is pinned to another persistent Sandbox conversation",
@@ -550,7 +556,8 @@ export class ToolBroker {
     }
     if (
       inherited !== undefined &&
-      (inherited.handle.assignment.sessionId !== request.assignment.sessionId ||
+      ((!crossSessionHandoffAllowed &&
+        inherited.handle.assignment.sessionId !== request.assignment.sessionId) ||
         request.workspaceRevision === undefined ||
         request.workspaceRevision !== inherited.workspaceRevision ||
         !sameEnvironment(request.environment, inherited.environment))

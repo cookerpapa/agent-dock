@@ -457,7 +457,12 @@ export class PiCloudTurnRunner {
         authority: sessionHandle.authority,
         model,
         models: modelRuntime,
-        systemPrompt: () => tools.systemPrompt(BASE_SYSTEM_PROMPT),
+        systemPrompt: () =>
+          tools.systemPrompt(
+            command.payload.agentSystemPrompt === undefined
+              ? BASE_SYSTEM_PROMPT
+              : `${BASE_SYSTEM_PROMPT}\n\n${command.payload.agentSystemPrompt}`,
+          ),
         tools: tools.tools,
         thinkingLevel: command.payload.model.thinkingLevel,
         streamOptions: {

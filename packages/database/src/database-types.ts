@@ -487,6 +487,7 @@ export interface RunTable {
   turn_id: string;
   command_id: string;
   environment_version_id: string;
+  agent_system_prompt: GeneratedNullable<string>;
   tool_capability_snapshot: GeneratedJsonArray;
   source_set_snapshot: GeneratedJsonObject;
   conversation_base_seq: GeneratedInt8;

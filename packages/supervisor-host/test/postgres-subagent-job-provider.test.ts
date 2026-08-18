@@ -2,6 +2,7 @@ import { createDatabase, runMigrations, type Database } from "@pi-cloud/database
 import { ControlPlaneStore, createPrivateTenant } from "@pi-cloud/control-plane";
 import { PostgresPiSessionRepository } from "@pi-cloud/pi-session-postgres";
 import { TURN_COMMAND_OUTBOX_TOPIC } from "@pi-cloud/protocol";
+import { RunCommandExecutor } from "@pi-cloud/runtime-core/run-command-executor";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
@@ -207,6 +208,7 @@ describe.sequential("PostgresSubagentJobProvider", () => {
         "child.session_kind as sessionKind",
         "child.tool_capabilities as sessionTools",
         "child_run.tool_capability_snapshot as runTools",
+        "child_run.command_id as commandId",
       ])
       .where("execution.id", "=", started.executionId)
       .executeTakeFirstOrThrow();
@@ -214,6 +216,7 @@ describe.sequential("PostgresSubagentJobProvider", () => {
       sessionKind: "subagent",
       sessionTools: [],
       runTools: [],
+      commandId: persisted.commandId,
     });
     const piSession = await database
       .selectFrom("pi_sessions")
@@ -228,6 +231,19 @@ describe.sequential("PostgresSubagentJobProvider", () => {
       .where("aggregate_id", "=", started.childSessionId)
       .executeTakeFirstOrThrow();
     expect(outbox.topic).toBe(TURN_COMMAND_OUTBOX_TOPIC);
+    const dispatched: string[] = [];
+    const dispatcher = new RunCommandExecutor({
+      database,
+      backend: {
+        async execute(request, lifecycle) {
+          dispatched.push(request.runId);
+          await lifecycle.started();
+          return { stopReason: "stop" };
+        },
+      },
+    });
+    await dispatcher.dispatchCommand(persisted.commandId);
+    expect(dispatched).toEqual([started.childRunId]);
   });
 
   it("forks Pi context, narrows tools and reads the terminal result from PostgreSQL", async () => {
@@ -243,6 +259,7 @@ describe.sequential("PostgresSubagentJobProvider", () => {
       stepIndex: 1,
       agentName: "scout",
       prompt: "Inspect the repository",
+      systemPrompt: "You are a deployment-owned scout profile.",
       contextMode: "fork",
       workspaceMode: "shared_serialized",
       requestedToolCapabilities: ["read", "bash"],
@@ -256,34 +273,25 @@ describe.sequential("PostgresSubagentJobProvider", () => {
 
     const child = await database
       .selectFrom("runs")
-      .select(["turn_id", "command_id", "tool_capability_snapshot"])
+      .select(["turn_id", "command_id", "tool_capability_snapshot", "agent_system_prompt"])
       .where("id", "=", started.childRunId)
       .executeTakeFirstOrThrow();
     expect(child.tool_capability_snapshot).toEqual(["read", "bash"]);
-    await childPi.appendMessage(assistant("Subagent result from PostgreSQL"));
-    const now = new Date();
-    await database.transaction().execute(async (transaction) => {
-      await transaction
-        .updateTable("runs")
-        .set({ state: "completed", settled_at: now })
-        .where("id", "=", started.childRunId)
-        .executeTakeFirstOrThrow();
-      await transaction
-        .updateTable("turns")
-        .set({ state: "completed", stop_reason: "stop", settled_at: now })
-        .where("id", "=", child.turn_id)
-        .executeTakeFirstOrThrow();
-      await transaction
-        .updateTable("sessions")
-        .set({ state: "idle" })
-        .where("id", "=", started.childSessionId)
-        .executeTakeFirstOrThrow();
-      await transaction
-        .updateTable("commands")
-        .set({ state: "completed", completed_at: now })
-        .where("id", "=", child.command_id)
-        .executeTakeFirstOrThrow();
+    expect(child.agent_system_prompt).toBe("You are a deployment-owned scout profile.");
+    const dispatched: string[] = [];
+    const dispatcher = new RunCommandExecutor({
+      database,
+      backend: {
+        async execute(request, lifecycle) {
+          dispatched.push(request.runId);
+          await lifecycle.started();
+          return { stopReason: "stop" };
+        },
+      },
     });
+    await dispatcher.dispatchCommand(child.command_id);
+    expect(dispatched).toEqual([started.childRunId]);
+    await childPi.appendMessage(assistant("Subagent result from PostgreSQL"));
 
     await expect(provider.result(tenantId, started.executionId)).resolves.toMatchObject({
       state: "completed",

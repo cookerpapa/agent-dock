@@ -336,9 +336,30 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         if (existing.state === "warm" && existing.owner_instance_id !== this.#instanceId) {
           return { status: "redirect", ownerBaseUrl: existing.owner_base_url };
         }
+        const delegatedHandoff =
+          existing.session_id === input.assignment.sessionId
+            ? undefined
+            : await transaction
+                .selectFrom("subagent_executions")
+                .select("id")
+                .where("tenant_id", "=", input.assignment.tenantId)
+                .where("workspace_mode", "=", "shared_serialized")
+                .where((expression) =>
+                  expression.or([
+                    expression.and([
+                      expression("parent_session_id", "=", existing.session_id),
+                      expression("child_session_id", "=", input.assignment.sessionId),
+                    ]),
+                    expression.and([
+                      expression("parent_session_id", "=", input.assignment.sessionId),
+                      expression("child_session_id", "=", existing.session_id),
+                    ]),
+                  ]),
+                )
+                .executeTakeFirst();
         const reusable =
           existing.state === "warm" &&
-          existing.session_id === input.assignment.sessionId &&
+          (existing.session_id === input.assignment.sessionId || delegatedHandoff !== undefined) &&
           existing.workspace_revision === (input.workspaceRevision ?? null) &&
           existing.environment_sha256 === input.environmentSha256;
         if (!reusable) return { status: "busy" };
@@ -351,6 +372,11 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         await transaction
           .updateTable("tool_broker_activations")
           .set({
+            supervisor_id: input.assignment.supervisorId,
+            boot_id: input.assignment.bootId,
+            sandbox_id: input.assignment.sandboxId,
+            command_id: input.assignment.commandId,
+            session_id: input.assignment.sessionId,
             turn_id: input.assignment.turnId,
             attempt_id: input.assignment.attemptId,
             lease_id: input.assignment.leaseId,
@@ -764,6 +790,25 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
     input: PersistentConversationHandoff,
   ): Promise<boolean> {
     if (input.currentSessionId === input.nextSessionId) return false;
+    const delegated = await this.#database
+      .selectFrom("subagent_executions")
+      .select("id")
+      .where("tenant_id", "=", input.tenantId)
+      .where("workspace_mode", "=", "shared_serialized")
+      .where((expression) =>
+        expression.or([
+          expression.and([
+            expression("parent_session_id", "=", input.currentSessionId),
+            expression("child_session_id", "=", input.nextSessionId),
+          ]),
+          expression.and([
+            expression("parent_session_id", "=", input.nextSessionId),
+            expression("child_session_id", "=", input.currentSessionId),
+          ]),
+        ]),
+      )
+      .executeTakeFirst();
+    if (delegated !== undefined) return true;
     const result = await sql<{
       start_session_id: string;
       root_session_id: string;

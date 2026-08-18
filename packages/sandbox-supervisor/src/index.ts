@@ -71,6 +71,11 @@ export {
   type TrustedRemoteAgentTools,
   type TrustedRemoteToolsRuntimeConfiguration,
 } from "./trusted-remote-tools-extension.ts";
+export {
+  createPiSubagentsCloudTool,
+  type PiSubagentCloudCoordinator,
+  type PiSubagentCloudToolContext,
+} from "./pi-subagents-cloud-tool.ts";
 
 export {
   CLOUD_ATTEMPT_CONTEXT_SCHEMA_VERSION,

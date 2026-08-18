@@ -112,6 +112,8 @@ export {
   downDurableSubagentExecutions,
   upToollessRunCapabilities,
   downToollessRunCapabilities,
+  upSubagentRunSystemPrompt,
+  downSubagentRunSystemPrompt,
 } from "./migrations/index.ts";
 
 export {

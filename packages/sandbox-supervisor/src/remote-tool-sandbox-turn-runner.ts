@@ -1,5 +1,6 @@
 import { FAKE_MODEL_API_KEY, FakeModelServer } from "@pi-cloud/fake-model-server";
 import { activeTraceCarrier, withSpan, type PiCloudMetrics } from "@pi-cloud/observability";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   type ExecuteTurnCommandMessage,
   type ToolSandboxAssignment,
@@ -103,6 +104,9 @@ export type RemoteToolSandboxTurnRunnerOptions = {
   workspaceSeedResolver?: AgentWorkspaceSeedResolver;
   checkpointStore?: SandboxCheckpointStore;
   openAgentSession: (command: ExecuteTurnCommandMessage) => Promise<PiCloudSessionHandle>;
+  createOrchestrationTools?: (
+    command: ExecuteTurnCommandMessage,
+  ) => Promise<readonly AgentTool[]> | readonly AgentTool[];
   runAttemptPhaseObserver?: RunAttemptPhaseObserver;
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
@@ -158,6 +162,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
   readonly #workspaceSeedResolver: AgentWorkspaceSeedResolver | undefined;
   readonly #checkpointStore: SandboxCheckpointStore | undefined;
   readonly #openAgentSession: RemoteToolSandboxTurnRunnerOptions["openAgentSession"];
+  readonly #createOrchestrationTools: RemoteToolSandboxTurnRunnerOptions["createOrchestrationTools"];
   readonly #runAttemptPhaseObserver: RunAttemptPhaseObserver | undefined;
   readonly #requestTimeoutMs: number | undefined;
   readonly #turnTimeoutMs: number | undefined;
@@ -181,6 +186,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     this.#workspaceSeedResolver = options.workspaceSeedResolver;
     this.#checkpointStore = options.checkpointStore;
     this.#openAgentSession = options.openAgentSession;
+    this.#createOrchestrationTools = options.createOrchestrationTools;
     this.#runAttemptPhaseObserver = options.runAttemptPhaseObserver;
     this.#requestTimeoutMs = options.requestTimeoutMs;
     this.#turnTimeoutMs = options.turnTimeoutMs;
@@ -336,6 +342,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
       loadedCheckpoint?.workspace ?? workspaceSeed,
     );
     const cloudTurn = createCloudTurnContext(command, loadedCheckpoint?.workspaceRevision);
+    const toolFree = cloudTurn.context.tools.names.length === 0;
 
     const usesEmbeddedFake =
       command.payload.model.provider === "pi-cloud-fake" &&
@@ -430,19 +437,21 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 : { workspaceRevision: loadedCheckpoint.workspaceRevision }),
             }),
       };
-      const createStartedAt = performance.now();
-      try {
-        activation = await this.#broker.create(createRequest);
-        this.#metrics?.sandboxDuration.observe(
-          { operation: "reserve", outcome: "completed" },
-          (performance.now() - createStartedAt) / 1_000,
-        );
-      } catch (error: unknown) {
-        this.#metrics?.sandboxDuration.observe(
-          { operation: "reserve", outcome: "failed" },
-          (performance.now() - createStartedAt) / 1_000,
-        );
-        throw error;
+      if (!toolFree) {
+        const createStartedAt = performance.now();
+        try {
+          activation = await this.#broker.create(createRequest);
+          this.#metrics?.sandboxDuration.observe(
+            { operation: "reserve", outcome: "completed" },
+            (performance.now() - createStartedAt) / 1_000,
+          );
+        } catch (error: unknown) {
+          this.#metrics?.sandboxDuration.observe(
+            { operation: "reserve", outcome: "failed" },
+            (performance.now() - createStartedAt) / 1_000,
+          );
+          throw error;
+        }
       }
       signal.addEventListener("abort", abortSandbox, { once: true });
       if (signal.aborted) abortSandbox();
@@ -490,6 +499,10 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
             };
       const onSettled: NonNullable<PiCloudTurnRunnerOptions["onSettled"]> = async () => {
         if (activation === undefined) {
+          if (toolFree) {
+            retainedWorkspaceRevision = loadedCheckpoint?.workspaceRevision;
+            return;
+          }
           throw new PiTurnError(
             "tool_sandbox_unavailable",
             "Tool Sandbox was unavailable at settlement",
@@ -571,6 +584,8 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         settlementPolicy === undefined
           ? undefined
           : new PiSettlementGateController(settlementPolicy);
+      const orchestrationTools =
+        (await this.#createOrchestrationTools?.(command)) ?? ([] as readonly AgentTool[]);
       const commonRunnerOptions = {
         resolveModelRuntime,
         openSession: this.#openAgentSession,
@@ -582,8 +597,8 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 this.#checkpointStore!.saveToolOutput!(command, output),
             }),
         sandboxContinuity: {
-          activationId: activeSandbox.activationId,
-          continuity: activeSandbox.continuity,
+          activationId: activeSandbox?.activationId ?? command.payload.attemptId,
+          continuity: activeSandbox?.continuity ?? "cold_restore",
           environmentSha256: cloudTurn.environmentSha256,
           committedWorkspaceRevision: loadedCheckpoint?.workspaceRevision ?? null,
           toolPolicySha256: cloudTurn.toolPolicySha256,
@@ -613,8 +628,28 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
       const runner = new PiCloudTurnRunner({
         ...commonRunnerOptions,
         createAgentTools: ({ toolOutputDirectory, stepWorldState, captureSamplingStep }) => {
+          if (activeSandbox === undefined) {
+            return {
+              tools: [...orchestrationTools],
+              async systemPrompt(base: string) {
+                return orchestrationTools.length === 0
+                  ? base
+                  : [
+                      base,
+                      "You may delegate substantial independent work through the subagent Tool. " +
+                        "Use stable workflow keys and inspect every returned result.",
+                    ].join("\n");
+              },
+              async transformContext(messages) {
+                return messages;
+              },
+              async transformHeaders(headers = {}) {
+                return headers;
+              },
+            };
+          }
           let stepSequence = 0;
-          return createTrustedRemoteAgentTools({
+          const remoteTools = createTrustedRemoteAgentTools({
             operationUrl: this.#broker.operationUrlFor(activeSandbox.activationId),
             activationId: activeSandbox.activationId,
             capability: activeSandbox.capability,
@@ -652,6 +687,18 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                     : { tracestate: downstreamTrace.tracestate }),
                 }),
           });
+          if (orchestrationTools.length === 0) return remoteTools;
+          return {
+            ...remoteTools,
+            tools: [...remoteTools.tools, ...orchestrationTools],
+            async systemPrompt(base: string) {
+              return [
+                await remoteTools.systemPrompt(base),
+                "You may delegate substantial independent work through the subagent Tool. " +
+                  "Use stable workflow keys, keep one shared Workspace writer, and inspect every returned result.",
+              ].join("\n");
+            },
+          };
         },
         ...(settlementGate === undefined
           ? {}

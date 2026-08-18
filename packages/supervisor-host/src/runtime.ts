@@ -22,10 +22,14 @@ import { createDatabase, type Database } from "@pi-cloud/database";
 import { GitHubGatewayClient } from "@pi-cloud/github-gateway";
 import { operationalLog, type PiCloudMetrics } from "@pi-cloud/observability";
 import { openPostgresDurableAgentSession } from "@pi-cloud/pi-session-postgres";
-import type { SupervisorBootProvisionRequest } from "@pi-cloud/protocol";
+import {
+  parseCloudToolCapabilitySnapshot,
+  type SupervisorBootProvisionRequest,
+} from "@pi-cloud/protocol";
 import { ReplicatedToolBrokerClient } from "@pi-cloud/tool-broker";
 import {
   WalEventSpoolStore,
+  createPiSubagentsCloudTool,
   LocalSandboxSupervisor,
   RemoteToolSandboxTurnRunner,
   ReconnectingSupervisorWebSocketClient,
@@ -43,6 +47,7 @@ import {
   SupervisorManagementServerError,
 } from "./management-server.ts";
 import { TenantModelGateway } from "./model-gateway.ts";
+import { PostgresSubagentJobProvider } from "./postgres-subagent-job-provider.ts";
 import {
   PostgresPiWorker,
   type PostgresPiWorkerOptions,
@@ -71,6 +76,28 @@ export type SupervisorRunWorker = {
   start(): Promise<void>;
   stop(): Promise<void>;
 };
+
+function subagentExternalState(state: string) {
+  switch (state) {
+    case "completed":
+      return "completed" as const;
+    case "failed":
+      return "failed" as const;
+    case "cancelled":
+      return "stopped" as const;
+    case "unknown":
+      return "blocked" as const;
+    case "running":
+      return "running" as const;
+    default:
+      return "queued" as const;
+  }
+}
+
+function subagentOption(options: Record<string, unknown>, name: string): string | undefined {
+  const value = options[name];
+  return typeof value === "string" ? value : undefined;
+}
 
 export type SupervisorToolBroker = Pick<
   ReplicatedToolBrokerClient,
@@ -375,6 +402,7 @@ export class SupervisorHostRuntime {
       await modelGateway.start();
       this.#modelGateway = modelGateway;
       const runWorkerIdentity = `postgres:${identity.supervisorId}:${identity.bootId}`;
+      const subagentJobs = new PostgresSubagentJobProvider({ database: this.#database });
       const runner = new RemoteToolSandboxTurnRunner({
         broker: this.#toolBroker,
         runtimeIdentity: identity,
@@ -392,6 +420,90 @@ export class SupervisorHostRuntime {
             claimOwnerId: runWorkerIdentity,
             fencingToken: command.payload.fencingToken,
           }),
+        createOrchestrationTools: async (command) => {
+          const session = await this.#database
+            .selectFrom("sessions")
+            .select("session_kind")
+            .where("tenant_id", "=", command.payload.tenantId)
+            .where("id", "=", command.payload.sessionId)
+            .executeTakeFirstOrThrow();
+          if (session.session_kind === "subagent") return [];
+          return [
+            await createPiSubagentsCloudTool({
+              context: {
+                parentSessionId: command.payload.sessionId,
+                model: {
+                  provider: command.payload.model.provider,
+                  id: command.payload.model.modelId,
+                },
+                thinkingLevel: command.payload.model.thinkingLevel,
+              },
+              coordinator: {
+                start: async (input, parentToolCallId) => {
+                  const contextMode = subagentOption(input.options, "contextMode");
+                  const workspaceMode = subagentOption(input.options, "workspaceMode");
+                  if (contextMode !== "fresh" && contextMode !== "fork") {
+                    throw new Error("pi-subagents provided an invalid context mode");
+                  }
+                  if (workspaceMode !== "none" && workspaceMode !== "shared_serialized") {
+                    throw new Error("pi-subagents provided an unsupported Workspace mode");
+                  }
+                  const tools = parseCloudToolCapabilitySnapshot(
+                    input.options.requestedToolCapabilities,
+                  );
+                  const systemPrompt = subagentOption(input.options, "systemPrompt");
+                  const child = await subagentJobs.start({
+                    tenantId: command.payload.tenantId,
+                    parentSessionId: command.payload.sessionId,
+                    parentRunId: command.payload.runId,
+                    parentAttemptId: command.payload.attemptId,
+                    parentFencingToken: command.payload.fencingToken,
+                    parentToolCallId,
+                    workflowRunId: input.runId,
+                    stepIndex: input.stepIndex,
+                    agentName: input.agent,
+                    prompt: input.prompt,
+                    ...(systemPrompt === undefined ? {} : { systemPrompt }),
+                    contextMode,
+                    workspaceMode,
+                    requestedToolCapabilities: tools,
+                  });
+                  return {
+                    providerJobId: child.executionId,
+                    state: subagentExternalState(child.state),
+                  };
+                },
+                status: async (providerJobId) => {
+                  const child = await subagentJobs.status(command.payload.tenantId, providerJobId);
+                  return {
+                    providerJobId,
+                    state: subagentExternalState(child.state),
+                    ...(child.failureCode === undefined ? {} : { failureCode: child.failureCode }),
+                    ...(child.failureMessage === undefined
+                      ? {}
+                      : { failureMessage: child.failureMessage }),
+                  };
+                },
+                result: async (providerJobId) => {
+                  const child = await subagentJobs.result(command.payload.tenantId, providerJobId);
+                  return {
+                    providerJobId,
+                    state: subagentExternalState(child.state),
+                    ...(child.output === undefined ? {} : { output: child.output }),
+                    ...(child.failureCode === undefined ? {} : { failureCode: child.failureCode }),
+                    ...(child.failureMessage === undefined
+                      ? {}
+                      : { failureMessage: child.failureMessage }),
+                  };
+                },
+                reattach: async (providerJobId) => {
+                  const child = await subagentJobs.status(command.payload.tenantId, providerJobId);
+                  return { providerJobId, state: subagentExternalState(child.state) };
+                },
+              },
+            }),
+          ];
+        },
         runAttemptPhaseObserver: new PostgresRunAttemptPhaseObserver({
           database: this.#database,
         }),
