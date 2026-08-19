@@ -14,6 +14,7 @@ import { Client } from "pg";
 
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_SCAN_MULTIPLIER = 4;
+const LOCAL_SUBAGENT_PRIORITY_DELAY_MS = 25;
 
 type ExecutionReference = {
   commandId: string;
@@ -191,6 +192,11 @@ export class PostgresPiWorker {
     }));
     if (!canPrioritizeLocalSubagent(commandId, active, this.#maximumConcurrentRuns)) return false;
     const execution = (async () => {
+      await new Promise<void>((resolvePromise) => {
+        const timer = setTimeout(resolvePromise, LOCAL_SUBAGENT_PRIORITY_DELAY_MS);
+        timer.unref();
+      });
+      if (this.#state !== "running" || !this.#canClaimRuns()) return;
       if (!(await this.#admitRunClaims())) return;
       await this.#execute({ commandId, subagent: true });
     })().finally(() => {

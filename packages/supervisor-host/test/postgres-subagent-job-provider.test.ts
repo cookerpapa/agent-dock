@@ -234,10 +234,11 @@ describe.sequential("PostgresSubagentJobProvider", () => {
     expect(piSession.parent_session_id).toBe(parentSessionId);
     const outbox = await database
       .selectFrom("outbox")
-      .select("topic")
+      .select(["topic", "created_at as createdAt", "available_at as availableAt"])
       .where("aggregate_id", "=", started.childSessionId)
       .executeTakeFirstOrThrow();
     expect(outbox.topic).toBe(TURN_COMMAND_OUTBOX_TOPIC);
+    expect(outbox.availableAt.valueOf()).toBeGreaterThan(outbox.createdAt.valueOf());
     const dispatched: string[] = [];
     const dispatcher = new RunCommandExecutor({
       database,
@@ -249,6 +250,7 @@ describe.sequential("PostgresSubagentJobProvider", () => {
         },
       },
     });
+    await new Promise((resolve) => setTimeout(resolve, 100));
     await dispatcher.dispatchCommand(persisted.commandId);
     expect(dispatched).toEqual([started.childRunId]);
   });
@@ -307,6 +309,7 @@ describe.sequential("PostgresSubagentJobProvider", () => {
         },
       },
     });
+    await new Promise((resolve) => setTimeout(resolve, 100));
     await dispatcher.dispatchCommand(child.command_id);
     expect(dispatched).toEqual([started.childRunId]);
     await childPi.appendMessage(assistant("Subagent result from PostgreSQL"));

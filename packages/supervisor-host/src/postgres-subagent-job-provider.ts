@@ -79,6 +79,7 @@ const CLOUD_SUBAGENT_LEAF_BOUNDARY = [
   "A durable contact_supervisor Tool is available across cloud Workers. Use progress_update only for meaningful progress; use need_decision or interview_request only when parent input is truly required, then wait for the reply.",
   "Use only Tools actually registered in this child Run, then return a focused result to the parent.",
 ].join("\n");
+const LOCAL_CHILD_CLAIM_GRACE_MS = 75;
 
 function childSystemPrompt(profilePrompt: string | undefined): string {
   return profilePrompt === undefined
@@ -631,6 +632,11 @@ export class PostgresSubagentJobProvider {
               turnId: childTurnId,
               kind: "turn.execute",
             },
+            // The creating Worker may immediately claim this durable Child by
+            // command ID when its reserved Child lane is free. The shared
+            // queue becomes eligible shortly afterwards, so locality never
+            // turns into a persistent affinity or capacity wait.
+            available_at: new Date(Date.now() + LOCAL_CHILD_CLAIM_GRACE_MS),
             published_at: null,
             last_error: null,
           })
@@ -805,6 +811,7 @@ export class PostgresSubagentJobProvider {
                 .then((run) => run.turn_id),
               kind: "turn.execute",
             },
+            available_at: new Date(Date.now() + LOCAL_CHILD_CLAIM_GRACE_MS),
             published_at: null,
             last_error: null,
           })
