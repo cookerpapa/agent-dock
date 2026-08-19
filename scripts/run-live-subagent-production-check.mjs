@@ -359,6 +359,26 @@ assert(recursiveEvidence.every((execution) => execution.rootRunId === recursive.
 assert(recursiveEvidence.every((execution) => execution.childRunState === "completed"));
 assert.equal(recursiveEvidence[0].parentExecutionId, null);
 assert.equal(recursiveEvidence[1].parentExecutionId, recursiveEvidence[0].executionId);
+const conversationList = await api.listConversations();
+const projectedRecursiveSessions = new Set(
+  conversationList.delegatedSessions
+    .filter((delegated) => delegated.rootSessionId === session.sessionId)
+    .map((delegated) => delegated.sessionId),
+);
+assert(projectedRecursiveSessions.has(recursiveEvidence[0].childSessionId));
+assert(projectedRecursiveSessions.has(recursiveEvidence[1].childSessionId));
+const fullTree = await api.getConversationTree(session.sessionId, "full");
+assert(
+  fullTree.branches.some(
+    (branch) =>
+      branch.sessionId === recursiveEvidence[1].childSessionId &&
+      branch.parentSessionId === recursiveEvidence[0].childSessionId,
+  ),
+  "Whole-tree projection did not preserve the recursive execution edge",
+);
+const focusedTree = await api.getConversationTree(recursiveEvidence[1].childSessionId, "focus");
+assert.equal(focusedTree.rootSessionId, recursiveEvidence[1].childSessionId);
+assert.equal(focusedTree.currentSessionId, recursiveEvidence[1].childSessionId);
 
 const tenantId = await psql(
   `select tenant_id::text from sessions where id = ${sqlLiteral(session.sessionId)}`,
@@ -379,6 +399,11 @@ const report = {
   parentSessionId: session.sessionId,
   modes: { none: noneEvidence, shared: sharedEvidence, isolated: isolatedEvidence },
   recursiveTree: recursiveEvidence,
+  productProjection: {
+    listContainsEveryRecursiveSession: true,
+    fullTreePreservesNestedParent: true,
+    nestedFocusRoot: focusedTree.rootSessionId,
+  },
 };
 await mkdir(resolve(repositoryRoot, "docs/reports"), { recursive: true });
 await writeFile(
