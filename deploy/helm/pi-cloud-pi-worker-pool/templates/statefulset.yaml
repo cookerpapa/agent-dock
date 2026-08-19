@@ -171,6 +171,12 @@ spec:
               {{- end }}
             - name: PI_CLOUD_SUPERVISOR_CAPACITY
               value: {{ .Values.workerPool.capacity | quote }}
+            - name: PI_CLOUD_SUBAGENT_MAXIMUM_DEPTH
+              value: {{ .Values.runtime.subagents.maximumDepth | quote }}
+            - name: PI_CLOUD_SUBAGENT_MAXIMUM_NODES
+              value: {{ .Values.runtime.subagents.maximumNodes | quote }}
+            - name: PI_CLOUD_SUBAGENT_MAXIMUM_CONCURRENT
+              value: {{ .Values.runtime.subagents.maximumConcurrent | quote }}
             - name: PI_CLOUD_TRUSTED_WORKSPACE_DIRECTORY
               value: /workspace
             - name: PI_CLOUD_BOOT_STATE_DIRECTORY

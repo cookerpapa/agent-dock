@@ -24,6 +24,9 @@ export type SupervisorHostConfig = {
   managementPort: number;
   managementAdvertisedBaseUrl: string;
   maxConcurrentSessions: number;
+  subagentMaximumDepth: number;
+  subagentMaximumNodes: number;
+  subagentMaximumConcurrent: number;
   toolBrokerBaseUrls: readonly string[];
   toolBrokerRequestTimeoutMs: number;
   trustedWorkspaceDirectory: string;
@@ -328,6 +331,23 @@ export async function loadSupervisorHostConfig(
   if (repositoryImportWaitMs < repositoryImportLeaseMs) {
     throw new TypeError("Repository import wait must not expire before its ownership lease");
   }
+  const subagentMaximumNodes = integerValue(
+    environment,
+    "PI_CLOUD_SUBAGENT_MAXIMUM_NODES",
+    32,
+    1,
+    10_000,
+  );
+  const subagentMaximumConcurrent = integerValue(
+    environment,
+    "PI_CLOUD_SUBAGENT_MAXIMUM_CONCURRENT",
+    3,
+    1,
+    1_000,
+  );
+  if (subagentMaximumConcurrent > subagentMaximumNodes) {
+    throw new TypeError("Subagent concurrency cannot exceed the Subagent node budget");
+  }
   const databaseUrl = await secret(environment, "DATABASE_URL", allowInlineSecrets);
   const databaseNotificationUrl =
     (await optionalSecret(environment, "DATABASE_NOTIFICATION_URL", allowInlineSecrets)) ??
@@ -386,6 +406,9 @@ export async function loadSupervisorHostConfig(
       "PI_CLOUD_SUPERVISOR_MANAGEMENT_ADVERTISED_URL",
     ),
     maxConcurrentSessions: integerValue(environment, "PI_CLOUD_SUPERVISOR_CAPACITY", 4, 1, 16),
+    subagentMaximumDepth: integerValue(environment, "PI_CLOUD_SUBAGENT_MAXIMUM_DEPTH", 4, 1, 64),
+    subagentMaximumNodes,
+    subagentMaximumConcurrent,
     toolBrokerBaseUrls: internalServiceBaseUrls(
       required(environment, "PI_CLOUD_TOOL_BROKER_URLS"),
       allowInsecureInternalHttp,

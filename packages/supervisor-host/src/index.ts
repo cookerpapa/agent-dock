@@ -41,10 +41,13 @@ export {
   type TenantModelGatewayOptions,
 } from "./model-gateway.ts";
 export {
+  DEFAULT_CLOUD_SUBAGENT_TREE_POLICY,
   PostgresSubagentJobError,
   PostgresSubagentJobProvider,
   type CloudSubagentJobHandle,
   type CloudSubagentJobResult,
+  type CloudSubagentTreeContext,
+  type CloudSubagentTreePolicy,
   type StartCloudSubagentJobInput,
 } from "./postgres-subagent-job-provider.ts";
 export {

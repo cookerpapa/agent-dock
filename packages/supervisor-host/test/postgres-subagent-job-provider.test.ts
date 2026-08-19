@@ -46,6 +46,74 @@ function assistant(text: string): AssistantMessage {
   };
 }
 
+async function activateChildRun(
+  childSessionId: string,
+  childRunId: string,
+  fencingToken: number,
+): Promise<string> {
+  const attemptId = crypto.randomUUID();
+  const run = await database
+    .selectFrom("runs")
+    .select(["turn_id", "command_id"])
+    .where("tenant_id", "=", tenantId)
+    .where("id", "=", childRunId)
+    .executeTakeFirstOrThrow();
+  await database.transaction().execute(async (transaction) => {
+    await transaction
+      .insertInto("run_attempts")
+      .values({
+        id: attemptId,
+        tenant_id: tenantId,
+        run_id: childRunId,
+        attempt_number: 1,
+        state: "running",
+        claim_owner_id: "recursive-test-worker",
+        claim_expires_at: new Date(Date.now() + 60_000),
+        sandbox_id: parentSandboxId,
+        lease_id: crypto.randomUUID(),
+        fencing_token: fencingToken,
+        running_at: new Date(),
+      })
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("runs")
+      .set({
+        state: "running",
+        current_attempt_id: attemptId,
+        attempt_count: 1,
+        started_at: new Date(),
+      })
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", childRunId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("turns")
+      .set({ state: "running", started_at: new Date() })
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", run.turn_id)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("commands")
+      .set({ state: "acknowledged", acknowledged_at: new Date() })
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", run.command_id)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("sessions")
+      .set({ state: "running" })
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", childSessionId)
+      .executeTakeFirstOrThrow();
+    await transaction
+      .updateTable("subagent_executions")
+      .set({ state: "running" })
+      .where("tenant_id", "=", tenantId)
+      .where("child_run_id", "=", childRunId)
+      .executeTakeFirstOrThrow();
+  });
+  return attemptId;
+}
+
 beforeAll(async () => {
   pglite = await PGlite.create();
   socket = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port: 0 });
@@ -297,7 +365,7 @@ describe.sequential("PostgresSubagentJobProvider", () => {
       .executeTakeFirstOrThrow();
     expect(child.tool_capability_snapshot).toEqual(["read", "bash"]);
     expect(child.agent_system_prompt).toContain("You are a deployment-owned scout profile.");
-    expect(child.agent_system_prompt).toContain("PiCloud delegated leaf boundary");
+    expect(child.agent_system_prompt).toContain("PiCloud delegated execution boundary");
     const dispatched: string[] = [];
     const dispatcher = new RunCommandExecutor({
       database,
@@ -531,6 +599,158 @@ describe.sequential("PostgresSubagentJobProvider", () => {
       reason: "need_decision",
       replyMessage: "No compatibility layer is required for unreleased data.",
     });
+  });
+
+  it("creates a bounded recursive tree with one root budget and durable parent links", async () => {
+    const provider = new PostgresSubagentJobProvider({
+      database,
+      treePolicy: { maximumDepth: 2, maximumNodes: 32, maximumConcurrentSubagents: 32 },
+    });
+    const child = await provider.start({
+      tenantId,
+      parentSessionId,
+      parentRunId,
+      parentAttemptId,
+      parentFencingToken: FENCE,
+      parentToolCallId: "recursive-level-one",
+      workflowRunId: "recursive-root-workflow",
+      stepIndex: 0,
+      agentName: "worker",
+      prompt: "Delegate one bounded verification task",
+      contextMode: "fork",
+      workspaceMode: "none",
+    });
+    const childAttemptId = await activateChildRun(child.childSessionId, child.childRunId, 11);
+    await expect(provider.treeContext(tenantId, child.childRunId)).resolves.toMatchObject({
+      executionId: child.executionId,
+      rootSessionId: parentSessionId,
+      rootRunId: parentRunId,
+      depth: 1,
+      canSpawnChildren: true,
+    });
+
+    const grandchild = await provider.start({
+      tenantId,
+      parentSessionId: child.childSessionId,
+      parentRunId: child.childRunId,
+      parentAttemptId: childAttemptId,
+      parentFencingToken: 11,
+      parentToolCallId: "recursive-level-two",
+      workflowRunId: "recursive-child-workflow",
+      stepIndex: 0,
+      agentName: "oracle",
+      prompt: "Verify the child result without tools",
+      contextMode: "fork",
+      workspaceMode: "none",
+    });
+    const persisted = await database
+      .selectFrom("subagent_executions")
+      .select([
+        "root_session_id as rootSessionId",
+        "root_run_id as rootRunId",
+        "parent_execution_id as parentExecutionId",
+        "depth",
+      ])
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", grandchild.executionId)
+      .executeTakeFirstOrThrow();
+    expect(persisted).toEqual({
+      rootSessionId: parentSessionId,
+      rootRunId: parentRunId,
+      parentExecutionId: child.executionId,
+      depth: 2,
+    });
+    const fullTree = await new ConversationTreeService({ database }).tree(
+      tenantId,
+      parentSessionId,
+      "full",
+    );
+    expect(fullTree.delegatedSessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sessionId: child.childSessionId,
+          parentSessionId,
+          rootSessionId: parentSessionId,
+          depth: 1,
+        }),
+        expect.objectContaining({
+          sessionId: grandchild.childSessionId,
+          parentSessionId: child.childSessionId,
+          rootSessionId: parentSessionId,
+          parentExecutionId: child.executionId,
+          depth: 2,
+        }),
+      ]),
+    );
+    expect(fullTree.branches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "subagent",
+          sessionId: grandchild.childSessionId,
+          parentSessionId: child.childSessionId,
+        }),
+      ]),
+    );
+    const defaultModelProfile = await database
+      .selectFrom("tenant_runtime_policies")
+      .select("default_model_profile_id")
+      .where("tenant_id", "=", tenantId)
+      .executeTakeFirstOrThrow();
+    const conversationList = await new ControlPlaneStore({
+      database,
+      tenantId,
+      defaultModelProfileId: defaultModelProfile.default_model_profile_id,
+    }).listConversations();
+    expect(conversationList.delegatedSessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId: child.childSessionId, depth: 1 }),
+        expect.objectContaining({
+          sessionId: grandchild.childSessionId,
+          parentSessionId: child.childSessionId,
+          depth: 2,
+        }),
+      ]),
+    );
+    await expect(
+      new ConversationTreeService({ database }).tree(tenantId, grandchild.childSessionId, "focus"),
+    ).resolves.toMatchObject({
+      rootSessionId: grandchild.childSessionId,
+      currentSessionId: grandchild.childSessionId,
+      branches: [
+        {
+          kind: "subagent",
+          sessionId: grandchild.childSessionId,
+          parentSessionId: null,
+          current: true,
+        },
+      ],
+    });
+    await expect(provider.treeContext(tenantId, grandchild.childRunId)).resolves.toMatchObject({
+      depth: 2,
+      canSpawnChildren: false,
+    });
+
+    const grandchildAttemptId = await activateChildRun(
+      grandchild.childSessionId,
+      grandchild.childRunId,
+      12,
+    );
+    await expect(
+      provider.start({
+        tenantId,
+        parentSessionId: grandchild.childSessionId,
+        parentRunId: grandchild.childRunId,
+        parentAttemptId: grandchildAttemptId,
+        parentFencingToken: 12,
+        parentToolCallId: "recursive-level-three",
+        workflowRunId: "recursive-grandchild-workflow",
+        stepIndex: 0,
+        agentName: "worker",
+        prompt: "This node must not be created",
+        contextMode: "fresh",
+        workspaceMode: "none",
+      }),
+    ).rejects.toMatchObject({ code: "subagent_tree_depth_exhausted" });
   });
 
   it("rejects dispatch after the parent fencing authority changes", async () => {

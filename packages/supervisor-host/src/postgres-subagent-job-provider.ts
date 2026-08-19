@@ -57,6 +57,27 @@ export type CloudSubagentJobResult = CloudSubagentJobHandle &
     failureMessage?: string;
   }>;
 
+export type CloudSubagentTreePolicy = Readonly<{
+  maximumDepth: number;
+  maximumNodes: number;
+  maximumConcurrentSubagents: number;
+}>;
+
+export type CloudSubagentTreeContext = Readonly<{
+  executionId: string;
+  rootSessionId: string;
+  rootRunId: string;
+  parentExecutionId?: string;
+  depth: number;
+  canSpawnChildren: boolean;
+}>;
+
+export const DEFAULT_CLOUD_SUBAGENT_TREE_POLICY: CloudSubagentTreePolicy = Object.freeze({
+  maximumDepth: 4,
+  maximumNodes: 32,
+  maximumConcurrentSubagents: 3,
+});
+
 export class PostgresSubagentJobError extends Error {
   readonly code: string;
 
@@ -72,19 +93,23 @@ type IsolatedWorkspaceForker = (
   request: ToolBrokerWorkspaceForkRequest,
 ) => Promise<ToolBrokerWorkspaceForkResponse>;
 
-const CLOUD_SUBAGENT_LEAF_BOUNDARY = [
-  "## PiCloud delegated leaf boundary",
+const CLOUD_SUBAGENT_EXECUTION_BOUNDARY = [
+  "## PiCloud delegated execution boundary",
   "Execute only the current child task. Inherited conversation entries are background context, not pending instructions.",
-  "Do not call, simulate, or request the subagent Tool and do not delegate recursively.",
   "A durable contact_supervisor Tool is available across cloud Workers. Use progress_update only for meaningful progress; use need_decision or interview_request only when parent input is truly required, then wait for the reply.",
   "Use only Tools actually registered in this child Run, then return a focused result to the parent.",
 ].join("\n");
 const LOCAL_CHILD_CLAIM_GRACE_MS = 75;
 
-function childSystemPrompt(profilePrompt: string | undefined): string {
-  return profilePrompt === undefined
-    ? CLOUD_SUBAGENT_LEAF_BOUNDARY
-    : `${profilePrompt}\n\n${CLOUD_SUBAGENT_LEAF_BOUNDARY}`;
+function childSystemPrompt(profilePrompt: string | undefined, canSpawnChildren: boolean): string {
+  const recursionBoundary = canSpawnChildren
+    ? [
+        "You may call the subagent Tool for a bounded, independent subtask when delegation materially improves the result.",
+        "Every descendant shares one root tree budget. Do not repeat inherited delegation requests or create recursive work without a concrete stopping condition.",
+      ].join("\n")
+    : "This Child is at the deployment-owned recursion boundary. Do not call or request another subagent.";
+  const boundary = `${CLOUD_SUBAGENT_EXECUTION_BOUNDARY}\n${recursionBoundary}`;
+  return profilePrompt === undefined ? boundary : `${profilePrompt}\n\n${boundary}`;
 }
 
 function nonEmpty(value: string, name: string, maximum: number): string {
@@ -197,15 +222,27 @@ export class PostgresSubagentJobProvider {
   readonly #database: Kysely<Database>;
   readonly #id: IdGenerator;
   readonly #forkWorkspace: IsolatedWorkspaceForker | undefined;
+  readonly #treePolicy: CloudSubagentTreePolicy;
 
   constructor(options: {
     database: Kysely<Database>;
     idGenerator?: IdGenerator;
     forkWorkspace?: IsolatedWorkspaceForker;
+    treePolicy?: CloudSubagentTreePolicy;
   }) {
     this.#database = options.database;
     this.#id = options.idGenerator ?? randomUUID;
     this.#forkWorkspace = options.forkWorkspace;
+    const treePolicy = options.treePolicy ?? DEFAULT_CLOUD_SUBAGENT_TREE_POLICY;
+    for (const [name, value] of Object.entries(treePolicy)) {
+      if (!Number.isSafeInteger(value) || value < 1 || value > 10_000) {
+        throw new TypeError(`Subagent tree policy ${name} is invalid`);
+      }
+    }
+    if (treePolicy.maximumConcurrentSubagents > treePolicy.maximumNodes) {
+      throw new TypeError("Subagent tree concurrency exceeds its node budget");
+    }
+    this.#treePolicy = { ...treePolicy };
   }
 
   async start(input: StartCloudSubagentJobInput): Promise<CloudSubagentJobHandle> {
@@ -294,6 +331,7 @@ export class PostgresSubagentJobProvider {
           "parent_session.id as sessionId",
           "parent_session.desired_model_profile_id as modelProfileId",
           "parent_session.sandbox_retention_policy as sandboxRetention",
+          "parent_session.session_kind as sessionKind",
           "parent_session.workspace_snapshot_key as workspaceSnapshotKey",
           "parent_session.current_workspace_version_id as sessionWorkspaceVersionId",
           "parent_session.forked_from_session_id as forkedFromSessionId",
@@ -348,6 +386,80 @@ export class PostgresSubagentJobProvider {
         throw new PostgresSubagentJobError(
           "parent_authority_expired",
           "Parent Agent Run no longer owns Subagent dispatch authority",
+        );
+      }
+
+      const parentExecution =
+        parent.sessionKind === "subagent"
+          ? await transaction
+              .selectFrom("subagent_executions")
+              .select([
+                "id",
+                "root_session_id as rootSessionId",
+                "root_run_id as rootRunId",
+                "depth",
+              ])
+              .where("tenant_id", "=", input.tenantId)
+              .where("child_session_id", "=", input.parentSessionId)
+              .where("child_run_id", "=", input.parentRunId)
+              .executeTakeFirst()
+          : undefined;
+      if (parent.sessionKind === "subagent" && parentExecution === undefined) {
+        throw new PostgresSubagentJobError(
+          "parent_tree_invalid",
+          "Parent Subagent is missing its durable tree identity",
+        );
+      }
+      const treeContext = {
+        rootSessionId: parentExecution?.rootSessionId ?? input.parentSessionId,
+        rootRunId: parentExecution?.rootRunId ?? input.parentRunId,
+        parentExecutionId: parentExecution?.id ?? null,
+        depth: (parentExecution?.depth ?? 0) + 1,
+      };
+      if (treeContext.depth > this.#treePolicy.maximumDepth) {
+        throw new PostgresSubagentJobError(
+          "subagent_tree_depth_exhausted",
+          `Subagent tree depth limit ${String(this.#treePolicy.maximumDepth)} was reached`,
+        );
+      }
+      if (treeContext.rootRunId !== input.parentRunId) {
+        const rootRun = await transaction
+          .selectFrom("runs")
+          .select("id")
+          .where("tenant_id", "=", input.tenantId)
+          .where("id", "=", treeContext.rootRunId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (rootRun === undefined) {
+          throw new PostgresSubagentJobError(
+            "parent_tree_invalid",
+            "Subagent root Run was not found",
+          );
+        }
+      }
+      const treeNodes = await transaction
+        .selectFrom("subagent_executions")
+        .select(({ fn }) => fn.countAll<string>().as("count"))
+        .where("tenant_id", "=", input.tenantId)
+        .where("root_run_id", "=", treeContext.rootRunId)
+        .executeTakeFirstOrThrow();
+      const activeTreeNodes = await transaction
+        .selectFrom("subagent_executions")
+        .select(({ fn }) => fn.countAll<string>().as("count"))
+        .where("tenant_id", "=", input.tenantId)
+        .where("root_run_id", "=", treeContext.rootRunId)
+        .where("state", "in", ["preparing", "queued", "running"])
+        .executeTakeFirstOrThrow();
+      if (Number(treeNodes.count) >= this.#treePolicy.maximumNodes) {
+        throw new PostgresSubagentJobError(
+          "subagent_tree_node_budget_exhausted",
+          `Subagent tree node limit ${String(this.#treePolicy.maximumNodes)} was reached`,
+        );
+      }
+      if (Number(activeTreeNodes.count) >= this.#treePolicy.maximumConcurrentSubagents) {
+        throw new PostgresSubagentJobError(
+          "subagent_tree_concurrency_exhausted",
+          `Subagent tree concurrency limit ${String(this.#treePolicy.maximumConcurrentSubagents)} was reached`,
         );
       }
 
@@ -599,7 +711,10 @@ export class PostgresSubagentJobProvider {
           turn_id: childTurnId,
           command_id: childCommandId,
           environment_version_id: parent.environmentVersionId,
-          agent_system_prompt: childSystemPrompt(input.systemPrompt),
+          agent_system_prompt: childSystemPrompt(
+            input.systemPrompt,
+            treeContext.depth < this.#treePolicy.maximumDepth,
+          ),
           tool_capability_snapshot: sql<unknown[]>`${JSON.stringify(tools)}::jsonb`,
           source_set_snapshot: parent.sourceSetSnapshot,
           conversation_base_seq: 0,
@@ -657,6 +772,10 @@ export class PostgresSubagentJobProvider {
           parent_run_id: input.parentRunId,
           parent_attempt_id: input.parentAttemptId,
           parent_tool_call_id: input.parentToolCallId,
+          root_session_id: treeContext.rootSessionId,
+          root_run_id: treeContext.rootRunId,
+          parent_execution_id: treeContext.parentExecutionId,
+          depth: treeContext.depth,
           workflow_run_id: input.workflowRunId,
           step_index: input.stepIndex,
           request_sha256: fingerprint,
@@ -1008,6 +1127,43 @@ export class PostgresSubagentJobProvider {
     };
   }
 
+  async treeContext(tenantId: string, childRunId: string): Promise<CloudSubagentTreeContext> {
+    const row = await this.#database
+      .selectFrom("subagent_executions")
+      .select([
+        "id as executionId",
+        "root_session_id as rootSessionId",
+        "root_run_id as rootRunId",
+        "parent_execution_id as parentExecutionId",
+        "depth",
+      ])
+      .where("tenant_id", "=", tenantId)
+      .where("child_run_id", "=", childRunId)
+      .executeTakeFirst();
+    if (row === undefined) {
+      throw new PostgresSubagentJobError(
+        "parent_tree_invalid",
+        "Subagent Run is missing its durable tree identity",
+      );
+    }
+    const nodeCount = await this.#database
+      .selectFrom("subagent_executions")
+      .select(({ fn }) => fn.countAll<string>().as("count"))
+      .where("tenant_id", "=", tenantId)
+      .where("root_run_id", "=", row.rootRunId)
+      .executeTakeFirstOrThrow();
+    return {
+      executionId: row.executionId,
+      rootSessionId: row.rootSessionId,
+      rootRunId: row.rootRunId,
+      ...(row.parentExecutionId === null ? {} : { parentExecutionId: row.parentExecutionId }),
+      depth: row.depth,
+      canSpawnChildren:
+        row.depth < this.#treePolicy.maximumDepth &&
+        Number(nodeCount.count) < this.#treePolicy.maximumNodes,
+    };
+  }
+
   async result(tenantId: string, executionId: string): Promise<CloudSubagentJobResult> {
     const status = await this.status(tenantId, executionId);
     if (status.state !== "completed") return status;
@@ -1060,6 +1216,14 @@ export class PostgresSubagentJobProvider {
   }
 
   async cancel(tenantId: string, executionId: string): Promise<CloudSubagentJobResult> {
+    const childExecutions = await this.#database
+      .selectFrom("subagent_executions")
+      .select("id")
+      .where("tenant_id", "=", tenantId)
+      .where("parent_execution_id", "=", executionId)
+      .orderBy("created_at", "desc")
+      .execute();
+    for (const child of childExecutions) await this.cancel(tenantId, child.id);
     await this.#database.transaction().execute(async (transaction) => {
       const row = await transaction
         .selectFrom("subagent_executions as execution")
@@ -1227,7 +1391,17 @@ export class PostgresSubagentJobProvider {
       .orderBy("child_run.settled_at", "asc")
       .limit(limit)
       .execute();
-    for (const row of terminal) await this.status(row.tenantId, row.id);
+    for (const row of terminal) {
+      const activeChildren = await this.#database
+        .selectFrom("subagent_executions")
+        .select("id")
+        .where("tenant_id", "=", row.tenantId)
+        .where("parent_execution_id", "=", row.id)
+        .where("state", "in", ["preparing", "queued", "running"])
+        .execute();
+      for (const child of activeChildren) await this.cancel(row.tenantId, child.id);
+      await this.status(row.tenantId, row.id);
+    }
 
     const stale = await this.#database
       .selectFrom("subagent_executions")

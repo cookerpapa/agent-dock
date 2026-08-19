@@ -124,6 +124,8 @@ export {
   downIsolatedSubagentWorkspaces,
   upConversationTailPruning,
   downConversationTailPruning,
+  upRecursiveSubagentTrees,
+  downRecursiveSubagentTrees,
 } from "./migrations/index.ts";
 
 export {

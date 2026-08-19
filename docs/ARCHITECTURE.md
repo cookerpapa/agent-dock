@@ -136,7 +136,7 @@ security boundary.
 
 PiCloud pins the public `pi-subagents` package and preserves its model-visible
 Tool schema, deployment-owned profiles and workflow-script runtime. A narrow
-`PI_SUBAGENT_PI_BINARY` adapter replaces only local leaf execution. Every leaf
+`PI_SUBAGENT_PI_BINARY` adapter replaces only local child execution. Every child
 becomes a typed `session_kind=subagent` Pi Session, Run and RunAttempt in
 PostgreSQL and is claimed by the ordinary shared Worker pool. The product
 projects it beneath the causal parent Turn with explicit context and Workspace
@@ -144,8 +144,18 @@ mode labels; its native transcript is inspectable but read-only. Focused tree
 navigation roots itself at the selected Child and shows inherited Pi context,
 while whole-tree navigation attaches every Child to its causal parent Turn. It
 never masquerades as a normal human conversation fork. A child never inherits
-more Tools than the immutable parent Run snapshot, and subagent Sessions cannot
-recursively register the orchestration Tool.
+more Tools than the immutable parent Run snapshot.
+
+Children may recursively delegate through the same cloud Tool contract. Every
+execution stores its root Session/Run, immediate parent execution and depth;
+all descendants share one deployment-owned tree budget. Defaults are depth 4,
+32 total nodes and 3 simultaneously active descendants. The Tool is omitted at
+the fixed depth/node boundary, while a concurrent-spawn race is rejected under
+the root-Run lock. These bounds can be configured per Worker deployment but are
+never model-controlled. Nested Child Runs use the same PostgreSQL queue,
+RunAttempt fence, Tool Broker authorization and Cube Workspace modes as the
+first generation. Cancelling or archiving a parent covers its full descendant
+execution subtree.
 
 The upstream native supervisor channel is local-file based, so PiCloud replaces
 that transport with a PostgreSQL channel while preserving the

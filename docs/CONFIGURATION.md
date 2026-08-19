@@ -23,6 +23,10 @@ Important operator values include:
 
 - HTTP bind address/port;
 - Pi Worker replica profile and per-Worker capacity;
+- recursive Subagent maximum depth, total nodes per root Run and simultaneous
+  active descendants (`PI_CLOUD_SUBAGENT_MAXIMUM_DEPTH`,
+  `PI_CLOUD_SUBAGENT_MAXIMUM_NODES`,
+  `PI_CLOUD_SUBAGENT_MAXIMUM_CONCURRENT`; defaults `4/32/3`);
 - public-registration and tenant quotas;
 - Tool, model and Turn timeouts;
 - Cube warm/persistent retention and capacity;

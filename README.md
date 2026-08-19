@@ -37,8 +37,9 @@ schema or maintained deployment. The current sources of truth are this README,
 - Pi Session tree navigation with focused/full-tree views, conversation forks,
   recursive subtree deletion and settled-message tail pruning;
 - the pinned community `pi-subagents` workflow contract, with durable Child
-  Sessions/Runs, focused/full delegated trees, cross-Worker supervisor messaging,
-  and shared or isolated Cube execution;
+  Sessions/Runs, deployment-bounded recursive Agent trees, focused/full tree
+  navigation, cross-Worker supervisor messaging, and shared or isolated Cube
+  execution;
 - pure chat without Sandbox activation;
 - lazy Cube activation, warm reuse and optional persistent Sandbox retention;
 - a Workspace directory/source browser, isolated Web Terminal, and safe deletion;
@@ -103,8 +104,11 @@ operation. Concurrent Agent runtimes in one Host never share a global Tool set.
 
 Pi subagents use the maintained `pi-subagents` workflow and agent-profile
 contract rather than a PiCloud-specific orchestration language. The package's
-leaf `pi` process boundary is replaced by a PostgreSQL-backed Child Session and
-Child Run on the same Worker pool. Tool-free reviewers consume no Cube;
+local child-process boundary is replaced by a PostgreSQL-backed Child Session
+and Child Run on the same Worker pool. Eligible Child Runs may delegate again;
+the resulting tree shares one root Run budget (depth 4, 32 nodes and 3 active
+descendants by default), and every edge remains a durable fenced execution.
+Tool-free reviewers consume no Cube;
 `shared_serialized` children temporarily receive the parent's Cube authority;
 `worktree:true` creates a trusted persistent-Volume fork and an independent
 Cube while preserving the selected agent's independent `fresh`/`fork` context

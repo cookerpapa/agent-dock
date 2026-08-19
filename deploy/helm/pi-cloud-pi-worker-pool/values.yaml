@@ -61,6 +61,10 @@ credentials:
 runtime:
   allowInsecureInternalHttp: true
   externalWorkerEventLog: true
+  subagents:
+    maximumDepth: 4
+    maximumNodes: 32
+    maximumConcurrent: 3
   checkpointCache:
     ttlMs: 600000
     maximumEntries: 512

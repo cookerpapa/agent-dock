@@ -71,6 +71,7 @@ import * as isolatedSubagentWorkspaces from "./069_isolated_subagent_workspaces.
 import * as conversationTailPruning from "./070_conversation_tail_pruning.ts";
 import * as subagentSupervisorChannel from "./071_subagent_supervisor_channel.ts";
 import * as sharedPiSessionEntries from "./072_shared_pi_session_entries.ts";
+import * as recursiveSubagentTrees from "./073_recursive_subagent_trees.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -147,6 +148,7 @@ export const migrationProvider: MigrationProvider = {
       "070_conversation_tail_pruning": conversationTailPruning,
       "071_subagent_supervisor_channel": subagentSupervisorChannel,
       "072_shared_pi_session_entries": sharedPiSessionEntries,
+      "073_recursive_subagent_trees": recursiveSubagentTrees,
     };
   },
 };
@@ -415,3 +417,7 @@ export {
   down as downSharedPiSessionEntries,
   up as upSharedPiSessionEntries,
 } from "./072_shared_pi_session_entries.ts";
+export {
+  down as downRecursiveSubagentTrees,
+  up as upRecursiveSubagentTrees,
+} from "./073_recursive_subagent_trees.ts";

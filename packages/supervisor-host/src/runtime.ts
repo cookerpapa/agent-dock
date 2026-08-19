@@ -417,6 +417,11 @@ export class PiWorkerRuntime {
       const subagentJobs = new PostgresSubagentJobProvider({
         database: this.#database,
         forkWorkspace: (request) => this.#toolBroker.forkWorkspace(request),
+        treePolicy: {
+          maximumDepth: this.#config.subagentMaximumDepth,
+          maximumNodes: this.#config.subagentMaximumNodes,
+          maximumConcurrentSubagents: this.#config.subagentMaximumConcurrent,
+        },
       });
       const subagentSupervisor = new PostgresSubagentSupervisorChannel(this.#database);
       await subagentJobs.reapStalePreparations().catch(() => undefined);
@@ -450,141 +455,137 @@ export class PiWorkerRuntime {
             .where("tenant_id", "=", command.payload.tenantId)
             .where("id", "=", command.payload.sessionId)
             .executeTakeFirstOrThrow();
-          if (session.session_kind === "subagent") {
-            await this.#database
-              .selectFrom("subagent_executions")
-              .select("id")
-              .where("tenant_id", "=", command.payload.tenantId)
-              .where("child_session_id", "=", command.payload.sessionId)
-              .where("child_run_id", "=", command.payload.runId)
-              .executeTakeFirstOrThrow();
-            return [
-              createCloudContactSupervisorTool({
-                channel: subagentSupervisor,
-                tenantId: command.payload.tenantId,
-                childSessionId: command.payload.sessionId,
-                childRunId: command.payload.runId,
-              }),
-            ];
+          const treeContext =
+            session.session_kind === "subagent"
+              ? await subagentJobs.treeContext(command.payload.tenantId, command.payload.runId)
+              : undefined;
+          const contactTool =
+            treeContext === undefined
+              ? undefined
+              : createCloudContactSupervisorTool({
+                  channel: subagentSupervisor,
+                  tenantId: command.payload.tenantId,
+                  childSessionId: command.payload.sessionId,
+                  childRunId: command.payload.runId,
+                });
+          const supervisorTool = createCloudSubagentSupervisorTool({
+            channel: subagentSupervisor,
+            jobs: subagentJobs,
+            tenantId: command.payload.tenantId,
+            parentSessionId: command.payload.sessionId,
+          });
+          if (treeContext !== undefined && !treeContext.canSpawnChildren) {
+            return [...(contactTool === undefined ? [] : [contactTool]), supervisorTool];
           }
-          return [
-            await createPiSubagentsCloudTool({
-              context: {
-                parentSessionId: command.payload.sessionId,
-                model: {
-                  provider: command.payload.model.provider,
-                  id: command.payload.model.modelId,
-                },
-                thinkingLevel: command.payload.model.thinkingLevel,
-              },
-              coordinator: {
-                start: async (input, parentToolCallId) => {
-                  const contextMode = subagentOption(input.options, "contextMode");
-                  const workspaceMode = subagentOption(input.options, "workspaceMode");
-                  if (contextMode !== "fresh" && contextMode !== "fork") {
-                    throw new Error("pi-subagents provided an invalid context mode");
-                  }
-                  if (
-                    workspaceMode !== "none" &&
-                    workspaceMode !== "shared_serialized" &&
-                    workspaceMode !== "isolated"
-                  ) {
-                    throw new Error("pi-subagents provided an unsupported Workspace mode");
-                  }
-                  if (
-                    workspaceMode === "isolated" &&
-                    orchestrationContext.activation === undefined
-                  ) {
-                    throw new Error(
-                      "Isolated Subagent execution requires an active parent Sandbox",
-                    );
-                  }
-                  const tools = parseCloudToolCapabilitySnapshot(
-                    input.options.requestedToolCapabilities,
-                  );
-                  const systemPrompt = subagentOption(input.options, "systemPrompt");
-                  const child = await subagentJobs.start({
-                    tenantId: command.payload.tenantId,
-                    parentSessionId: command.payload.sessionId,
-                    parentRunId: command.payload.runId,
-                    parentAttemptId: command.payload.attemptId,
-                    parentFencingToken: command.payload.fencingToken,
-                    parentToolCallId,
-                    workflowRunId: input.runId,
-                    stepIndex: input.stepIndex,
-                    agentName: input.agent,
-                    prompt: input.prompt,
-                    ...(systemPrompt === undefined ? {} : { systemPrompt }),
-                    contextMode,
-                    workspaceMode,
-                    requestedToolCapabilities: tools,
-                    ...(workspaceMode !== "isolated" ||
-                    orchestrationContext.activation === undefined
-                      ? {}
-                      : { parentActivation: orchestrationContext.activation }),
-                  });
-                  this.#runWorker?.prioritizeSubagent?.(child.childCommandId);
-                  return {
-                    providerJobId: child.executionId,
-                    state: subagentExternalState(child.state),
-                  };
-                },
-                status: async (providerJobId) => {
-                  const child = await subagentJobs.status(command.payload.tenantId, providerJobId);
-                  const coordination = await subagentSupervisor.latestForExecution(
-                    command.payload.tenantId,
-                    providerJobId,
-                  );
-                  return {
-                    providerJobId,
-                    state:
-                      coordination?.expectsReply === true
-                        ? ("blocked" as const)
-                        : subagentExternalState(child.state),
-                    ...(coordination === undefined
-                      ? {}
-                      : {
-                          coordinationRequest: {
-                            requestId: coordination.requestId,
-                            reason: coordination.reason,
-                            message: coordination.message,
-                            expectsReply: coordination.expectsReply,
-                          },
-                        }),
-                    ...(child.failureCode === undefined ? {} : { failureCode: child.failureCode }),
-                    ...(child.failureMessage === undefined
-                      ? {}
-                      : { failureMessage: child.failureMessage }),
-                  };
-                },
-                result: async (providerJobId) => {
-                  const child = await subagentJobs.result(command.payload.tenantId, providerJobId);
-                  return {
-                    providerJobId,
-                    state: subagentExternalState(child.state),
-                    ...(child.output === undefined ? {} : { output: child.output }),
-                    ...(child.failureCode === undefined ? {} : { failureCode: child.failureCode }),
-                    ...(child.failureMessage === undefined
-                      ? {}
-                      : { failureMessage: child.failureMessage }),
-                  };
-                },
-                reattach: async (providerJobId) => {
-                  const child = await subagentJobs.status(command.payload.tenantId, providerJobId);
-                  return { providerJobId, state: subagentExternalState(child.state) };
-                },
-                cancel: async (providerJobId) => {
-                  const child = await subagentJobs.cancel(command.payload.tenantId, providerJobId);
-                  return { providerJobId, state: subagentExternalState(child.state) };
-                },
-              },
-            }),
-            createCloudSubagentSupervisorTool({
-              channel: subagentSupervisor,
-              jobs: subagentJobs,
-              tenantId: command.payload.tenantId,
+          const delegationTool = await createPiSubagentsCloudTool({
+            context: {
               parentSessionId: command.payload.sessionId,
-            }),
+              model: {
+                provider: command.payload.model.provider,
+                id: command.payload.model.modelId,
+              },
+              thinkingLevel: command.payload.model.thinkingLevel,
+            },
+            coordinator: {
+              start: async (input, parentToolCallId) => {
+                const contextMode = subagentOption(input.options, "contextMode");
+                const workspaceMode = subagentOption(input.options, "workspaceMode");
+                if (contextMode !== "fresh" && contextMode !== "fork") {
+                  throw new Error("pi-subagents provided an invalid context mode");
+                }
+                if (
+                  workspaceMode !== "none" &&
+                  workspaceMode !== "shared_serialized" &&
+                  workspaceMode !== "isolated"
+                ) {
+                  throw new Error("pi-subagents provided an unsupported Workspace mode");
+                }
+                if (workspaceMode === "isolated" && orchestrationContext.activation === undefined) {
+                  throw new Error("Isolated Subagent execution requires an active parent Sandbox");
+                }
+                const tools = parseCloudToolCapabilitySnapshot(
+                  input.options.requestedToolCapabilities,
+                );
+                const systemPrompt = subagentOption(input.options, "systemPrompt");
+                const child = await subagentJobs.start({
+                  tenantId: command.payload.tenantId,
+                  parentSessionId: command.payload.sessionId,
+                  parentRunId: command.payload.runId,
+                  parentAttemptId: command.payload.attemptId,
+                  parentFencingToken: command.payload.fencingToken,
+                  parentToolCallId,
+                  workflowRunId: input.runId,
+                  stepIndex: input.stepIndex,
+                  agentName: input.agent,
+                  prompt: input.prompt,
+                  ...(systemPrompt === undefined ? {} : { systemPrompt }),
+                  contextMode,
+                  workspaceMode,
+                  requestedToolCapabilities: tools,
+                  ...(workspaceMode !== "isolated" || orchestrationContext.activation === undefined
+                    ? {}
+                    : { parentActivation: orchestrationContext.activation }),
+                });
+                this.#runWorker?.prioritizeSubagent?.(child.childCommandId);
+                return {
+                  providerJobId: child.executionId,
+                  state: subagentExternalState(child.state),
+                };
+              },
+              status: async (providerJobId) => {
+                const child = await subagentJobs.status(command.payload.tenantId, providerJobId);
+                const coordination = await subagentSupervisor.latestForExecution(
+                  command.payload.tenantId,
+                  providerJobId,
+                );
+                return {
+                  providerJobId,
+                  state:
+                    coordination?.expectsReply === true
+                      ? ("blocked" as const)
+                      : subagentExternalState(child.state),
+                  ...(coordination === undefined
+                    ? {}
+                    : {
+                        coordinationRequest: {
+                          requestId: coordination.requestId,
+                          reason: coordination.reason,
+                          message: coordination.message,
+                          expectsReply: coordination.expectsReply,
+                        },
+                      }),
+                  ...(child.failureCode === undefined ? {} : { failureCode: child.failureCode }),
+                  ...(child.failureMessage === undefined
+                    ? {}
+                    : { failureMessage: child.failureMessage }),
+                };
+              },
+              result: async (providerJobId) => {
+                const child = await subagentJobs.result(command.payload.tenantId, providerJobId);
+                return {
+                  providerJobId,
+                  state: subagentExternalState(child.state),
+                  ...(child.output === undefined ? {} : { output: child.output }),
+                  ...(child.failureCode === undefined ? {} : { failureCode: child.failureCode }),
+                  ...(child.failureMessage === undefined
+                    ? {}
+                    : { failureMessage: child.failureMessage }),
+                };
+              },
+              reattach: async (providerJobId) => {
+                const child = await subagentJobs.status(command.payload.tenantId, providerJobId);
+                return { providerJobId, state: subagentExternalState(child.state) };
+              },
+              cancel: async (providerJobId) => {
+                const child = await subagentJobs.cancel(command.payload.tenantId, providerJobId);
+                return { providerJobId, state: subagentExternalState(child.state) };
+              },
+            },
+          });
+          return [
+            ...(contactTool === undefined ? [] : [contactTool]),
+            delegationTool,
+            supervisorTool,
           ];
         },
         runAttemptPhaseObserver: new PostgresRunAttemptPhaseObserver({

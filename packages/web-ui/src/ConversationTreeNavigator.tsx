@@ -43,8 +43,8 @@ export function selectConversationNavigationTarget<T>(
 function branchChildren(tree: ConversationTreeResource) {
   const children = new Map<string, ConversationTreeBranchResource[]>();
   for (const branch of tree.branches) {
-    if (branch.parentSessionId === null || branch.forkedFromEntryId === null) continue;
-    const key = `${branch.parentSessionId}:${branch.forkedFromEntryId}`;
+    if (branch.parentSessionId === null) continue;
+    const key = `${branch.parentSessionId}:${branch.forkedFromEntryId ?? "__root__"}`;
     const siblings = children.get(key) ?? [];
     siblings.push(branch);
     children.set(key, siblings);
@@ -79,6 +79,7 @@ function TreeBranch({
   currentSessionId: string;
   navigate: (sessionId: string, target?: { turnId: string; entryId: string }) => void;
 }) {
+  const unanchoredChildren = children.get(`${branch.sessionId}:__root__`) ?? [];
   return (
     <div className="product-tree-branch" style={{ "--tree-depth": depth } as React.CSSProperties}>
       {branch.parentSessionId === null && branch.kind === "conversation" ? null : (
@@ -109,6 +110,17 @@ function TreeBranch({
           </span>
         </button>
       )}
+      {unanchoredChildren.map((child) => (
+        <TreeBranch
+          activeTurnId={activeTurnId}
+          branch={child}
+          children={children}
+          currentSessionId={currentSessionId}
+          depth={depth + 1}
+          key={child.sessionId}
+          navigate={navigate}
+        />
+      ))}
       {branch.entries.map((entry) => {
         const nested = children.get(`${branch.sessionId}:${entry.entryId}`) ?? [];
         return (

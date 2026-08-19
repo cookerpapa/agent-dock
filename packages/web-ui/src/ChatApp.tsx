@@ -736,6 +736,41 @@ export default function ChatApp() {
     }
   }
 
+  function renderDelegatedNode(
+    delegated: DelegatedSessionSummaryResource,
+    depth: number,
+  ): ReactNode {
+    const childDelegates = delegatesByParent.get(delegated.sessionId) ?? [];
+    return (
+      <div className="product-conversation-tree-node" key={delegated.executionId}>
+        <div
+          className={`product-conversation-row product-delegated-session ${delegated.contextMode}${
+            state.session?.sessionId === delegated.sessionId ? " active" : ""
+          }`}
+          style={{ "--conversation-depth": depth } as CSSProperties}
+        >
+          <button
+            disabled={conversationLoading !== null || operation !== null}
+            onClick={() => void openDelegatedSession(delegated)}
+            type="button"
+          >
+            <strong>
+              <span className="product-conversation-branch-mark">
+                {delegated.contextMode === "fork" ? "↳" : "⋯"}
+              </span>
+              {delegated.agentName} · Subagent
+            </strong>
+            <small>
+              第 {delegated.depth} 层 · {delegatedContextLabel(delegated.contextMode)} ·{" "}
+              {delegatedWorkspaceLabel(delegated.workspaceMode)} · {delegated.state}
+            </small>
+          </button>
+        </div>
+        {childDelegates.map((child) => renderDelegatedNode(child, depth + 1))}
+      </div>
+    );
+  }
+
   function renderConversationNode(conversation: ConversationSummaryResource, depth = 0): ReactNode {
     const childConversations = conversationChildren.get(conversation.sessionId) ?? [];
     const childDelegates = delegatesByParent.get(conversation.sessionId) ?? [];
@@ -772,32 +807,7 @@ export default function ChatApp() {
           </button>
         </div>
         {childConversations.map((child) => renderConversationNode(child, depth + 1))}
-        {childDelegates.map((delegated) => (
-          <div
-            className={`product-conversation-row product-delegated-session ${delegated.contextMode}${
-              state.session?.sessionId === delegated.sessionId ? " active" : ""
-            }`}
-            key={delegated.executionId}
-            style={{ "--conversation-depth": depth + 1 } as CSSProperties}
-          >
-            <button
-              disabled={conversationLoading !== null || operation !== null}
-              onClick={() => void openDelegatedSession(delegated)}
-              type="button"
-            >
-              <strong>
-                <span className="product-conversation-branch-mark">
-                  {delegated.contextMode === "fork" ? "↳" : "⋯"}
-                </span>
-                {delegated.agentName} · Subagent
-              </strong>
-              <small>
-                {delegatedContextLabel(delegated.contextMode)} ·{" "}
-                {delegatedWorkspaceLabel(delegated.workspaceMode)} · {delegated.state}
-              </small>
-            </button>
-          </div>
-        ))}
+        {childDelegates.map((delegated) => renderDelegatedNode(delegated, depth + 1))}
       </div>
     );
   }

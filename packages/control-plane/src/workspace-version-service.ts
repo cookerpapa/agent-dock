@@ -375,7 +375,7 @@ export class WorkspaceVersionService {
             .selectFrom("subagent_executions")
             .select("id")
             .where("tenant_id", "=", tenantId)
-            .where("parent_session_id", "in", [sessionId, ...descendantSessionIds])
+            .where("root_session_id", "in", [sessionId, ...descendantSessionIds])
             .where("state", "in", ["preparing", "queued", "running"])
             .limit(1)
             .executeTakeFirst();
@@ -468,7 +468,7 @@ export class WorkspaceVersionService {
               .selectFrom("subagent_executions")
               .select("child_session_id")
               .where("tenant_id", "=", tenantId)
-              .where("parent_session_id", "in", [sessionId, ...descendantSessionIds]),
+              .where("root_session_id", "in", [sessionId, ...descendantSessionIds]),
           )
           .execute();
         const operationId = this.#idGenerator();

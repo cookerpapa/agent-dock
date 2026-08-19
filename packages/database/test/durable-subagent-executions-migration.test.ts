@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   downDurableSubagentExecutions,
   downIsolatedSubagentWorkspaces,
+  downRecursiveSubagentTrees,
   upDurableSubagentExecutions,
   upIsolatedSubagentWorkspaces,
+  upRecursiveSubagentTrees,
 } from "../src/index.ts";
 import { applyCompiledQueries, compileMigration } from "./postgres-test-harness.ts";
 
@@ -116,6 +118,26 @@ describe("durable Subagent executions migration", () => {
         { workspace_kind: "subagent_isolated", child_workspace_id: CHILD_WORKSPACE },
       ]);
 
+      await applyCompiledQueries(postgres, await compileMigration(upRecursiveSubagentTrees));
+      const recursiveIdentity = await postgres.query<{
+        root_session_id: string;
+        root_run_id: string;
+        parent_execution_id: string | null;
+        depth: number;
+      }>(`
+        select root_session_id, root_run_id, parent_execution_id, depth
+        from subagent_executions
+      `);
+      expect(recursiveIdentity.rows).toEqual([
+        {
+          root_session_id: PARENT_SESSION,
+          root_run_id: PARENT_RUN,
+          parent_execution_id: null,
+          depth: 1,
+        },
+      ]);
+
+      await applyCompiledQueries(postgres, await compileMigration(downRecursiveSubagentTrees));
       await applyCompiledQueries(postgres, await compileMigration(downIsolatedSubagentWorkspaces));
       await applyCompiledQueries(postgres, await compileMigration(downDurableSubagentExecutions));
       const columns = await postgres.query<{ column_name: string }>(`

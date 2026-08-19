@@ -164,6 +164,7 @@
       "required": [
         "allowInsecureInternalHttp",
         "externalWorkerEventLog",
+        "subagents",
         "checkpointCache",
         "timeouts",
         "repositoryImport"
@@ -171,6 +172,16 @@
       "properties": {
         "allowInsecureInternalHttp": { "type": "boolean" },
         "externalWorkerEventLog": { "type": "boolean" },
+        "subagents": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maximumDepth", "maximumNodes", "maximumConcurrent"],
+          "properties": {
+            "maximumDepth": { "type": "integer", "minimum": 1, "maximum": 64 },
+            "maximumNodes": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "maximumConcurrent": { "type": "integer", "minimum": 1, "maximum": 1000 }
+          }
+        },
         "checkpointCache": {
           "type": "object",
           "additionalProperties": false,

@@ -25,7 +25,7 @@ conversation.
 
 - Pin and adapt the public `pi-subagents` contract; do not patch Pi's Agent
   Loop or invent a competing agent-profile/workflow language.
-- Replace only the package's leaf execution backend. Each leaf is admitted as
+- Replace only the package's child execution backend. Each child is admitted as
   a durable Child Session and Child Run, then claimed by the existing shared
   Pi Agent Host pool.
 - PostgreSQL owns the parent/child execution relation, child Run state and all
@@ -43,9 +43,16 @@ conversation.
   target ordinary conversation Sessions only.
 - Freeze the child's Tool set as an intersection with the parent Run
   capability snapshot. A child can never widen its parent's grant.
+- Register the same cloud Subagent Tool in eligible Child Runs. Persist
+  `root_run_id`, `parent_execution_id` and `depth`, serialize admission under
+  the root Run and enforce one deployment-owned budget across the whole tree.
+  The maintained defaults are depth 4, 32 total nodes and 3 active descendants;
+  deployment configuration may lower or raise them within hard validation
+  bounds, but prompts and Tool arguments cannot.
 - Fork native Pi context at the boundary before the current delegation prompt.
-  This preserves earlier context without making “call a subagent” recursively
-  executable inside the Child.
+  This preserves earlier context without copying the parent's “call a
+  subagent” request as the Child's own pending instruction. A Child may still
+  make a new, concrete delegation through its registered Tool.
 - Support explicit Workspace modes:
   - `none`: no Cube Tool capability;
   - `shared_serialized`: the parent and child use one Workspace and one
@@ -75,8 +82,10 @@ conversation.
 - Project-controlled agent or extension code remains outside the trusted Host.
   Only deployment-owned profiles are enabled until a separate extension trust
   policy is accepted.
-- Parent cancellation is propagated to durable Child Runs. The package's
-  cross-invocation management actions (including standalone steer/resume UI)
+- Parent cancellation is propagated recursively to durable descendant Runs.
+  Tree navigation and archival follow the same durable parent-execution links.
+- The package's cross-invocation management actions (including standalone
+  steer/resume UI)
   remain intentionally unavailable until their local run registry is replaced
   by a PostgreSQL control contract; PiCloud does not pretend local process IDs
   survive Worker replacement.

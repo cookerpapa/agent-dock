@@ -47,7 +47,7 @@ import {
 import { sql, type Kysely, type Transaction } from "kysely";
 import { materializeConversationTurnProjections } from "@pi-cloud/runtime-core/conversation-turn-projection";
 import type { PiCloudMetrics } from "@pi-cloud/observability";
-import { loadDelegatedSessionSummaries } from "./delegated-session-projection.ts";
+import { loadDelegatedSessionTreeSummaries } from "./delegated-session-projection.ts";
 
 export type ControlPlaneStoreOptions = {
   database: Kysely<Database>;
@@ -1127,14 +1127,14 @@ export class ControlPlaneStore {
 
           const activeSubagent = await transaction
             .selectFrom("subagent_executions as execution")
-            .innerJoin("sessions as parent", (join) =>
+            .innerJoin("sessions as root", (join) =>
               join
-                .onRef("parent.tenant_id", "=", "execution.tenant_id")
-                .onRef("parent.id", "=", "execution.parent_session_id"),
+                .onRef("root.tenant_id", "=", "execution.tenant_id")
+                .onRef("root.id", "=", "execution.root_session_id"),
             )
             .select("execution.id")
             .where("execution.tenant_id", "=", this.#tenantId)
-            .where("parent.workspace_id", "=", workspaceId)
+            .where("root.workspace_id", "=", workspaceId)
             .where("execution.state", "in", ["preparing", "queued", "running"])
             .limit(1)
             .executeTakeFirst();
@@ -1147,14 +1147,14 @@ export class ControlPlaneStore {
 
           const childSessionIds = transaction
             .selectFrom("subagent_executions as execution")
-            .innerJoin("sessions as parent", (join) =>
+            .innerJoin("sessions as root", (join) =>
               join
-                .onRef("parent.tenant_id", "=", "execution.tenant_id")
-                .onRef("parent.id", "=", "execution.parent_session_id"),
+                .onRef("root.tenant_id", "=", "execution.tenant_id")
+                .onRef("root.id", "=", "execution.root_session_id"),
             )
             .select("execution.child_session_id")
             .where("execution.tenant_id", "=", this.#tenantId)
-            .where("parent.workspace_id", "=", workspaceId);
+            .where("root.workspace_id", "=", workspaceId);
           await transaction
             .updateTable("sessions")
             .set({
@@ -1304,9 +1304,9 @@ export class ControlPlaneStore {
       .limit(MAX_CONVERSATION_SUMMARIES + 1)
       .execute();
     const visibleRows = rows.slice(0, MAX_CONVERSATION_SUMMARIES);
-    const delegated = await loadDelegatedSessionSummaries(this.#database, {
+    const delegated = await loadDelegatedSessionTreeSummaries(this.#database, {
       tenantId: this.#tenantId,
-      parentSessionIds: visibleRows.map((row) => row.sessionId),
+      rootParentSessionIds: visibleRows.map((row) => row.sessionId),
       maximum: MAX_DELEGATED_SESSION_SUMMARIES,
     });
     return {

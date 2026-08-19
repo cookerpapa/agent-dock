@@ -100,6 +100,9 @@ describe("Supervisor host production configuration", () => {
       supervisorId: "supervisor-production-1",
       supervisorWebSocketUrl: "ws://control-plane:3000/internal/v1/supervisor",
       maxConcurrentSessions: 1,
+      subagentMaximumDepth: 4,
+      subagentMaximumNodes: 32,
+      subagentMaximumConcurrent: 3,
       databaseNotificationUrl: "postgresql://picloud:secret@postgres:5432/picloud",
       managementPort: 4100,
       managementAdvertisedBaseUrl: "http://supervisor-production-1:4100/",
@@ -142,6 +145,13 @@ describe("Supervisor host production configuration", () => {
         PI_CLOUD_REPOSITORY_IMPORT_WAIT_MS: "299999",
       }),
     ).rejects.toThrow("ownership lease");
+    await expect(
+      loadSupervisorHostConfig({
+        ...environment,
+        PI_CLOUD_SUBAGENT_MAXIMUM_NODES: "2",
+        PI_CLOUD_SUBAGENT_MAXIMUM_CONCURRENT: "3",
+      }),
+    ).rejects.toThrow("Subagent concurrency");
   });
 
   it("accepts a private group-readable Kubernetes Secret projection", async () => {

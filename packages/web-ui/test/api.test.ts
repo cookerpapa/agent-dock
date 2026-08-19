@@ -351,6 +351,8 @@ describe("tenant-aware browser API", () => {
                     executionId: "60000000-0000-4000-8000-000000000001",
                     sessionId: "60000000-0000-4000-8000-000000000002",
                     parentSessionId: "20000000-0000-4000-8000-000000000001",
+                    rootSessionId: "20000000-0000-4000-8000-000000000001",
+                    depth: 1,
                     parentTurnId: "60000000-0000-4000-8000-000000000003",
                     title: "worker · subagent",
                     agentName: "worker",

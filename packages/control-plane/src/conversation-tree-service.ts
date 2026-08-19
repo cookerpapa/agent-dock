@@ -13,7 +13,10 @@ import type {
 } from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
-import { loadDelegatedSessionSummaries } from "./delegated-session-projection.ts";
+import {
+  loadDelegatedSessionSummaries,
+  loadDelegatedSessionTreeSummaries,
+} from "./delegated-session-projection.ts";
 
 const MAX_TREE_BRANCHES = 100;
 const MAX_TREE_ENTRIES = 10_000;
@@ -312,7 +315,11 @@ export class ConversationTreeService {
         ? await this.#database
             .selectFrom("subagent_executions")
             .select([
+              "id as executionId",
               "parent_session_id as parentSessionId",
+              "root_session_id as rootSessionId",
+              "parent_execution_id as parentExecutionId",
+              "depth",
               "created_at as createdAt",
               "context_mode as contextMode",
             ])
@@ -321,7 +328,7 @@ export class ConversationTreeService {
             .executeTakeFirst()
         : undefined;
     const humanSessionId =
-      selected.sessionKind === "conversation" ? selected.id : selectedExecution?.parentSessionId;
+      selected.sessionKind === "conversation" ? selected.id : selectedExecution?.rootSessionId;
     if (humanSessionId === undefined) {
       throw new ControlPlaneStoreError(
         "control_plane_misconfigured",
@@ -348,9 +355,14 @@ export class ConversationTreeService {
         ? (delegatedBySession.get(selected.id) ??
           (await this.#delegatedSummary(tenantId, selected.id)))
         : undefined;
+    const selectedDelegatedAncestorSessionIds =
+      selectedExecution === undefined
+        ? []
+        : await this.#delegatedAncestorSessionIds(tenantId, selectedExecution.executionId);
     const sessionIds = [
       ...humanSessions.map((session) => session.id),
       ...delegated.map((summary) => summary.sessionId),
+      ...selectedDelegatedAncestorSessionIds,
       ...(selectedDelegated === undefined ? [] : [selectedDelegated.sessionId]),
     ];
     const uniqueSessionIds = [...new Set(sessionIds)];
@@ -445,8 +457,13 @@ export class ConversationTreeService {
       const inheritedBranch = active.filter(
         (entry) => safeInteger(entry.timestampMs, "Subagent entry timestamp") < createdAt,
       );
-      const inheritedTurns = lineage
-        .flatMap((session) => turnsBySession.get(session.id) ?? [])
+      const inheritedTurns = [
+        ...lineage.map((session) => session.id),
+        ...selectedDelegatedAncestorSessionIds.filter(
+          (sessionId) => sessionId !== selectedDelegated.sessionId,
+        ),
+      ]
+        .flatMap((sessionId) => turnsBySession.get(sessionId) ?? [])
         .filter((turn) => turn.turnId !== selectedDelegated.parentTurnId);
       const inherited = mappedConversationEntries(inheritedBranch, inheritedTurns);
       const mappedInheritedIds = new Set(inherited.map((entry) => entry.entryId));
@@ -476,27 +493,33 @@ export class ConversationTreeService {
       if (mapped.length > MAX_TREE_ENTRIES) {
         throw new ControlPlaneStoreError("invalid_request", "Conversation tree is too large");
       }
+      const focusedRoot: ConversationTreeBranchResource = {
+        kind: "subagent",
+        sessionId: selectedDelegated.sessionId,
+        title: selectedDelegated.title,
+        parentSessionId: null,
+        forkedFromTurnId: null,
+        forkedFromEntryId: null,
+        current: true,
+        agentName: selectedDelegated.agentName,
+        contextMode: selectedDelegated.contextMode,
+        workspaceMode: selectedDelegated.workspaceMode,
+        delegatedState: selectedDelegated.state,
+        entries: mapped.map(({ index: _index, ...entry }) => entry),
+      };
+      const focusedDescendants = delegatedBranches.map((branch) => {
+        if (branch.parentSessionId !== selectedDelegated.sessionId) return branch;
+        const anchor = focusedRoot.entries
+          .filter((entry) => entry.turnId === branch.forkedFromTurnId)
+          .at(-1);
+        return { ...branch, forkedFromEntryId: anchor?.entryId ?? null };
+      });
       return {
         rootSessionId: selectedDelegated.sessionId,
         currentSessionId,
         view,
-        branches: [
-          {
-            kind: "subagent",
-            sessionId: selectedDelegated.sessionId,
-            title: selectedDelegated.title,
-            parentSessionId: null,
-            forkedFromTurnId: null,
-            forkedFromEntryId: null,
-            current: true,
-            agentName: selectedDelegated.agentName,
-            contextMode: selectedDelegated.contextMode,
-            workspaceMode: selectedDelegated.workspaceMode,
-            delegatedState: selectedDelegated.state,
-            entries: mapped.map(({ index: _index, ...entry }) => entry),
-          },
-        ],
-        delegatedSessions: [selectedDelegated],
+        branches: [focusedRoot, ...focusedDescendants],
+        delegatedSessions: [selectedDelegated, ...delegated],
       };
     }
 
@@ -551,28 +574,38 @@ export class ConversationTreeService {
     tenantId: string,
     initialParentSessionIds: readonly string[],
   ): Promise<DelegatedSessionSummaryResource[]> {
-    const pending = [...new Set(initialParentSessionIds)];
-    const loadedParents = new Set<string>();
-    const items: DelegatedSessionSummaryResource[] = [];
-    while (pending.length > 0) {
-      const parents = pending.splice(0, pending.length).filter((id) => !loadedParents.has(id));
-      if (parents.length === 0) continue;
-      for (const parent of parents) loadedParents.add(parent);
-      const loaded = await loadDelegatedSessionSummaries(this.#database, {
-        tenantId,
-        parentSessionIds: parents,
-        maximum: MAX_TREE_DELEGATIONS - items.length,
-      });
-      if (loaded.truncated) {
-        throw new ControlPlaneStoreError(
-          "invalid_request",
-          "Conversation tree has too many delegates",
-        );
-      }
-      items.push(...loaded.items);
-      pending.push(...loaded.items.map((item) => item.sessionId));
+    const loaded = await loadDelegatedSessionTreeSummaries(this.#database, {
+      tenantId,
+      rootParentSessionIds: initialParentSessionIds,
+      maximum: MAX_TREE_DELEGATIONS,
+    });
+    if (loaded.truncated) {
+      throw new ControlPlaneStoreError(
+        "invalid_request",
+        "Conversation tree has too many delegates",
+      );
     }
-    return items;
+    return loaded.items;
+  }
+
+  async #delegatedAncestorSessionIds(tenantId: string, executionId: string): Promise<string[]> {
+    const ancestors = await sql<{ sessionId: string; depth: number }>`
+      with recursive execution_ancestors as (
+        select id, parent_execution_id, child_session_id, depth
+          from subagent_executions
+         where tenant_id = ${tenantId}::uuid
+           and id = ${executionId}::uuid
+        union all
+        select parent.id, parent.parent_execution_id, parent.child_session_id, parent.depth
+          from subagent_executions parent
+          join execution_ancestors child on child.parent_execution_id = parent.id
+         where parent.tenant_id = ${tenantId}::uuid
+      )
+      select child_session_id as "sessionId", depth
+        from execution_ancestors
+       order by depth asc
+    `.execute(this.#database);
+    return ancestors.rows.map((row) => row.sessionId);
   }
 
   async prune(
@@ -766,32 +799,45 @@ export class ConversationTreeService {
           }
         }
 
-        const subagentRows =
-          descendantIds.length === 0 && prunedTurnIds.length === 0
+        const affectedSubagentConditions = [
+          ...(descendantIds.length === 0
             ? []
-            : await transaction
-                .selectFrom("subagent_executions as execution")
-                .innerJoin("runs as parent_run", (join) =>
-                  join
-                    .onRef("parent_run.tenant_id", "=", "execution.tenant_id")
-                    .onRef("parent_run.id", "=", "execution.parent_run_id"),
-                )
-                .select([
-                  "execution.child_session_id as sessionId",
-                  "execution.state as executionState",
-                ])
-                .where("execution.tenant_id", "=", tenantId)
-                .where((expression) =>
-                  expression.or([
-                    ...(descendantIds.length === 0
-                      ? []
-                      : [expression("execution.parent_session_id", "in", descendantIds)]),
-                    ...(prunedTurnIds.length === 0
-                      ? []
-                      : [expression("parent_run.turn_id", "in", prunedTurnIds)]),
-                  ]),
-                )
-                .execute();
+            : [
+                sql`execution.parent_session_id in (${sql.join(
+                  descendantIds.map((id) => sql`${id}::uuid`),
+                )})`,
+              ]),
+          ...(prunedTurnIds.length === 0
+            ? []
+            : [
+                sql`parent_run.turn_id in (${sql.join(
+                  prunedTurnIds.map((id) => sql`${id}::uuid`),
+                )})`,
+              ]),
+        ];
+        const subagentRows =
+          affectedSubagentConditions.length === 0
+            ? []
+            : (
+                await sql<{ sessionId: string; executionState: string }>`
+                  with recursive affected_executions as (
+                    select execution.id, execution.child_session_id, execution.state
+                      from subagent_executions execution
+                      join runs parent_run
+                        on parent_run.tenant_id = execution.tenant_id
+                       and parent_run.id = execution.parent_run_id
+                     where execution.tenant_id = ${tenantId}::uuid
+                       and (${sql.join(affectedSubagentConditions, sql` or `)})
+                    union
+                    select child.id, child.child_session_id, child.state
+                      from subagent_executions child
+                      join affected_executions parent on child.parent_execution_id = parent.id
+                     where child.tenant_id = ${tenantId}::uuid
+                  )
+                  select child_session_id as "sessionId", state as "executionState"
+                    from affected_executions
+                `.execute(transaction)
+              ).rows;
         if (
           subagentRows.some(
             (row) =>

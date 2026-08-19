@@ -40,6 +40,9 @@ export async function loadDelegatedSessionSummaries(
       "execution.id as executionId",
       "execution.child_session_id as sessionId",
       "execution.parent_session_id as parentSessionId",
+      "execution.root_session_id as rootSessionId",
+      "execution.parent_execution_id as parentExecutionId",
+      "execution.depth",
       "parent_run.turn_id as parentTurnId",
       "child.title as title",
       "execution.agent_name as agentName",
@@ -63,6 +66,9 @@ export async function loadDelegatedSessionSummaries(
       executionId: row.executionId,
       sessionId: row.sessionId,
       parentSessionId: row.parentSessionId,
+      rootSessionId: row.rootSessionId,
+      ...(row.parentExecutionId === null ? {} : { parentExecutionId: row.parentExecutionId }),
+      depth: row.depth,
       parentTurnId: row.parentTurnId,
       title: row.title,
       agentName: row.agentName,
@@ -75,4 +81,36 @@ export async function loadDelegatedSessionSummaries(
     })),
     truncated: rows.length > input.maximum,
   };
+}
+
+export async function loadDelegatedSessionTreeSummaries(
+  database: Kysely<Database>,
+  input: {
+    tenantId: string;
+    rootParentSessionIds: readonly string[];
+    maximum: number;
+  },
+): Promise<{
+  items: DelegatedSessionSummaryResource[];
+  truncated: boolean;
+}> {
+  const pending = [...new Set(input.rootParentSessionIds)];
+  const loadedParents = new Set<string>();
+  const items: DelegatedSessionSummaryResource[] = [];
+  while (pending.length > 0 && items.length <= input.maximum) {
+    const parents = pending.splice(0, pending.length).filter((id) => !loadedParents.has(id));
+    if (parents.length === 0) continue;
+    for (const parent of parents) loadedParents.add(parent);
+    const loaded = await loadDelegatedSessionSummaries(database, {
+      tenantId: input.tenantId,
+      parentSessionIds: parents,
+      maximum: input.maximum - items.length,
+    });
+    items.push(...loaded.items);
+    if (loaded.truncated || items.length >= input.maximum) {
+      return { items: items.slice(0, input.maximum), truncated: true };
+    }
+    pending.push(...loaded.items.map((item) => item.sessionId));
+  }
+  return { items, truncated: false };
 }

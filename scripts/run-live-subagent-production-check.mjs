@@ -125,8 +125,8 @@ async function retireHistoricalAcceptanceCubes() {
     union
     select execution.child_session_id::text
     from subagent_executions as execution
-    join sessions as parent on parent.id = execution.parent_session_id
-    where parent.title like 'Subagent production acceptance %'
+    join sessions as root on root.id = execution.root_session_id
+    where root.title like 'Subagent production acceptance %'
   `);
   const acceptanceSessions = new Set(rows ? rows.split(/\r?\n/) : []);
   if (acceptanceSessions.size === 0) return;
@@ -257,6 +257,26 @@ async function executionEvidence(parentRunId) {
   return JSON.parse(value);
 }
 
+async function recursiveTreeEvidence(rootRunId) {
+  const value = await psql(`
+    select coalesce(json_agg(json_build_object(
+      'executionId', execution.id,
+      'parentExecutionId', execution.parent_execution_id,
+      'rootSessionId', execution.root_session_id,
+      'rootRunId', execution.root_run_id,
+      'depth', execution.depth,
+      'state', execution.state,
+      'childSessionId', execution.child_session_id,
+      'childRunId', execution.child_run_id,
+      'childRunState', child_run.state
+    ) order by execution.depth, execution.created_at), '[]'::json)::text
+    from subagent_executions as execution
+    join runs as child_run on child_run.id = execution.child_run_id
+    where execution.root_run_id = ${sqlLiteral(rootRunId)}
+  `);
+  return JSON.parse(value);
+}
+
 await retireHistoricalAcceptanceCubes();
 const model = await api.getModelConfiguration();
 assert.equal(model.mode, "real", "Production tenant must use a real model");
@@ -315,6 +335,31 @@ assert.equal(isolatedEvidence.workspaceDeleted, true);
 assert.equal(isolatedEvidence.patchContainsIsolatedFile, true);
 assert(isolatedEvidence.inheritedReferenceCount > 0);
 
+const nestedTask = [
+  "Call the subagent Tool exactly once and do not call file or bash Tools.",
+  'Use this exact workflowScript: return runs.run("nested", {agent:"oracle", task:"Reply exactly SUBAGENT-NESTED-LEAF-OK"})',
+  "After it finishes, reply exactly SUBAGENT-NESTED-PARENT-OK.",
+].join(" ");
+const recursive = await runTurn(
+  session.sessionId,
+  [
+    "Create a two-level recursive Agent tree.",
+    `Call the subagent Tool exactly once with this exact workflowScript: return runs.run("recursive-parent", {agent:"worker", task:${JSON.stringify(nestedTask)}})`,
+    "After it finishes, reply exactly SUBAGENT-RECURSIVE-OK.",
+  ].join(" "),
+  isolated.cursor,
+);
+const recursiveEvidence = await recursiveTreeEvidence(recursive.accepted.runId);
+assert.equal(recursiveEvidence.length, 2, JSON.stringify(recursiveEvidence));
+assert.deepEqual(
+  recursiveEvidence.map((execution) => execution.depth),
+  [1, 2],
+);
+assert(recursiveEvidence.every((execution) => execution.rootRunId === recursive.accepted.runId));
+assert(recursiveEvidence.every((execution) => execution.childRunState === "completed"));
+assert.equal(recursiveEvidence[0].parentExecutionId, null);
+assert.equal(recursiveEvidence[1].parentExecutionId, recursiveEvidence[0].executionId);
+
 const tenantId = await psql(
   `select tenant_id::text from sessions where id = ${sqlLiteral(session.sessionId)}`,
 );
@@ -333,6 +378,7 @@ const report = {
   model: { provider: model.provider, modelId: model.modelId },
   parentSessionId: session.sessionId,
   modes: { none: noneEvidence, shared: sharedEvidence, isolated: isolatedEvidence },
+  recursiveTree: recursiveEvidence,
 };
 await mkdir(resolve(repositoryRoot, "docs/reports"), { recursive: true });
 await writeFile(
