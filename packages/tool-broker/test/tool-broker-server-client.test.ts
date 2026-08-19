@@ -412,6 +412,90 @@ describe("Tool Broker authenticated RPC", () => {
     expect(calls).toEqual([2, 2]);
   });
 
+  it("keeps the parent activation owner while a colocated delegated holder releases", async () => {
+    let ownerBaseUrl = "http://tool-broker.invalid";
+    const server = new ToolBrokerServer({
+      host: "127.0.0.1",
+      port: 0,
+      serviceToken: SERVICE_TOKEN,
+      broker: {
+        ...backend(),
+        async create(request) {
+          return {
+            toolBrokerProtocolVersion: 1,
+            type: "tool_sandbox.reserved",
+            requestId: request.requestId,
+            activationId: ACTIVATION_ID,
+            ownerBaseUrl,
+            capability: CAPABILITY,
+            workspaceRoot: "/workspace",
+            continuity: "warm_reuse",
+          };
+        },
+      },
+    });
+    servers.push(server);
+    ownerBaseUrl = await server.listen();
+    const client = new ReplicatedToolBrokerClient({
+      baseUrls: [ownerBaseUrl],
+      serviceToken: SERVICE_TOKEN,
+      allowInsecureHttp: true,
+    });
+    const parentRequest: ToolSandboxCreateRequest = {
+      toolBrokerProtocolVersion: 1,
+      type: "tool_sandbox.create",
+      requestId: "10000000-0000-4000-8000-000000000081",
+      assignment,
+      turnContextSha256: STEP_CONTEXT_SHA256,
+      attemptContextSha256: STEP_CONTEXT_SHA256,
+      allowedTools: ["read", "write", "edit", "bash"],
+      environment: {
+        environmentVersionId: "10000000-0000-4000-8000-000000000013",
+        versionNumber: 1,
+        profileKey: "pi-cloud-fullstack",
+        profileVersion: "1",
+        imageRevision: "development",
+        specSha256: "e4195cfc4c9e79286d47618d704dbe32dd4141eaa0ce21d82f72699e360f9630",
+        recipe: DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
+        recipeSha256: DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
+      },
+      workspaceSeed: { kind: "sample_java" },
+    };
+    const childAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      commandId: "delegated-command",
+      sessionId: "delegated-session",
+      turnId: "delegated-turn",
+      attemptId: "20000000-0000-4000-8000-000000000083",
+      leaseId: "20000000-0000-4000-8000-000000000084",
+      fencingToken: assignment.fencingToken + 1,
+    };
+    const parent = await client.create(parentRequest);
+    const child = await client.create({
+      ...parentRequest,
+      requestId: "20000000-0000-4000-8000-000000000082",
+      assignment: childAssignment,
+    });
+    expect(child.activationId).toBe(parent.activationId);
+
+    await client.release(child.activationId, childAssignment, {
+      kind: "keep_warm",
+      workspaceRevision: "a".repeat(64),
+    });
+    expect(client.operationUrlFor(parent.activationId)).toBe(
+      new URL("/internal/v1/tool-operation", ownerBaseUrl).toString(),
+    );
+    await expect(
+      client.release(parent.activationId, assignment, {
+        kind: "keep_warm",
+        workspaceRevision: "b".repeat(64),
+      }),
+    ).resolves.toMatchObject({ activationId: parent.activationId });
+    expect(() => client.operationUrlFor(parent.activationId)).toThrow(
+      "Tool Sandbox activation owner is unavailable",
+    );
+  });
+
   it("follows the durable activation owner instead of replaying create elsewhere", async () => {
     const owner = new ToolBrokerServer({
       host: "127.0.0.1",

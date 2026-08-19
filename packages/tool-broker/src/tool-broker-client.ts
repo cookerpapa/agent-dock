@@ -493,7 +493,10 @@ export type ReplicatedToolBrokerClientOptions = Omit<ToolBrokerClientOptions, "b
 export class ReplicatedToolBrokerClient {
   readonly #clients: readonly ToolBrokerClient[];
   readonly #ownerClients = new Map<string, ToolBrokerClient>();
-  readonly #activationOwners = new Map<string, ToolBrokerClient>();
+  readonly #activationOwners = new Map<
+    string,
+    Readonly<{ client: ToolBrokerClient; holders: Set<string> }>
+  >();
   readonly #serviceToken: string;
   readonly #allowInsecureHttp: boolean;
   readonly #requestTimeoutMs: number;
@@ -541,7 +544,7 @@ export class ReplicatedToolBrokerClient {
     const client = this.#clients[this.#nextClient % this.#clients.length]!;
     this.#nextClient += 1;
     const response = await client.create(request);
-    this.#activationOwners.set(response.activationId, this.#ownerClient(response.ownerBaseUrl));
+    this.#rememberActivationOwner(response.activationId, response.ownerBaseUrl, request.assignment);
     return response;
   }
 
@@ -563,7 +566,7 @@ export class ReplicatedToolBrokerClient {
     try {
       return await this.#ownedClient(activationId).release(activationId, assignment, disposition);
     } finally {
-      this.#activationOwners.delete(activationId);
+      this.#forgetActivationOwner(activationId, assignment);
     }
   }
 
@@ -571,7 +574,7 @@ export class ReplicatedToolBrokerClient {
     try {
       await this.#ownedClient(activationId).stop(activationId, assignment);
     } finally {
-      this.#activationOwners.delete(activationId);
+      this.#forgetActivationOwner(activationId, assignment);
     }
   }
 
@@ -618,13 +621,53 @@ export class ReplicatedToolBrokerClient {
   }
 
   #ownedClient(activationId: string): ToolBrokerClient {
-    const client = this.#activationOwners.get(activationId);
-    if (client !== undefined) return client;
+    const owner = this.#activationOwners.get(activationId);
+    if (owner !== undefined) return owner.client;
     throw new ToolBrokerClientError(
       "tool_broker_owner_unknown",
       "Tool Sandbox activation owner is unavailable",
       false,
     );
+  }
+
+  #rememberActivationOwner(
+    activationId: string,
+    ownerBaseUrl: string,
+    assignment: ToolSandboxAssignment,
+  ): void {
+    const client = this.#ownerClient(ownerBaseUrl);
+    const holder = this.#activationHolder(assignment);
+    const existing = this.#activationOwners.get(activationId);
+    if (existing !== undefined) {
+      if (existing.client !== client) {
+        throw new ToolBrokerClientError(
+          "tool_broker_owner_changed",
+          "Tool Sandbox activation owner changed during a delegated handoff",
+          false,
+        );
+      }
+      existing.holders.add(holder);
+      return;
+    }
+    this.#activationOwners.set(activationId, { client, holders: new Set([holder]) });
+  }
+
+  #forgetActivationOwner(activationId: string, assignment: ToolSandboxAssignment): void {
+    const owner = this.#activationOwners.get(activationId);
+    if (owner === undefined) return;
+    owner.holders.delete(this.#activationHolder(assignment));
+    if (owner.holders.size === 0) this.#activationOwners.delete(activationId);
+  }
+
+  #activationHolder(assignment: ToolSandboxAssignment): string {
+    return [
+      assignment.tenantId,
+      assignment.workspaceId,
+      assignment.sessionId,
+      assignment.attemptId,
+      assignment.leaseId,
+      String(assignment.fencingToken),
+    ].join("\0");
   }
 
   #ownerClient(ownerBaseUrl: string): ToolBrokerClient {
