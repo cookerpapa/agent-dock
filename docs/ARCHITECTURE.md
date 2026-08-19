@@ -144,8 +144,8 @@ Workspace modes are explicit:
   shared Workspace-head commit;
 - upstream `worktree:true` maps to `isolated`: Tool Broker quiesces the parent,
   the trusted Volume gateway makes an idempotent revision-bound internal
-  Workspace copy, and a fresh-context child runs concurrently in another Cube.
-  Its settled
+  Workspace copy, and the child keeps its resolved `fresh` or `fork` Pi context
+  while running concurrently in another Cube. Its settled
   patch is returned to the parent, while the internal Workspace is hidden from
   product lists and retired after terminal settlement. Child Sandbox retention
   is always ephemeral even when the parent conversation is persistent.

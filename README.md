@@ -106,7 +106,8 @@ leaf `pi` process boundary is replaced by a PostgreSQL-backed Child Session and
 Child Run on the same Worker pool. Tool-free reviewers consume no Cube;
 `shared_serialized` children temporarily receive the parent's Cube authority;
 `worktree:true` creates a trusted persistent-Volume fork and an independent
-Cube with fresh model context, then returns the settled patch to the parent. Child Session entries and
+Cube while preserving the selected agent's independent `fresh`/`fork` context
+policy, then returns the settled patch to the parent. Child Session entries and
 compaction remain native Pi PostgreSQL records. The UI exposes each Child as a
 typed, read-only branch and labels context inheritance separately from
 Workspace sharing. Parent cancellation is relayed
