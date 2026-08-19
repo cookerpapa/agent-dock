@@ -603,6 +603,10 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
                 },
               }),
         })) ?? ([] as readonly AgentTool[]);
+      const hasDelegationTool = orchestrationTools.some((tool) => tool.name === "subagent");
+      const hasSupervisorContact = orchestrationTools.some(
+        (tool) => tool.name === "contact_supervisor",
+      );
       const commonRunnerOptions = {
         resolveModelRuntime,
         openSession: this.#openAgentSession,
@@ -676,11 +680,22 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
               async systemPrompt(base: string) {
                 return orchestrationTools.length === 0
                   ? base
-                  : [
-                      base,
-                      "You may delegate substantial independent work through the subagent Tool. " +
-                        "Use stable workflow keys and inspect every returned result.",
-                    ].join("\n");
+                  : [base]
+                      .concat(
+                        hasDelegationTool
+                          ? [
+                              "You may delegate substantial independent work through the subagent Tool. " +
+                                "Use stable workflow keys and inspect every returned result. " +
+                                "When a Child pauses for input, answer it through subagent_supervisor.",
+                            ]
+                          : [],
+                        hasSupervisorContact
+                          ? [
+                              "A durable contact_supervisor Tool can reach the parent Agent across cloud Workers.",
+                            ]
+                          : [],
+                      )
+                      .join("\n");
               },
               async transformContext(messages, purpose = "agent") {
                 currentStep = undefined;
@@ -764,11 +779,22 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
             ...remoteTools,
             tools: [...remoteTools.tools, ...orchestrationTools],
             async systemPrompt(base: string) {
-              return [
-                await remoteTools.systemPrompt(base),
-                "You may delegate substantial independent work through the subagent Tool. " +
-                  "Use stable workflow keys, keep one shared Workspace writer, and inspect every returned result.",
-              ].join("\n");
+              return [await remoteTools.systemPrompt(base)]
+                .concat(
+                  hasDelegationTool
+                    ? [
+                        "You may delegate substantial independent work through the subagent Tool. " +
+                          "Use stable workflow keys, keep one shared Workspace writer, and inspect every returned result. " +
+                          "When a Child pauses for input, answer it through subagent_supervisor.",
+                      ]
+                    : [],
+                  hasSupervisorContact
+                    ? [
+                        "A durable contact_supervisor Tool can reach the parent Agent across cloud Workers.",
+                      ]
+                    : [],
+                )
+                .join("\n");
             },
           };
         },

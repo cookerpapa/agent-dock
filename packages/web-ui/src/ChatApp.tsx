@@ -390,6 +390,16 @@ export default function ChatApp() {
   }, [api, authPhase, currentTurn?.runId, refreshConversations, state.session, update]);
 
   useEffect(() => {
+    if (authPhase !== "authenticated" || currentTurn === undefined) return;
+    const refresh = (): void => {
+      void refreshConversations().catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 1_500);
+    return () => clearInterval(timer);
+  }, [authPhase, currentTurn?.runId, refreshConversations]);
+
+  useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [state.lastSequence, state.turns.length]);
 

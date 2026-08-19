@@ -51,6 +51,22 @@ const abort = new AbortController();
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
 const activeProviderJobs = new Set<string>();
 const completedCloudResults = new Map<string, { stepIndex: number; output: string }>();
+const blockedCloudResults = new Map<
+  string,
+  {
+    stepIndex: number;
+    requestId: string;
+    reason: string;
+    message: string;
+  }
+>();
+
+function progress(text: string, details: Record<string, unknown>): void {
+  parentPort!.postMessage({
+    type: "progress",
+    result: { content: [{ type: "text", text }], details },
+  });
+}
 
 parentPort.on("message", (message: ProviderResponse | { type: "abort" }) => {
   if (message.type === "abort") {
@@ -256,17 +272,34 @@ let directoriesForBridge: ReturnType<typeof prepareAgentDir> | undefined;
 async function waitForCloudResult(
   startInput: ExternalJobStartInput,
 ): Promise<Record<string, unknown>> {
+  const startedAt = Date.now();
   const started = (await request("start", { input: startInput })) as {
     providerJobId: string;
     state: string;
   };
   activeProviderJobs.add(started.providerJobId);
+  progress(`Subagent ${startInput.agent} 已进入云端 Worker 队列。`, {
+    state: started.state,
+    agent: startInput.agent,
+    stepIndex: startInput.stepIndex,
+    elapsedMs: Date.now() - startedAt,
+  });
   if (abort.signal.aborted) {
     await request("cancel", { providerJobId: started.providerJobId }).catch(() => undefined);
     activeProviderJobs.delete(started.providerJobId);
     throw abort.signal.reason;
   }
   let state = started.state;
+  let previousState = state;
+  let latestCoordination:
+    | {
+        requestId: string;
+        reason: string;
+        message: string;
+        expectsReply: boolean;
+      }
+    | undefined;
+  let latestCoordinationId: string | undefined;
   const deadline = Date.now() + 120_000;
   while (!new Set(["completed", "failed", "stopped", "blocked"]).has(state)) {
     if (abort.signal.aborted) throw abort.signal.reason;
@@ -275,8 +308,58 @@ async function waitForCloudResult(
     await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 100));
     const status = (await request("status", { providerJobId: started.providerJobId })) as {
       state: string;
+      coordinationRequest?: {
+        requestId: string;
+        reason: string;
+        message: string;
+        expectsReply: boolean;
+      };
     };
     state = status.state;
+    latestCoordination = status.coordinationRequest;
+    if (latestCoordination !== undefined && latestCoordination.requestId !== latestCoordinationId) {
+      latestCoordinationId = latestCoordination.requestId;
+      progress(
+        latestCoordination.expectsReply
+          ? `Subagent ${startInput.agent} 正在等待父 Agent 决策：${latestCoordination.message}`
+          : `Subagent ${startInput.agent}：${latestCoordination.message}`,
+        {
+          state,
+          agent: startInput.agent,
+          stepIndex: startInput.stepIndex,
+          coordinationRequest: latestCoordination,
+          elapsedMs: Date.now() - startedAt,
+        },
+      );
+    }
+    if (state !== previousState) {
+      previousState = state;
+      progress(
+        state === "running"
+          ? `Subagent ${startInput.agent} 正在执行。`
+          : `Subagent ${startInput.agent} 状态：${state}`,
+        {
+          state,
+          agent: startInput.agent,
+          stepIndex: startInput.stepIndex,
+          elapsedMs: Date.now() - startedAt,
+        },
+      );
+    }
+  }
+  if (state === "blocked" && latestCoordination?.expectsReply === true) {
+    blockedCloudResults.set(started.providerJobId, {
+      stepIndex: startInput.stepIndex,
+      requestId: latestCoordination.requestId,
+      reason: latestCoordination.reason,
+      message: latestCoordination.message,
+    });
+    return {
+      providerJobId: started.providerJobId,
+      state: "blocked",
+      blockingJobId: latestCoordination.requestId,
+      failureMessage: latestCoordination.message,
+    };
   }
   try {
     const result = (await request("result", { providerJobId: started.providerJobId })) as Record<
@@ -289,6 +372,12 @@ async function waitForCloudResult(
         output: result.output.trim(),
       });
     }
+    progress(`Subagent ${startInput.agent} 已结束。`, {
+      state: result.state,
+      agent: startInput.agent,
+      stepIndex: startInput.stepIndex,
+      elapsedMs: Date.now() - startedAt,
+    });
     return result;
   } finally {
     activeProviderJobs.delete(started.providerJobId);
@@ -328,6 +417,7 @@ async function startShimBridge(socketPath: string): Promise<Server> {
 }
 
 async function main(): Promise<void> {
+  progress("正在准备 pi-subagents 云端编排器。", { state: "preparing" });
   const directories = prepareAgentDir();
   directoriesForBridge = directories;
   process.env.PI_CODING_AGENT_DIR = directories.agentDir;
@@ -472,6 +562,32 @@ async function main(): Promise<void> {
       { id: asyncId, timeoutMs: 120_000 },
       abort.signal,
     );
+    const blocked = [...blockedCloudResults.values()].sort(
+      (left, right) => left.stepIndex - right.stepIndex,
+    );
+    if (blocked.length > 0) {
+      parentPort!.postMessage({
+        type: "result",
+        result: {
+          content: [
+            {
+              type: "text" as const,
+              text: [
+                "A cloud Subagent paused for supervisor input.",
+                ...blocked.flatMap((request) => [
+                  "",
+                  `${request.requestId} · ${request.reason}`,
+                  request.message,
+                  `Reply with subagent_supervisor({ action: \"reply\", replyTo: \"${request.requestId}\", message: \"...\" }).`,
+                ]),
+              ].join("\n"),
+            },
+          ],
+          details: { state: "blocked", requests: blocked },
+        },
+      });
+      return;
+    }
     const cloudOutput = [...completedCloudResults.values()]
       .sort((left, right) => left.stepIndex - right.stepIndex)
       .map((result) => result.output)

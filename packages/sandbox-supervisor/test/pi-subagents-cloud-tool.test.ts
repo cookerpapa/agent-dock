@@ -241,4 +241,47 @@ describe("pi-subagents cloud Tool adapter", () => {
     await execution;
     expect(cancelled).toEqual(["job-cancel"]);
   }, 30_000);
+
+  it("surfaces durable cross-Worker supervisor requests instead of appearing stalled", async () => {
+    const updates: string[] = [];
+    const tool = await createPiSubagentsCloudTool({
+      context: { parentSessionId: "00000000-0000-4000-8000-000000000005" },
+      coordinator: {
+        start: () => ({ providerJobId: "job-blocked", state: "running" }),
+        status: () => ({
+          providerJobId: "job-blocked",
+          state: "blocked",
+          coordinationRequest: {
+            requestId: "00000000-0000-4000-8000-000000000099",
+            reason: "need_decision",
+            message: "Should this API preserve the old wire format?",
+            expectsReply: true,
+          },
+        }),
+        result: () => ({ providerJobId: "job-blocked", state: "running" }),
+        reattach: () => ({ providerJobId: "job-blocked", state: "running" }),
+        cancel: () => ({ providerJobId: "job-blocked", state: "stopped" }),
+      },
+    });
+    const result = await tool.execute(
+      "tool-call-blocked",
+      { agent: "worker", task: "Implement the API" },
+      new AbortController().signal,
+      (update) => {
+        updates.push(
+          update.content
+            .filter((part): part is { type: "text"; text: string } => part.type === "text")
+            .map((part) => part.text)
+            .join("\n"),
+        );
+      },
+    );
+    const output = result.content
+      .filter((part): part is { type: "text"; text: string } => part.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+    expect(updates.join("\n")).toContain("正在等待父 Agent 决策");
+    expect(output).toContain("subagent_supervisor");
+    expect(output).toContain("Should this API preserve the old wire format?");
+  }, 30_000);
 });

@@ -47,6 +47,12 @@ export {
   type CloudSubagentJobResult,
   type StartCloudSubagentJobInput,
 } from "./postgres-subagent-job-provider.ts";
+export {
+  PostgresSubagentSupervisorChannel,
+  createCloudContactSupervisorTool,
+  createCloudSubagentSupervisorTool,
+  type CloudSupervisorRequest,
+} from "./postgres-subagent-supervisor-channel.ts";
 
 export {
   PostgresWorkspaceSeedResolver,

@@ -52,6 +52,10 @@ conversation.
 - A provider job identity is idempotent across Worker loss. Recovery reattaches
   to the same Child Run and never redispatches the prompt merely because a
   parent Worker disappeared.
+- Replace the package's Worker-local supervisor files with a PostgreSQL-backed
+  `contact_supervisor`/`subagent_supervisor` channel. Progress is projected into
+  the live parent Tool output; blocking decisions are correlated to one Child
+  execution and replies resume that existing Run.
 
 ## Consequences
 
@@ -62,9 +66,9 @@ conversation.
   waiting slot as an optimization, but correctness does not depend on it.
 - Shared mode preserves live files, dependencies and processes but must retain
   a single writer. Isolated mode permits parallel mutations but requires a
-  trusted Volume fork and an explicit result/merge contract. Isolated children
-  intentionally use fresh model context so inherited orchestration requests
-  cannot become executable child instructions.
+  trusted Volume fork and an explicit result/merge contract. Context mode is
+  orthogonal: a trusted worker profile may use either an exact `fork` of the
+  parent Pi branch or a `fresh` context in either Workspace mode.
 - Project-controlled agent or extension code remains outside the trusted Host.
   Only deployment-owned profiles are enabled until a separate extension trust
   policy is accepted.

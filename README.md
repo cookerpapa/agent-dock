@@ -37,7 +37,8 @@ schema or maintained deployment. The current sources of truth are this README,
 - Pi Session tree navigation with focused/full-tree views, conversation forks,
   recursive subtree deletion and settled-message tail pruning;
 - the pinned community `pi-subagents` workflow contract, with durable Child
-  Sessions/Runs, visible delegated branches and shared or isolated Cube execution;
+  Sessions/Runs, focused/full delegated trees, cross-Worker supervisor messaging,
+  and shared or isolated Cube execution;
 - pure chat without Sandbox activation;
 - lazy Cube activation, warm reuse and optional persistent Sandbox retention;
 - a Workspace directory/source browser, isolated Web Terminal, and safe deletion;
@@ -110,7 +111,9 @@ Cube while preserving the selected agent's independent `fresh`/`fork` context
 policy, then returns the settled patch to the parent. Child Session entries and
 compaction remain native Pi PostgreSQL records. The UI exposes each Child as a
 typed, read-only branch and labels context inheritance separately from
-Workspace sharing. Parent cancellation is relayed
+Workspace sharing. `contact_supervisor` requests use a durable PostgreSQL
+channel rather than Worker-local files, so parent and Child may coordinate on
+different Worker replicas without replaying the Child task. Parent cancellation is relayed
 to admitted children, and Worker capacity reserves a child lane so a pool of
 waiting parents cannot starve every delegated Run.
 

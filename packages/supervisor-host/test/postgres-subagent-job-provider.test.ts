@@ -13,6 +13,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresSubagentJobError, PostgresSubagentJobProvider } from "../src/index.ts";
+import { PostgresSubagentSupervisorChannel } from "../src/postgres-subagent-supervisor-channel.ts";
 
 let pglite: PGlite;
 let socket: PGLiteSocketServer;
@@ -455,6 +456,67 @@ describe.sequential("PostgresSubagentJobProvider", () => {
     await expect(provider.reapStalePreparations()).resolves.toBeGreaterThanOrEqual(1);
     await expect(provider.status(tenantId, started.executionId)).resolves.toMatchObject({
       state: "cancelled",
+    });
+  });
+
+  it("persists cross-Worker Child progress and blocking supervisor replies", async () => {
+    const provider = new PostgresSubagentJobProvider({ database });
+    const started = await provider.start({
+      tenantId,
+      parentSessionId,
+      parentRunId,
+      parentAttemptId,
+      parentFencingToken: FENCE,
+      parentToolCallId: "subagent-tool-supervisor",
+      workflowRunId: "workflow-supervisor",
+      stepIndex: 4,
+      agentName: "worker",
+      prompt: "Ask the parent only if a material decision is required",
+      contextMode: "fork",
+      workspaceMode: "none",
+    });
+    await database
+      .updateTable("subagent_executions")
+      .set({ state: "running", updated_at: new Date() })
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", started.executionId)
+      .executeTakeFirstOrThrow();
+    const channel = new PostgresSubagentSupervisorChannel(database);
+    await expect(
+      channel.contact({
+        tenantId,
+        childSessionId: started.childSessionId,
+        childRunId: started.childRunId,
+        reason: "progress_update",
+        message: "The repository inspection has started.",
+      }),
+    ).resolves.toMatchObject({ reason: "progress_update", expectsReply: false });
+    await expect(channel.latestForExecution(tenantId, started.executionId)).resolves.toMatchObject({
+      message: "The repository inspection has started.",
+    });
+
+    const waiting = channel.contact({
+      tenantId,
+      childSessionId: started.childSessionId,
+      childRunId: started.childRunId,
+      reason: "need_decision",
+      message: "Should the public API remain backward compatible?",
+    });
+    let pending = await channel.pendingForParent(tenantId, parentSessionId);
+    for (let attempt = 0; pending.length === 0 && attempt < 20; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      pending = await channel.pendingForParent(tenantId, parentSessionId);
+    }
+    expect(pending).toHaveLength(1);
+    await channel.reply({
+      tenantId,
+      parentSessionId,
+      requestId: pending[0]!.requestId,
+      message: "No compatibility layer is required for unreleased data.",
+    });
+    await expect(waiting).resolves.toMatchObject({
+      reason: "need_decision",
+      replyMessage: "No compatibility layer is required for unreleased data.",
     });
   });
 

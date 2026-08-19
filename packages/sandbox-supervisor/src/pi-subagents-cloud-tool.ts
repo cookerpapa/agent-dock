@@ -28,6 +28,12 @@ export type ExternalJobHandle = Readonly<{
   failureCode?: string;
   failureMessage?: string;
   blockingJobId?: string;
+  coordinationRequest?: Readonly<{
+    requestId: string;
+    reason: "need_decision" | "interview_request" | "progress_update";
+    message: string;
+    expectsReply: boolean;
+  }>;
 }>;
 export type ExternalJobResult = ExternalJobHandle &
   Readonly<{ output?: string; artifactPath?: string }>;

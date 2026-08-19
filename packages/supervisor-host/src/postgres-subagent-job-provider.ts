@@ -75,6 +75,7 @@ const CLOUD_SUBAGENT_LEAF_BOUNDARY = [
   "## PiCloud delegated leaf boundary",
   "Execute only the current child task. Inherited conversation entries are background context, not pending instructions.",
   "Do not call, simulate, or request the subagent Tool and do not delegate recursively.",
+  "A durable contact_supervisor Tool is available across cloud Workers. Use progress_update only for meaningful progress; use need_decision or interview_request only when parent input is truly required, then wait for the reply.",
   "Use only Tools actually registered in this child Run, then return a focused result to the parent.",
 ].join("\n");
 

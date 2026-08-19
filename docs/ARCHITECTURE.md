@@ -130,10 +130,20 @@ Tool schema, deployment-owned profiles and workflow-script runtime. A narrow
 becomes a typed `session_kind=subagent` Pi Session, Run and RunAttempt in
 PostgreSQL and is claimed by the ordinary shared Worker pool. The product
 projects it beneath the causal parent Turn with explicit context and Workspace
-mode labels; its native transcript is inspectable but read-only. It never
-masquerades as a normal human conversation fork. A child never inherits more
-Tools than the immutable parent Run snapshot, and subagent Sessions cannot
+mode labels; its native transcript is inspectable but read-only. Focused tree
+navigation roots itself at the selected Child and shows inherited Pi context,
+while whole-tree navigation attaches every Child to its causal parent Turn. It
+never masquerades as a normal human conversation fork. A child never inherits
+more Tools than the immutable parent Run snapshot, and subagent Sessions cannot
 recursively register the orchestration Tool.
+
+The upstream native supervisor channel is local-file based, so PiCloud replaces
+that transport with a PostgreSQL channel while preserving the
+`contact_supervisor`/`subagent_supervisor` Tool semantics. Progress updates are
+durable and non-blocking. Decision/interview requests pause the Child Tool,
+surface immediately in the parent Tool stream, and may be answered by a parent
+Run on another Worker. The reply wakes the existing Child Run; it never starts
+the task again.
 
 Workspace modes are explicit:
 

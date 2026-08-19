@@ -49,6 +49,11 @@ import {
 import { TenantModelGateway } from "./model-gateway.ts";
 import { PostgresSubagentJobProvider } from "./postgres-subagent-job-provider.ts";
 import {
+  PostgresSubagentSupervisorChannel,
+  createCloudContactSupervisorTool,
+  createCloudSubagentSupervisorTool,
+} from "./postgres-subagent-supervisor-channel.ts";
+import {
   PostgresPiWorker,
   type PostgresPiWorkerOptions,
   type PostgresPiWorkerState,
@@ -408,6 +413,7 @@ export class PiWorkerRuntime {
         database: this.#database,
         forkWorkspace: (request) => this.#toolBroker.forkWorkspace(request),
       });
+      const subagentSupervisor = new PostgresSubagentSupervisorChannel(this.#database);
       await subagentJobs.reapStalePreparations().catch(() => undefined);
       this.#subagentPreparationReaper = setInterval(
         () => void subagentJobs.reapStalePreparations().catch(() => undefined),
@@ -438,7 +444,23 @@ export class PiWorkerRuntime {
             .where("tenant_id", "=", command.payload.tenantId)
             .where("id", "=", command.payload.sessionId)
             .executeTakeFirstOrThrow();
-          if (session.session_kind === "subagent") return [];
+          if (session.session_kind === "subagent") {
+            await this.#database
+              .selectFrom("subagent_executions")
+              .select("id")
+              .where("tenant_id", "=", command.payload.tenantId)
+              .where("child_session_id", "=", command.payload.sessionId)
+              .where("child_run_id", "=", command.payload.runId)
+              .executeTakeFirstOrThrow();
+            return [
+              createCloudContactSupervisorTool({
+                channel: subagentSupervisor,
+                tenantId: command.payload.tenantId,
+                childSessionId: command.payload.sessionId,
+                childRunId: command.payload.runId,
+              }),
+            ];
+          }
           return [
             await createPiSubagentsCloudTool({
               context: {
@@ -502,9 +524,26 @@ export class PiWorkerRuntime {
                 },
                 status: async (providerJobId) => {
                   const child = await subagentJobs.status(command.payload.tenantId, providerJobId);
+                  const coordination = await subagentSupervisor.latestForExecution(
+                    command.payload.tenantId,
+                    providerJobId,
+                  );
                   return {
                     providerJobId,
-                    state: subagentExternalState(child.state),
+                    state:
+                      coordination?.expectsReply === true
+                        ? ("blocked" as const)
+                        : subagentExternalState(child.state),
+                    ...(coordination === undefined
+                      ? {}
+                      : {
+                          coordinationRequest: {
+                            requestId: coordination.requestId,
+                            reason: coordination.reason,
+                            message: coordination.message,
+                            expectsReply: coordination.expectsReply,
+                          },
+                        }),
                     ...(child.failureCode === undefined ? {} : { failureCode: child.failureCode }),
                     ...(child.failureMessage === undefined
                       ? {}
@@ -532,6 +571,12 @@ export class PiWorkerRuntime {
                   return { providerJobId, state: subagentExternalState(child.state) };
                 },
               },
+            }),
+            createCloudSubagentSupervisorTool({
+              channel: subagentSupervisor,
+              jobs: subagentJobs,
+              tenantId: command.payload.tenantId,
+              parentSessionId: command.payload.sessionId,
             }),
           ];
         },

@@ -79,6 +79,7 @@ export type SubagentContextMode = "fresh" | "fork";
 export type SubagentWorkspaceMode = "none" | "shared_serialized" | "isolated";
 export type SubagentExecutionState =
   "preparing" | "queued" | "running" | "completed" | "failed" | "cancelled" | "unknown";
+export type SubagentSupervisorReason = "need_decision" | "interview_request" | "progress_update";
 
 export interface SandboxDomainTable {
   id: string;
@@ -447,6 +448,20 @@ export interface SubagentExecutionTable {
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
   settled_at: NullableTimestamp;
+}
+
+export interface SubagentSupervisorRequestTable {
+  id: string;
+  tenant_id: string;
+  execution_id: string;
+  reason: SubagentSupervisorReason;
+  message: string;
+  interview: GeneratedNullable<Record<string, unknown>>;
+  expects_reply: boolean;
+  reply_message: string | null;
+  created_at: GeneratedTimestamp;
+  expires_at: NullableTimestamp;
+  replied_at: NullableTimestamp;
 }
 
 export interface ConversationForkOperationTable {
@@ -1144,6 +1159,7 @@ export interface Database {
   tenant_model_credentials: TenantModelCredentialTable;
   sessions: SessionTable;
   subagent_executions: SubagentExecutionTable;
+  subagent_supervisor_requests: SubagentSupervisorRequestTable;
   conversation_prune_operations: ConversationPruneOperationTable;
   turns: TurnTable;
   runs: RunTable;

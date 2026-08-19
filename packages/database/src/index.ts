@@ -24,6 +24,8 @@ export {
   type SubagentContextMode,
   type SubagentExecutionState,
   type SubagentExecutionTable,
+  type SubagentSupervisorReason,
+  type SubagentSupervisorRequestTable,
   type SubagentWorkspaceMode,
   type ToolBrokerActivationState,
   type ToolBrokerInstanceState,
