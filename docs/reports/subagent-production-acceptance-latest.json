@@ -1,23 +1,23 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-19T15:31:33.335Z",
+  "checkedAt": "2026-08-19T17:06:53.424Z",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
   },
-  "parentSessionId": "83482ab4-5965-4708-b14d-e89d0135c953",
+  "parentSessionId": "c736a698-3ff0-4a9e-97fa-b00d31182d93",
   "modes": {
     "none": {
-      "executionId": "ac9335ae-0fdb-4808-9882-ef20854c944b",
+      "executionId": "7d9e46b0-f91c-4d59-b386-f85cae49e9e7",
       "workspaceMode": "none",
       "state": "completed",
-      "childSessionId": "df7404e3-b01d-4560-b101-add04130c5ee",
-      "childRunId": "0fd544be-2121-44b7-a199-bce038cac0a6",
-      "parentWorkspaceId": "3996e83b-e3e7-4054-a0fa-122bd164484a",
-      "childWorkspaceId": "3996e83b-e3e7-4054-a0fa-122bd164484a",
+      "childSessionId": "eeb59f52-ad07-40cd-a84f-7410ddfb9c23",
+      "childRunId": "2104e67a-40f6-4e35-a5f5-bef07a9d674d",
+      "parentWorkspaceId": "def2977a-a610-4931-85ed-aa0d2297ae41",
+      "childWorkspaceId": "def2977a-a610-4931-85ed-aa0d2297ae41",
       "childRunState": "completed",
-      "parentWorker": "postgres:pi-cloud-worker-2:2db9b243-f79d-4a60-9a91-c15d1a83c981",
-      "childWorker": "postgres:pi-cloud-worker-2:2db9b243-f79d-4a60-9a91-c15d1a83c981",
+      "parentWorker": "postgres:pi-cloud-worker-2:1e1df6d7-6cbf-4ef6-9c24-58c57512bdd5",
+      "childWorker": "postgres:pi-cloud-worker-2:1e1df6d7-6cbf-4ef6-9c24-58c57512bdd5",
       "sameWorker": true,
       "inheritedReferenceCount": 0,
       "childOwnedEntryCount": 3,
@@ -26,16 +26,16 @@
       "patchContainsIsolatedFile": false
     },
     "shared": {
-      "executionId": "da70f9b2-8a7e-4224-9a49-fdcd17b43971",
+      "executionId": "a49d8b75-902c-469d-b172-0f2a80ceb6f7",
       "workspaceMode": "shared_serialized",
       "state": "completed",
-      "childSessionId": "a830a26e-6900-41d8-b495-647c028f2aca",
-      "childRunId": "b3d18387-8a0f-4bab-8b10-9ade24d056a5",
-      "parentWorkspaceId": "3996e83b-e3e7-4054-a0fa-122bd164484a",
-      "childWorkspaceId": "3996e83b-e3e7-4054-a0fa-122bd164484a",
+      "childSessionId": "d9ea2bd6-2bed-4efc-81c3-1e6fafa10118",
+      "childRunId": "7d033f28-f4f1-4994-b636-574530f375b8",
+      "parentWorkspaceId": "def2977a-a610-4931-85ed-aa0d2297ae41",
+      "childWorkspaceId": "def2977a-a610-4931-85ed-aa0d2297ae41",
       "childRunState": "completed",
-      "parentWorker": "postgres:pi-cloud-worker-2:2db9b243-f79d-4a60-9a91-c15d1a83c981",
-      "childWorker": "postgres:pi-cloud-worker-2:2db9b243-f79d-4a60-9a91-c15d1a83c981",
+      "parentWorker": "postgres:pi-cloud-worker-1:99fbaa2d-d839-4f0c-b991-fab640e7fb98",
+      "childWorker": "postgres:pi-cloud-worker-1:99fbaa2d-d839-4f0c-b991-fab640e7fb98",
       "sameWorker": true,
       "inheritedReferenceCount": 5,
       "childOwnedEntryCount": 5,
@@ -44,22 +44,51 @@
       "patchContainsIsolatedFile": false
     },
     "isolated": {
-      "executionId": "4732e34b-fe8f-46a4-a798-5cf02963ed3a",
+      "executionId": "a9811608-8ef7-49cf-9219-0305044eef10",
       "workspaceMode": "isolated",
       "state": "completed",
-      "childSessionId": "6c4dc57c-cbdd-4dcf-af01-25b5c4c3e7bb",
-      "childRunId": "72bf9a6b-ed8d-4db2-9387-2632f2401467",
-      "parentWorkspaceId": "3996e83b-e3e7-4054-a0fa-122bd164484a",
-      "childWorkspaceId": "d5b13c61-ea80-404d-a5e3-b5d7ff8c5e3c",
+      "childSessionId": "411fda1f-8655-433b-b670-144db0cb284f",
+      "childRunId": "e4f98165-cfb8-4338-be10-35975019a53d",
+      "parentWorkspaceId": "def2977a-a610-4931-85ed-aa0d2297ae41",
+      "childWorkspaceId": "4c3e1221-203a-48e6-b939-1b39b00f4945",
       "childRunState": "completed",
-      "parentWorker": "postgres:pi-cloud-worker-2:2db9b243-f79d-4a60-9a91-c15d1a83c981",
-      "childWorker": "postgres:pi-cloud-worker-2:2db9b243-f79d-4a60-9a91-c15d1a83c981",
+      "parentWorker": "postgres:pi-cloud-worker-1:99fbaa2d-d839-4f0c-b991-fab640e7fb98",
+      "childWorker": "postgres:pi-cloud-worker-1:99fbaa2d-d839-4f0c-b991-fab640e7fb98",
       "sameWorker": true,
-      "inheritedReferenceCount": 12,
-      "childOwnedEntryCount": 7,
+      "inheritedReferenceCount": 14,
+      "childOwnedEntryCount": 9,
       "workspaceKind": "subagent_isolated",
       "workspaceDeleted": true,
       "patchContainsIsolatedFile": true
     }
+  },
+  "recursiveTree": [
+    {
+      "executionId": "35408e72-2f9c-4c43-afa5-5acd4267c6fb",
+      "parentExecutionId": null,
+      "rootSessionId": "c736a698-3ff0-4a9e-97fa-b00d31182d93",
+      "rootRunId": "e1fbed7f-93d0-4540-8c15-5fbdefd4385e",
+      "depth": 1,
+      "state": "completed",
+      "childSessionId": "ee5a1c6e-bf08-407e-bc45-105aa2f5d698",
+      "childRunId": "4ef2b6e8-3e19-4e0c-bff3-96f2eecfd115",
+      "childRunState": "completed"
+    },
+    {
+      "executionId": "81a9aa07-c191-4bcd-9f60-f55691a7b448",
+      "parentExecutionId": "35408e72-2f9c-4c43-afa5-5acd4267c6fb",
+      "rootSessionId": "c736a698-3ff0-4a9e-97fa-b00d31182d93",
+      "rootRunId": "e1fbed7f-93d0-4540-8c15-5fbdefd4385e",
+      "depth": 2,
+      "state": "completed",
+      "childSessionId": "75e69c5d-696c-437a-bdcc-748dbab49031",
+      "childRunId": "a8f167ac-a53a-4e2e-a9b0-3b2fd309ea08",
+      "childRunState": "completed"
+    }
+  ],
+  "productProjection": {
+    "listContainsEveryRecursiveSession": true,
+    "fullTreePreservesNestedParent": true,
+    "nestedFocusRoot": "75e69c5d-696c-437a-bdcc-748dbab49031"
   }
 }
