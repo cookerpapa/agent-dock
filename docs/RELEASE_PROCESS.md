@@ -100,10 +100,13 @@ fixable-finding gate, and uploads each evidence set for 14 days. Checkout,
 Node, Anchore, Trivy, Gitleaks, and artifact Actions are pinned to immutable
 commits in `.github/workflows/ci.yml`.
 
-GitHub-hosted CI runs deterministic zero-token, container-contract and
-Cube-template checks. It does not pretend to execute the KVM- and
-credential-dependent `production:check`; that gate remains an explicit release
-precondition on the deployment host.
+GitHub-hosted CI runs deterministic zero-token checks plus the nine-image SBOM
+and vulnerability matrix. The matrix still builds the Cube Tool image, but the
+full `cubesandbox:template-check` is a release-host precondition: rebuilding the
+same large toolchain a second time on every push exceeded the hosted Runner's
+30-minute budget without adding KVM evidence. CI does not pretend to execute
+the KVM- and credential-dependent `production:check`; that gate also remains
+an explicit release precondition on the deployment host.
 
 No package receives a scheduler-specific vulnerability exception. Every
 fixable HIGH/CRITICAL finding remains a release blocker unless a narrow,

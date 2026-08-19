@@ -75,40 +75,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  containers:
-    name: CubeSandbox template contract
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Set up Node.js for the runtime verifier
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24.18.0
-          package-manager-cache: false
-
-      - name: Install pinned dependencies without lifecycle scripts
-        run: npm ci --ignore-scripts
-
-      - name: Build the current CubeSandbox Tool template
-        run: >-
-          docker build
-          --file deploy/cubesandbox/Dockerfile.tool
-          --build-arg PI_CLOUD_VERSION=ci
-          --build-arg PI_CLOUD_REVISION="${{ github.sha }}"
-          --tag pi-cloud/cubesandbox-tool:ci
-          .
-
-      - name: Verify the immutable CubeSandbox template contract
-        run: npm run cubesandbox:template-check
-        env:
-          PI_CLOUD_CUBESANDBOX_TOOL_IMAGE: pi-cloud/cubesandbox-tool:ci
-
   supply-chain:
     name: SBOM and vulnerability gate (${{ matrix.image }})
     runs-on: ubuntu-latest
