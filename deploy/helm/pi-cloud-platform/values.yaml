@@ -67,7 +67,7 @@ controlPlane:
     maximumProjects: 10
     maximumSessions: 100
     maximumUnsettledTurns: 10
-    maximumConcurrentTurns: 2
+    maximumConcurrentTurns: 4
     maximumActiveSandboxes: 2
   supervisorIdPrefix: pi-cloud-pi-worker-
   resources:

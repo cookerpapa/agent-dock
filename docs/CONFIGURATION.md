@@ -75,6 +75,7 @@ model capability TTL >= Pi Turn timeout + expiry margin
 repository import lease <= repository import wait
 Worker termination grace > Turn + Tool settlement window
 Kafka retention > Valkey live replay window
+tenant maximum concurrent Runs >= desired active Subagents + one waiting root Run
 ```
 
 Changing one value may require changing its dependents. Run:

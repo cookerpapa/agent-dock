@@ -155,7 +155,9 @@ the root-Run lock. These bounds can be configured per Worker deployment but are
 never model-controlled. Nested Child Runs use the same PostgreSQL queue,
 RunAttempt fence, Tool Broker authorization and Cube Workspace modes as the
 first generation. Cancelling or archiving a parent covers its full descendant
-execution subtree.
+execution subtree. Admission also proves the tenant concurrent-Run quota has a
+lane for the new Child; an undersized quota fails the Tool call immediately
+instead of leaving a parent/child chain deadlocked in the queue.
 
 The upstream native supervisor channel is local-file based, so PiCloud replaces
 that transport with a PostgreSQL channel while preserving the

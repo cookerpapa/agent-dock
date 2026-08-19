@@ -497,7 +497,7 @@ const publicTenantMaximumUnsettledTurns = integerEnvironmentValue(
 );
 const publicTenantMaximumConcurrentTurns = integerEnvironmentValue(
   "PI_CLOUD_PUBLIC_TENANT_MAXIMUM_CONCURRENT_TURNS",
-  2,
+  4,
   1,
   256,
 );

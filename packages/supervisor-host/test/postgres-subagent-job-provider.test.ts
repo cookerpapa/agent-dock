@@ -629,6 +629,33 @@ describe.sequential("PostgresSubagentJobProvider", () => {
       canSpawnChildren: true,
     });
 
+    await database
+      .updateTable("tenant_runtime_policies")
+      .set({ maximum_concurrent_turns: 2 })
+      .where("tenant_id", "=", tenantId)
+      .executeTakeFirstOrThrow();
+    await expect(
+      provider.start({
+        tenantId,
+        parentSessionId: child.childSessionId,
+        parentRunId: child.childRunId,
+        parentAttemptId: childAttemptId,
+        parentFencingToken: 11,
+        parentToolCallId: "recursive-no-tenant-lane",
+        workflowRunId: "recursive-no-tenant-lane",
+        stepIndex: 0,
+        agentName: "oracle",
+        prompt: "This must fail instead of waiting forever",
+        contextMode: "fresh",
+        workspaceMode: "none",
+      }),
+    ).rejects.toMatchObject({ code: "tenant_subagent_concurrency_exhausted" });
+    await database
+      .updateTable("tenant_runtime_policies")
+      .set({ maximum_concurrent_turns: 8 })
+      .where("tenant_id", "=", tenantId)
+      .executeTakeFirstOrThrow();
+
     const grandchild = await provider.start({
       tenantId,
       parentSessionId: child.childSessionId,

@@ -444,11 +444,16 @@ export class PostgresSubagentJobProvider {
         .where("root_run_id", "=", treeContext.rootRunId)
         .executeTakeFirstOrThrow();
       const activeTreeNodes = await transaction
-        .selectFrom("subagent_executions")
+        .selectFrom("subagent_executions as execution")
+        .innerJoin("runs as child_run", (join) =>
+          join
+            .onRef("child_run.tenant_id", "=", "execution.tenant_id")
+            .onRef("child_run.id", "=", "execution.child_run_id"),
+        )
         .select(({ fn }) => fn.countAll<string>().as("count"))
-        .where("tenant_id", "=", input.tenantId)
-        .where("root_run_id", "=", treeContext.rootRunId)
-        .where("state", "in", ["preparing", "queued", "running"])
+        .where("execution.tenant_id", "=", input.tenantId)
+        .where("execution.root_run_id", "=", treeContext.rootRunId)
+        .where("child_run.state", "in", ["queued", "claimed", "running"])
         .executeTakeFirstOrThrow();
       if (Number(treeNodes.count) >= this.#treePolicy.maximumNodes) {
         throw new PostgresSubagentJobError(
@@ -465,10 +470,16 @@ export class PostgresSubagentJobProvider {
 
       const policy = await transaction
         .selectFrom("tenant_runtime_policies")
-        .select(["maximum_sessions", "maximum_unsettled_turns"])
+        .select(["maximum_sessions", "maximum_unsettled_turns", "maximum_concurrent_turns"])
         .where("tenant_id", "=", input.tenantId)
         .forUpdate()
         .executeTakeFirstOrThrow();
+      if (Number(activeTreeNodes.count) + 2 > policy.maximum_concurrent_turns) {
+        throw new PostgresSubagentJobError(
+          "tenant_subagent_concurrency_exhausted",
+          "Tenant concurrent-Run quota has no lane for another recursive Subagent",
+        );
+      }
       const sessionCount = await transaction
         .selectFrom("sessions")
         .select(({ fn }) => fn.countAll<string>().as("count"))
