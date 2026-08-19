@@ -85,6 +85,7 @@ export interface SandboxActivationStateRepository {
     failureCode?: string,
   ): Promise<void>;
   claimOrphanedActivations(limit: number): Promise<readonly SandboxOrphanedActivation[]>;
+  claimTerminalRunActivations(limit: number): Promise<readonly SandboxOrphanedActivation[]>;
   listRetiredWarmActivationIds(): Promise<readonly string[]>;
   listRuntimeAssignments(sandboxId: string): Promise<readonly SupervisorRuntimeAssignment[]>;
   releaseRuntimeAssignment(assignment: SupervisorRuntimeAssignment): Promise<void>;
@@ -172,6 +173,9 @@ export class InMemorySandboxActivationStateRepository implements SandboxActivati
   }
   async settleOperation(): Promise<void> {}
   async claimOrphanedActivations(): Promise<readonly SandboxOrphanedActivation[]> {
+    return [];
+  }
+  async claimTerminalRunActivations(): Promise<readonly SandboxOrphanedActivation[]> {
     return [];
   }
   async listRetiredWarmActivationIds(): Promise<readonly string[]> {
@@ -1019,6 +1023,110 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
           .where("activation_id", "=", row.activation_id)
           .where("state", "=", "unknown")
           .executeTakeFirstOrThrow();
+      }
+      return rows.map((row) => ({
+        activationId: row.activation_id,
+        assignment: {
+          tenantId: row.tenant_id,
+          projectId: row.project_id,
+          workspaceId: row.workspace_id,
+          supervisorId: row.supervisor_id,
+          bootId: row.boot_id,
+          sandboxId: row.sandbox_id,
+          commandId: row.command_id,
+          sessionId: row.session_id,
+          turnId: row.turn_id,
+          attemptId: row.attempt_id,
+          leaseId: row.lease_id,
+          fencingToken: Number(row.fencing_token),
+        },
+      }));
+    });
+  }
+
+  async claimTerminalRunActivations(limit: number): Promise<readonly SandboxOrphanedActivation[]> {
+    const boundedLimit = positiveInteger(limit, "terminal Run activation cleanup limit");
+    const now = validDate(this.#clock);
+    return this.#database.transaction().execute(async (transaction) => {
+      await this.#assertCurrentOwner(transaction, now);
+      const rows = await transaction
+        .selectFrom("tool_broker_activations as activation")
+        .innerJoin("run_attempts as attempt", (join) =>
+          join
+            .onRef("attempt.tenant_id", "=", "activation.tenant_id")
+            .onRef("attempt.id", "=", "activation.attempt_id"),
+        )
+        .innerJoin("runs as run", (join) =>
+          join
+            .onRef("run.tenant_id", "=", "attempt.tenant_id")
+            .onRef("run.id", "=", "attempt.run_id"),
+        )
+        .select([
+          "activation.activation_id",
+          "activation.tenant_id",
+          "activation.project_id",
+          "activation.workspace_id",
+          "activation.supervisor_id",
+          "activation.boot_id",
+          "activation.sandbox_id",
+          "activation.command_id",
+          "activation.session_id",
+          "activation.turn_id",
+          "activation.attempt_id",
+          "activation.lease_id",
+          "activation.fencing_token",
+        ])
+        .where("activation.sandbox_domain_id", "=", this.#sandboxDomainId)
+        .where("activation.state", "in", ["reserved", "materializing", "active"])
+        .where((expression) =>
+          expression.or([
+            expression("run.state", "in", [
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "superseded",
+            ]),
+            expression("attempt.state", "in", [
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "superseded",
+            ]),
+            sql<boolean>`${sql.ref("run.current_attempt_id")} is distinct from ${sql.ref(
+              "activation.attempt_id",
+            )}`,
+          ]),
+        )
+        .orderBy("activation.updated_at", "asc")
+        .limit(boundedLimit)
+        .forUpdate("activation")
+        .skipLocked()
+        .execute();
+      const activationIds = rows.map((row) => row.activation_id);
+      if (activationIds.length > 0) {
+        await transaction
+          .updateTable("tool_broker_activations")
+          .set({
+            owner_instance_id: this.#instanceId,
+            owner_base_url: this.#ownerBaseUrl,
+            state: "cleaning",
+            failure_code: "terminal_run_orphan",
+            updated_at: now,
+          })
+          .where("activation_id", "in", activationIds)
+          .execute();
+        await transaction
+          .updateTable("tool_broker_operations")
+          .set({
+            state: "failed",
+            failure_code: "terminal_run_orphan",
+            settled_at: now,
+          })
+          .where("activation_id", "in", activationIds)
+          .where("state", "=", "running")
+          .execute();
       }
       return rows.map((row) => ({
         activationId: row.activation_id,

@@ -65,6 +65,11 @@ Cube loss discards processes, memory, sockets and PTYs. The persistent Workspace
 Volume survives and can attach to a fresh KVM. The next Pi step is told only
 when the execution world materially changed.
 
+If a Worker dies during lazy Cube creation, Tool Broker also reconciles the
+Activation against the authoritative Run/Attempt. A late-created runtime for a
+terminal or superseded Attempt is destroyed and cannot retain scarce admission
+capacity.
+
 ## Delivery semantics
 
 ```text

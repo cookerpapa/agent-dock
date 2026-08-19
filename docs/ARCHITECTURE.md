@@ -186,6 +186,13 @@ The Broker validates opaque Tool authority, resolves a Workspace's Sandbox
 Domain and reconciles Cube lifecycle. Pi cannot choose a Sandbox ID, image,
 mount, runtime class, resource limit or network policy.
 
+Broker admission is reconciled against PostgreSQL Run/Attempt state. If a
+Worker disappears while Cube creation is in flight, a runtime that appears
+after the Run or Attempt became terminal is treated as an orphan: the pending
+operation is failed, the runtime is destroyed and the admission slot is
+released. This closes the create-after-caller-death race instead of relying on
+the vanished Worker to call `release()`.
+
 Cube mounts only the `workspace/` child of a trusted persistent Volume. The
 guest contains normal development tools but no platform credential. The trusted
 Volume envelope holds generation and Git baseline metadata outside the guest's

@@ -434,6 +434,38 @@ describe("PostgreSQL Tool Broker ownership", () => {
       capability_sha256: activation.capabilitySha256,
       state: "reserved",
     });
+    await database
+      .updateTable("run_attempts")
+      .set({
+        state: "failed",
+        failure_code: "test_terminal_run",
+        failure_message: "test terminal Run",
+        failure_retryable: false,
+        settled_at: new Date(),
+      })
+      .where("id", "=", activation.assignment.attemptId)
+      .executeTakeFirstOrThrow();
+    await database
+      .updateTable("runs")
+      .set({
+        state: "failed",
+        failure_code: "test_terminal_run",
+        failure_message: "test terminal Run",
+        failure_retryable: false,
+        settled_at: new Date(),
+      })
+      .where("id", "=", parentRunId)
+      .executeTakeFirstOrThrow();
+    await expect(repository.claimTerminalRunActivations(16)).resolves.toEqual([
+      expect.objectContaining({ activationId: activation.activationId }),
+    ]);
+    await expect(
+      database
+        .selectFrom("tool_broker_activations")
+        .select(["state", "failure_code"])
+        .where("activation_id", "=", activation.activationId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ state: "cleaning", failure_code: "terminal_run_orphan" });
   }, 15_000);
 
   it("fences an expired replica before a surviving owner stays Ready", async () => {

@@ -346,6 +346,7 @@ export class ToolBroker {
           this.reapWarm(),
           this.reapRetiredWarm(),
           this.#reapOrphanedActivations(),
+          this.#reapTerminalRunActivations(),
           this.#reapOrphanedTerminals(),
         ]).catch(() => undefined),
       30_000,
@@ -397,6 +398,7 @@ export class ToolBroker {
       this.reapWarm(),
       this.reapRetiredWarm(),
       this.#reapOrphanedActivations(),
+      this.#reapTerminalRunActivations(),
       this.#reapOrphanedTerminals(),
     ]);
     if (this.#provider.openTerminal === undefined) {
@@ -516,7 +518,12 @@ export class ToolBroker {
   }
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
-    await Promise.all([this.reapWarm(), this.reapRetiredWarm(), this.#reapOrphanedActivations()]);
+    await Promise.all([
+      this.reapWarm(),
+      this.reapRetiredWarm(),
+      this.#reapOrphanedActivations(),
+      this.#reapTerminalRunActivations(),
+    ]);
     if (
       request.environment.profileKey !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_KEY ||
       request.environment.profileVersion !== DEFAULT_PROJECT_ENVIRONMENT_PROFILE_VERSION ||
@@ -1211,6 +1218,14 @@ export class ToolBroker {
           }
         }
         if (handle === undefined) handle = await this.#provider.create(activation.spec);
+        if (this.#activations.get(activationId) !== activation || signal?.aborted) {
+          await this.#provider.destroy(handle).catch(() => undefined);
+          throw new ToolBrokerError(
+            "tool_sandbox_admission_cancelled",
+            "Tool Sandbox admission was cancelled after provider creation",
+            false,
+          );
+        }
         if (
           !handleMatches(
             handle,
@@ -1315,6 +1330,25 @@ export class ToolBroker {
   async #reapOrphanedActivations(): Promise<void> {
     const orphaned = await this.#stateRepository.claimOrphanedActivations(16);
     for (const orphan of orphaned) {
+      try {
+        await this.#provider.destroyActivation(orphan.activationId, orphan.assignment);
+        await this.#stateRepository.setActivationState(orphan.activationId, "released");
+      } catch (error: unknown) {
+        await this.#stateRepository
+          .setActivationState(orphan.activationId, "unknown", {
+            failureCode: operationFailureCode(error),
+          })
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  async #reapTerminalRunActivations(): Promise<void> {
+    const orphaned = await this.#stateRepository.claimTerminalRunActivations(16);
+    for (const orphan of orphaned) {
+      const local = this.#activations.get(orphan.activationId);
+      if (local !== undefined) this.#revoke(orphan.activationId, local);
+      this.#releaseAdmission(orphan.activationId);
       try {
         await this.#provider.destroyActivation(orphan.activationId, orphan.assignment);
         await this.#stateRepository.setActivationState(orphan.activationId, "released");
