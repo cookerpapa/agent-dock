@@ -47,7 +47,12 @@ export function WorkspaceTerminal({
   const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const stateRef = useRef<TerminalState>("disconnected");
+  const onErrorRef = useRef(onError);
   const [state, setStateValue] = useState<TerminalState>("disconnected");
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   const setState = useCallback((next: TerminalState): void => {
     stateRef.current = next;
@@ -109,7 +114,7 @@ export function WorkspaceTerminal({
         } else if (frame.type === "workspace_terminal.error") {
           terminal.writeln(`\r\n\x1b[31m${frame.message}\x1b[0m`);
           setState("failed");
-          onError(frame.message);
+          onErrorRef.current(frame.message);
         }
       } catch {
         terminal.writeln("\r\n\x1b[31m终端返回了无效数据。\x1b[0m");
@@ -127,28 +132,40 @@ export function WorkspaceTerminal({
       terminal.writeln("\r\n\x1b[31m无法连接 Workspace 终端。\x1b[0m");
       setState("failed");
     });
-  }, [onError, sessionId, setState, transmit]);
+  }, [sessionId, setState, transmit]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
-    const terminal = new Terminal({
-      cursorBlink: true,
-      fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
-      fontSize: 13,
-      lineHeight: 1.25,
-      scrollback: 5_000,
-      theme: {
-        background: "#171917",
-        foreground: "#e7e9e5",
-        cursor: "#f4f1e8",
-        selectionBackground: "#454b45",
-      },
-    });
-    const fit = new FitAddon();
-    terminal.loadAddon(fit);
-    terminal.open(host);
-    fit.fit();
+    let terminal: Terminal;
+    let fit: FitAddon;
+    try {
+      terminal = new Terminal({
+        cursorBlink: true,
+        fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+        fontSize: 13,
+        lineHeight: 1.25,
+        scrollback: 5_000,
+        theme: {
+          background: "#171917",
+          foreground: "#e7e9e5",
+          cursor: "#f4f1e8",
+          selectionBackground: "#454b45",
+        },
+      });
+      fit = new FitAddon();
+      terminal.loadAddon(fit);
+      terminal.open(host);
+      fit.fit();
+    } catch (error: unknown) {
+      setState("failed");
+      onErrorRef.current(
+        error instanceof Error && error.message
+          ? `Workspace 终端初始化失败：${error.message}`
+          : "Workspace 终端初始化失败。",
+      );
+      return;
+    }
     terminal.writeln("\x1b[38;5;245m点击“连接终端”进入 /workspace。\x1b[0m");
     terminalRef.current = terminal;
     fitRef.current = fit;
@@ -160,10 +177,14 @@ export function WorkspaceTerminal({
         data: base64(new TextEncoder().encode(data)),
       });
     });
-    const resize = new ResizeObserver(() => {
+    const resizeTerminal = (): void => {
       requestAnimationFrame(() => {
         if (terminalRef.current !== terminal) return;
-        fit.fit();
+        try {
+          fit.fit();
+        } catch {
+          return;
+        }
         if (stateRef.current === "ready") {
           transmit({
             workspaceTerminalProtocolVersion: 1,
@@ -173,11 +194,15 @@ export function WorkspaceTerminal({
           });
         }
       });
-    });
-    resize.observe(host);
+    };
+    const resize =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resizeTerminal);
+    if (resize === null) window.addEventListener("resize", resizeTerminal);
+    else resize.observe(host);
     return () => {
       disconnect();
-      resize.disconnect();
+      if (resize === null) window.removeEventListener("resize", resizeTerminal);
+      else resize.disconnect();
       input.dispose();
       terminal.dispose();
       terminalRef.current = null;

@@ -1114,6 +1114,7 @@ export class ControlPlaneStore {
             .select("id")
             .where("tenant_id", "=", this.#tenantId)
             .where("workspace_id", "=", workspaceId)
+            .where("session_kind", "=", "conversation")
             .where("archived_at", "is", null)
             .limit(1)
             .executeTakeFirst();
@@ -1123,6 +1124,47 @@ export class ControlPlaneStore {
               "Delete every conversation in this Workspace before deleting the Workspace",
             );
           }
+
+          const activeSubagent = await transaction
+            .selectFrom("subagent_executions as execution")
+            .innerJoin("sessions as parent", (join) =>
+              join
+                .onRef("parent.tenant_id", "=", "execution.tenant_id")
+                .onRef("parent.id", "=", "execution.parent_session_id"),
+            )
+            .select("execution.id")
+            .where("execution.tenant_id", "=", this.#tenantId)
+            .where("parent.workspace_id", "=", workspaceId)
+            .where("execution.state", "in", ["preparing", "queued", "running"])
+            .limit(1)
+            .executeTakeFirst();
+          if (activeSubagent !== undefined) {
+            throw new ControlPlaneStoreError(
+              "conflict",
+              "Wait for delegated work to settle before deleting the Workspace",
+            );
+          }
+
+          const childSessionIds = transaction
+            .selectFrom("subagent_executions as execution")
+            .innerJoin("sessions as parent", (join) =>
+              join
+                .onRef("parent.tenant_id", "=", "execution.tenant_id")
+                .onRef("parent.id", "=", "execution.parent_session_id"),
+            )
+            .select("execution.child_session_id")
+            .where("execution.tenant_id", "=", this.#tenantId)
+            .where("parent.workspace_id", "=", workspaceId);
+          await transaction
+            .updateTable("sessions")
+            .set({
+              archived_at: sql<Date>`coalesce(${sql.ref("archived_at")}, now())`,
+              row_version: sql<string>`${sql.ref("row_version")} + 1`,
+              updated_at: sql<Date>`now()`,
+            })
+            .where("tenant_id", "=", this.#tenantId)
+            .where("id", "in", childSessionIds)
+            .execute();
 
           deletedAt = new Date();
           await transaction

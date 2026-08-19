@@ -24,6 +24,7 @@ const IDS = {
   version2: "19000000-0000-4000-8000-000000000002",
   workspace3: "18000000-0000-4000-8000-000000000003",
   version3: "19000000-0000-4000-8000-000000000003",
+  subagentSession: "14000000-0000-4000-8000-000000000002",
 } as const;
 
 let pglite: PGlite;
@@ -506,6 +507,11 @@ describe.sequential("versioned Workspace service", () => {
   });
 
   it("archives a conversation idempotently and blocks later turns", async () => {
+    await database
+      .updateTable("sessions")
+      .set({ state: "failed" })
+      .where("id", "=", IDS.session)
+      .executeTakeFirstOrThrow();
     await expect(
       service.archive(IDS.tenant, "archive-session", IDS.session, { archived: true }),
     ).resolves.toMatchObject({ kind: "archive" });
@@ -530,5 +536,39 @@ describe.sequential("versioned Workspace service", () => {
       code: "artifact_corrupt",
     });
     objects.set("checkpoints/workspace-1", original);
+  });
+
+  it("does not let internal Subagent history block deletion of an unused Workspace", async () => {
+    await database
+      .updateTable("sessions")
+      .set({ archived_at: new Date("2026-07-20T01:00:00.000Z") })
+      .where("tenant_id", "=", IDS.tenant)
+      .where("workspace_id", "=", IDS.workspace)
+      .where("session_kind", "=", "conversation")
+      .execute();
+    await database
+      .insertInto("sessions")
+      .values({
+        id: IDS.subagentSession,
+        tenant_id: IDS.tenant,
+        project_id: IDS.project,
+        workspace_id: IDS.workspace,
+        desired_model_profile_id: IDS.profile,
+        state: "idle",
+        session_kind: "subagent",
+      })
+      .executeTakeFirstOrThrow();
+    const store = new ControlPlaneStore({
+      database,
+      tenantId: IDS.tenant,
+      defaultModelProfileId: IDS.profile,
+      idGenerator: randomUUID,
+    });
+    await expect(store.listWorkspaces()).resolves.toMatchObject({
+      workspaces: [{ workspaceId: IDS.workspace, sessionCount: 0 }],
+    });
+    await expect(
+      store.deleteWorkspace(IDS.workspace, "delete-workspace-with-subagent-history"),
+    ).resolves.toMatchObject({ workspaceId: IDS.workspace, replayed: false });
   });
 });

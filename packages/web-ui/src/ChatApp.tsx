@@ -79,7 +79,14 @@ export default function ChatApp() {
   const [conversationLoading, setConversationLoading] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [operation, setOperation] = useState<
-    "creating" | "submitting" | "cancelling" | "steering" | "forking" | "deleting-workspace" | null
+    | "creating"
+    | "submitting"
+    | "cancelling"
+    | "steering"
+    | "forking"
+    | "deleting-conversation"
+    | "deleting-workspace"
+    | null
   >(null);
   const [steerNotice, setSteerNotice] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -555,11 +562,11 @@ export default function ChatApp() {
     ) {
       return;
     }
-    setOperation("creating");
+    setOperation("deleting-conversation");
     try {
       await api.deleteConversation(conversation.sessionId, newIdempotencyKey("delete"));
       if (state.session?.sessionId === conversation.sessionId) resetConversation();
-      await refreshConversations();
+      await Promise.all([refreshConversations(), refreshWorkspaces()]);
     } catch (error: unknown) {
       update({ type: "api.error", message: errorMessage(error) });
     } finally {

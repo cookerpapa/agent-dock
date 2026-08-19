@@ -1955,14 +1955,6 @@ body.product-panel-resizing {
   background: #171917;
 }
 
-.workspace-terminal-loading {
-  display: grid;
-  min-height: 100%;
-  place-content: center;
-  color: #777;
-  font-size: 11px;
-}
-
 .workspace-terminal-toolbar {
   display: flex;
   align-items: center;
@@ -2189,12 +2181,6 @@ body.product-panel-resizing {
   .product-mobile-menu {
     display: block;
   }
-  .product-content.with-inspector {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .product-content.with-inspector .product-chat-scroll {
-    display: none;
-  }
   .product-conversation-outline,
   .product-tree-panel {
     display: none;
@@ -2205,6 +2191,15 @@ body.product-panel-resizing {
 
   .product-admin-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .product-content.with-inspector {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .product-content.with-inspector .product-chat-scroll {
+    display: none;
   }
 }
 

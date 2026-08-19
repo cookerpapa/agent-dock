@@ -1,11 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WorkspaceFileResource, WorkspaceVersionResource } from "@pi-cloud/protocol";
 import { PiCloudApi, PiCloudApiError } from "./api.ts";
-
-const WorkspaceTerminal = lazy(async () => {
-  const module = await import("./WorkspaceTerminal.tsx");
-  return { default: module.WorkspaceTerminal };
-});
+import { WorkspaceTerminal } from "./WorkspaceTerminal.tsx";
 
 export const MAXIMUM_WORKSPACE_PREVIEW_BYTES = 512 * 1_024;
 
@@ -309,9 +305,7 @@ export function WorkspaceInspector({
         </button>
       </div>
       {view === "terminal" ? (
-        <Suspense fallback={<div className="workspace-terminal-loading">正在载入终端…</div>}>
-          <WorkspaceTerminal sessionId={sessionId} onError={onError} />
-        </Suspense>
+        <WorkspaceTerminal sessionId={sessionId} onError={onError} />
       ) : (
         <div className="workspace-directory-body">
           <nav className="workspace-file-tree" aria-label="/workspace 文件">

@@ -316,7 +316,7 @@ export class WorkspaceVersionService {
           .executeTakeFirst();
         if (session === undefined)
           throw new WorkspaceVersionError("not_found", "Session was not found");
-        if (session.state !== "cold" && session.state !== "idle") {
+        if (!(["cold", "idle", "failed"] as const).some((state) => state === session.state)) {
           throw new WorkspaceVersionError("conflict", "Active Session cannot be archived");
         }
         if ((session.archived_at !== null) === request.archived) {
@@ -396,6 +396,24 @@ export class WorkspaceVersionService {
           .where("tenant_id", "=", tenantId)
           .where("id", "=", sessionId)
           .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("sessions")
+          .set({
+            archived_at: request.archived ? now : null,
+            row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            updated_at: now,
+          })
+          .where("tenant_id", "=", tenantId)
+          .where(
+            "id",
+            "in",
+            transaction
+              .selectFrom("subagent_executions")
+              .select("child_session_id")
+              .where("tenant_id", "=", tenantId)
+              .where("parent_session_id", "=", sessionId),
+          )
+          .execute();
         const operationId = this.#idGenerator();
         await transaction
           .insertInto("workspace_operations")
