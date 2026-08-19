@@ -23,6 +23,15 @@ function turnElements(scroller: HTMLElement): ReadonlyMap<string, HTMLElement> {
   return elements;
 }
 
+function entryElements(scroller: HTMLElement): ReadonlyMap<string, HTMLElement> {
+  const elements = new Map<string, HTMLElement>();
+  for (const element of scroller.querySelectorAll<HTMLElement>("[data-conversation-entry-id]")) {
+    const entryId = element.dataset.conversationEntryId;
+    if (entryId !== undefined) elements.set(entryId, element);
+  }
+  return elements;
+}
+
 function branchChildren(tree: ConversationTreeResource) {
   const children = new Map<string, ConversationTreeBranchResource[]>();
   for (const branch of tree.branches) {
@@ -60,7 +69,7 @@ function TreeBranch({
   depth: number;
   activeTurnId: string | null;
   currentSessionId: string;
-  navigate: (sessionId: string, turnId?: string) => void;
+  navigate: (sessionId: string, target?: { turnId: string; entryId: string }) => void;
 }) {
   return (
     <div className="product-tree-branch" style={{ "--tree-depth": depth } as React.CSSProperties}>
@@ -69,7 +78,9 @@ function TreeBranch({
           className={`product-tree-branch-label ${branch.kind}${branch.current ? " current" : ""}`}
           onClick={() => {
             const first = branch.entries[0];
-            if (first !== undefined) navigate(branch.sessionId, first.turnId);
+            if (first !== undefined) {
+              navigate(branch.sessionId, { turnId: first.turnId, entryId: first.entryId });
+            }
           }}
           title={branch.title}
           type="button"
@@ -99,7 +110,9 @@ function TreeBranch({
               className={`product-tree-entry product-tree-${entry.role}${
                 activeTurnId === entry.turnId ? " active" : ""
               }`}
-              onClick={() => navigate(branch.sessionId, entry.turnId)}
+              onClick={() =>
+                navigate(branch.sessionId, { turnId: entry.turnId, entryId: entry.entryId })
+              }
               title={compact(entry.text, 240)}
               type="button"
             >
@@ -139,7 +152,7 @@ export function ConversationTreeNavigator({
   loading: boolean;
   scrollerRef: RefObject<HTMLElement | null>;
   onViewChange: (view: ConversationTreeView) => void;
-  onNavigate: (sessionId: string, turnId?: string) => void;
+  onNavigate: (sessionId: string, target?: { turnId: string; entryId: string }) => void;
 }) {
   const panel = useResizablePanel({
     storageKey: "pi-cloud:conversation-tree",
@@ -203,19 +216,26 @@ export function ConversationTreeNavigator({
     [],
   );
 
-  const navigate = (sessionId: string, turnId?: string): void => {
-    if (turnId === undefined) {
+  const navigate = (
+    sessionId: string,
+    targetIdentity?: { turnId: string; entryId: string },
+  ): void => {
+    if (targetIdentity === undefined) {
       onNavigate(sessionId);
       return;
     }
     const scroller = scrollerRef.current;
-    const target = scroller === null ? undefined : turnElements(scroller).get(turnId);
+    const target =
+      scroller === null
+        ? undefined
+        : (entryElements(scroller).get(targetIdentity.entryId) ??
+          turnElements(scroller).get(targetIdentity.turnId));
     if (target === undefined) {
-      onNavigate(sessionId, turnId);
+      onNavigate(sessionId, targetIdentity);
       return;
     }
-    jumpTargetRef.current = turnId;
-    setActiveTurnId(turnId);
+    jumpTargetRef.current = targetIdentity.turnId;
+    setActiveTurnId(targetIdentity.turnId);
     target.scrollIntoView({ behavior: "smooth", block: "start" });
     if (jumpReleaseTimerRef.current !== null) clearTimeout(jumpReleaseTimerRef.current);
     jumpReleaseTimerRef.current = setTimeout(() => {

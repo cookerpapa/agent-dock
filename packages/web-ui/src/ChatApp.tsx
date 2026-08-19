@@ -101,7 +101,10 @@ export default function ChatApp() {
   const [sandboxRetention, setSandboxRetention] = useState<SandboxRetentionPolicy>("ephemeral");
   const [pendingInitialPrompt, setPendingInitialPrompt] = useState<string | null>(null);
   const [reconnectGeneration, setReconnectGeneration] = useState(0);
-  const [pendingTreeJump, setPendingTreeJump] = useState<string | null>(null);
+  const [pendingTreeJump, setPendingTreeJump] = useState<{
+    turnId: string;
+    entryId: string;
+  } | null>(null);
   const [forkTarget, setForkTarget] = useState<{
     sourceSessionId: string;
     turnId: string;
@@ -406,7 +409,7 @@ export default function ChatApp() {
   useEffect(() => {
     if (pendingTreeJump === null) return;
     const target = chatScrollerRef.current?.querySelector<HTMLElement>(
-      `[data-conversation-turn-id="${pendingTreeJump}"]`,
+      `[data-conversation-entry-id="${pendingTreeJump.entryId}"], [data-conversation-turn-id="${pendingTreeJump.turnId}"]`,
     );
     if (target === undefined || target === null) return;
     target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -440,7 +443,7 @@ export default function ChatApp() {
 
   async function openConversationSession(
     sessionId: string,
-    jumpToTurnId?: string,
+    jumpTarget?: { turnId: string; entryId: string },
     allowDuringOperation = false,
     delegatedSession: DelegatedSessionSummaryResource | null = null,
   ): Promise<void> {
@@ -456,7 +459,7 @@ export default function ChatApp() {
         ...(loaded.liveSnapshot === undefined ? {} : { liveSnapshot: loaded.liveSnapshot }),
       });
       setSelectedDelegatedSession(delegatedSession);
-      if (jumpToTurnId !== undefined) setPendingTreeJump(jumpToTurnId);
+      if (jumpTarget !== undefined) setPendingTreeJump(jumpTarget);
       setSidebarOpen(false);
     } catch (error: unknown) {
       update({ type: "api.error", message: errorMessage(error) });
@@ -492,7 +495,11 @@ export default function ChatApp() {
       setForkTarget(null);
       setForkTitle("");
       await Promise.all([
-        openConversationSession(forked.session.sessionId, forkTarget.turnId, true),
+        openConversationSession(
+          forked.session.sessionId,
+          { turnId: forkTarget.turnId, entryId: forkTarget.entryId },
+          true,
+        ),
         refreshConversations(),
       ]);
     } catch (error: unknown) {
@@ -901,11 +908,11 @@ export default function ChatApp() {
 
       <ConversationTreeNavigator
         loading={treeLoading}
-        onNavigate={(sessionId, turnId) => {
+        onNavigate={(sessionId, target) => {
           const delegated = conversationTree?.delegatedSessions.find(
             (candidate) => candidate.sessionId === sessionId,
           );
-          void openConversationSession(sessionId, turnId, false, delegated ?? null);
+          void openConversationSession(sessionId, target, false, delegated ?? null);
         }}
         onViewChange={setTreeView}
         scrollerRef={chatScrollerRef}
@@ -1236,6 +1243,7 @@ export default function ChatApp() {
                     {state.inheritedMessages.map((message) => (
                       <div
                         className={`product-inherited-message ${message.role}`}
+                        data-conversation-entry-id={message.entryId}
                         key={message.entryId}
                       >
                         {message.role === "user" ? (
