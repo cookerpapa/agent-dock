@@ -160,6 +160,12 @@ Workspace modes are explicit:
   product lists and retired after terminal settlement. Child Sandbox retention
   is always ephemeral even when the parent conversation is persistent.
 
+For `context=fork`, PiCloud forks the native Pi branch immediately before the
+current parent prompt that requested delegation, then appends the deployment-
+owned Child task. Earlier conversation and compaction state are preserved, but
+the orchestration request itself is not copied as another executable Child
+instruction.
+
 RunAttempt fences remain the database-side effect authority. A separate
 monotonic Cube authority epoch rotates the in-guest secret across
 parent→child→parent handoffs; Session-local fence numbers are never compared as

@@ -43,6 +43,9 @@ conversation.
   target ordinary conversation Sessions only.
 - Freeze the child's Tool set as an intersection with the parent Run
   capability snapshot. A child can never widen its parent's grant.
+- Fork native Pi context at the boundary before the current delegation prompt.
+  This preserves earlier context without making “call a subagent” recursively
+  executable inside the Child.
 - Support explicit Workspace modes:
   - `none`: no Cube Tool capability;
   - `shared_serialized`: the parent and child use one Workspace and one

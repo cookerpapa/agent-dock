@@ -254,6 +254,13 @@ describe.sequential("PostgresSubagentJobProvider", () => {
   });
 
   it("forks Pi context, narrows tools and reads the terminal result from PostgreSQL", async () => {
+    const parentRepository = new PostgresPiSessionRepository({ database, tenantId });
+    const parentPi = await parentRepository.openById(parentSessionId);
+    await parentPi.appendMessage({
+      role: "user",
+      content: "Delegate repository inspection",
+      timestamp: Date.now(),
+    });
     const provider = new PostgresSubagentJobProvider({ database });
     const started = await provider.start({
       tenantId,
@@ -274,9 +281,12 @@ describe.sequential("PostgresSubagentJobProvider", () => {
     const repository = new PostgresPiSessionRepository({ database, tenantId });
     const childPi = await repository.openById(started.childSessionId);
     const inherited = await childPi.view("main").findEntriesOnBranch({ order: "oldestFirst" });
-    expect(inherited).toHaveLength(1);
+    expect(inherited).toHaveLength(2);
     expect(inherited[0]?.type).toBe("message");
     if (inherited[0]?.type === "message") expect(inherited[0].message.role).toBe("user");
+    expect(inherited[1]?.type).toBe("message");
+    if (inherited[1]?.type === "message") expect(inherited[1].message.role).toBe("assistant");
+    expect(JSON.stringify(inherited)).not.toContain("Delegate repository inspection");
 
     const child = await database
       .selectFrom("runs")

@@ -175,6 +175,22 @@ function assistantText(message: AgentMessage): string | undefined {
   return text.length === 0 ? undefined : text;
 }
 
+function storedMessageText(payload: Record<string, unknown>): string | undefined {
+  const value = payload.message;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const message = value as Record<string, unknown>;
+  if (message.role !== "user") return undefined;
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return undefined;
+  return message.content
+    .flatMap((part) => {
+      if (typeof part !== "object" || part === null || Array.isArray(part)) return [];
+      const content = part as Record<string, unknown>;
+      return content.type === "text" && typeof content.text === "string" ? [content.text] : [];
+    })
+    .join("\n");
+}
+
 export class PostgresSubagentJobProvider {
   readonly #database: Kysely<Database>;
   readonly #id: IdGenerator;
@@ -270,6 +286,7 @@ export class PostgresSubagentJobProvider {
           "parent_workspace.current_workspace_version_id as workspaceVersionId",
           "parent_workspace.sandbox_domain_id as sandboxDomainId",
           "parent_turn.model_profile_id as turnModelProfileId",
+          "parent_turn.input_text as parentPrompt",
           "parent_turn.provider as provider",
           "parent_turn.model_id as modelId",
           "parent_turn.thinking_level as thinkingLevel",
@@ -447,6 +464,37 @@ export class PostgresSubagentJobProvider {
           .where("session_id", "=", input.parentSessionId)
           .where("lane", "=", "main")
           .executeTakeFirstOrThrow();
+        let forkBoundaryEntryId = leaf.leaf_id;
+        if (leaf.leaf_id !== null && parent.parentPrompt !== null) {
+          const branch = await sql<{
+            id: string;
+            seq: string;
+            type: string;
+            payload: Record<string, unknown>;
+          }>`
+            with recursive branch as (
+              select id, seq, parent_id, type, payload
+                from pi_session_entries
+               where tenant_id = ${input.tenantId}::uuid
+                 and session_id = ${input.parentSessionId}
+                 and id = ${leaf.leaf_id}
+              union all
+              select parent.id, parent.seq, parent.parent_id, parent.type, parent.payload
+                from pi_session_entries parent
+                join branch child on child.parent_id = parent.id
+               where parent.tenant_id = ${input.tenantId}::uuid
+                 and parent.session_id = ${input.parentSessionId}
+            )
+            select id, seq, type, payload
+              from branch
+             where type = 'message'
+             order by seq::bigint desc
+          `.execute(transaction);
+          const currentPrompt = branch.rows.find(
+            (entry) => storedMessageText(entry.payload) === parent.parentPrompt,
+          );
+          if (currentPrompt !== undefined) forkBoundaryEntryId = currentPrompt.id;
+        }
         await forkPostgresPiSessionInTransaction(
           transaction,
           input.tenantId,
@@ -456,9 +504,9 @@ export class PostgresSubagentJobProvider {
             id: childSessionId,
             parentSessionId: input.parentSessionId,
             scope: "branch",
-            ...(leaf.leaf_id === null
+            ...(forkBoundaryEntryId === null
               ? {}
-              : { entryId: leaf.leaf_id, position: "before" as const }),
+              : { entryId: forkBoundaryEntryId, position: "before" as const }),
           },
         );
       } else {
