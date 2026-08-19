@@ -284,4 +284,38 @@ describe("pi-subagents cloud Tool adapter", () => {
     expect(output).toContain("subagent_supervisor");
     expect(output).toContain("Should this API preserve the old wire format?");
   }, 30_000);
+
+  it("waits for the durable Child Run after the local upstream shim times out", async () => {
+    let childStartedAt = 0;
+    const tool = await createPiSubagentsCloudTool({
+      context: { parentSessionId: "00000000-0000-4000-8000-000000000006" },
+      coordinator: {
+        start: () => {
+          childStartedAt = Date.now();
+          return { providerJobId: "job-after-shim-timeout", state: "running" };
+        },
+        status: () => ({
+          providerJobId: "job-after-shim-timeout",
+          state: Date.now() - childStartedAt >= 250 ? "completed" : "running",
+        }),
+        result: () => ({
+          providerJobId: "job-after-shim-timeout",
+          state: "completed",
+          output: "durable cloud result",
+        }),
+        reattach: () => ({ providerJobId: "job-after-shim-timeout", state: "running" }),
+        cancel: () => ({ providerJobId: "job-after-shim-timeout", state: "stopped" }),
+      },
+    });
+    const result = await tool.execute(
+      "tool-call-after-shim-timeout",
+      {
+        workflowScript:
+          'return runs.run("slow-cloud", {agent:"worker", task:"Finish remotely", timeoutMs:50})',
+      },
+      new AbortController().signal,
+    );
+    expect(JSON.stringify(result)).toContain("durable cloud result");
+    expect(JSON.stringify(result)).not.toContain("without a text result");
+  }, 30_000);
 });

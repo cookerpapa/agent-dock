@@ -50,6 +50,7 @@ if (parentPort === null) throw new Error("Pi subagent cloud Worker requires a pa
 const abort = new AbortController();
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
 const activeProviderJobs = new Set<string>();
+const activeCloudWaits = new Set<Promise<unknown>>();
 const completedCloudResults = new Map<string, { stepIndex: number; output: string }>();
 const blockedCloudResults = new Map<
   string,
@@ -60,6 +61,7 @@ const blockedCloudResults = new Map<
     message: string;
   }
 >();
+const failedCloudResults = new Map<string, { stepIndex: number; state: string; message: string }>();
 
 function progress(text: string, details: Record<string, unknown>): void {
   parentPort!.postMessage({
@@ -240,7 +242,8 @@ function cloudWorkflowScript(script: string, defaultIsolated: boolean): string {
     "  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return spec;",
     "  const isolated = spec.worktree === undefined ? __piCloudDefaultIsolated : spec.worktree === true;",
     "  const task = isolated && typeof spec.task === 'string' ? __piCloudTaskMarker + spec.task : spec.task;",
-    "  return { ...spec, worktree: false, ...(task === undefined ? {} : { task }) };",
+    "  const timeoutMs = spec.timeoutMs === undefined ? 300000 : spec.timeoutMs;",
+    "  return { ...spec, worktree: false, timeoutMs, ...(task === undefined ? {} : { task }) };",
     "};",
     "const __piCloudRuns = Object.freeze({",
     "  run: (key, spec) => runs.run(key, __piCloudChild(spec)),",
@@ -300,7 +303,7 @@ async function waitForCloudResult(
       }
     | undefined;
   let latestCoordinationId: string | undefined;
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + 300_000;
   while (!new Set(["completed", "failed", "stopped", "blocked"]).has(state)) {
     if (abort.signal.aborted) throw abort.signal.reason;
     if (Date.now() >= deadline)
@@ -372,6 +375,16 @@ async function waitForCloudResult(
         output: result.output.trim(),
       });
     }
+    if (result.state !== "completed") {
+      failedCloudResults.set(started.providerJobId, {
+        stepIndex: startInput.stepIndex,
+        state: typeof result.state === "string" ? result.state : "failed",
+        message:
+          typeof result.failureMessage === "string" && result.failureMessage.trim() !== ""
+            ? result.failureMessage.trim()
+            : `Subagent ended in state ${String(result.state ?? "failed")}.`,
+      });
+    }
     progress(`Subagent ${startInput.agent} 已结束。`, {
       state: result.state,
       agent: startInput.agent,
@@ -394,7 +407,9 @@ async function startShimBridge(socketPath: string): Promise<Server> {
       if (newline < 0) return;
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
-      void waitForCloudResult(parseChildInvocation(JSON.parse(line)))
+      const cloudWait = waitForCloudResult(parseChildInvocation(JSON.parse(line)));
+      activeCloudWaits.add(cloudWait);
+      void cloudWait
         .then((result) => socket.end(`${JSON.stringify(result)}\n`))
         .catch((error: unknown) =>
           socket.end(
@@ -403,7 +418,8 @@ async function startShimBridge(socketPath: string): Promise<Server> {
               failureMessage: error instanceof Error ? error.message : String(error),
             })}\n`,
           ),
-        );
+        )
+        .finally(() => activeCloudWaits.delete(cloudWait));
     });
   });
   await new Promise<void>((resolvePromise, rejectPromise) => {
@@ -559,9 +575,17 @@ async function main(): Promise<void> {
     const waitTool = wrapRegisteredTool(registeredWait, session.extensionRunner);
     await waitTool.execute(
       `${input.toolCallId}:wait`,
-      { id: asyncId, timeoutMs: 120_000 },
+      { id: asyncId, timeoutMs: 300_000 },
       abort.signal,
     );
+    // The upstream process watchdog protects a local child process. In
+    // PiCloud, a leaf may already be durably admitted and continue on another
+    // Worker after that local shim exits. PostgreSQL Child Run settlement is
+    // authoritative, so never return an empty parent result while an admitted
+    // cloud leaf is still active.
+    while (activeCloudWaits.size > 0) {
+      await Promise.allSettled([...activeCloudWaits]);
+    }
     const blocked = [...blockedCloudResults.values()].sort(
       (left, right) => left.stepIndex - right.stepIndex,
     );
@@ -584,6 +608,26 @@ async function main(): Promise<void> {
             },
           ],
           details: { state: "blocked", requests: blocked },
+        },
+      });
+      return;
+    }
+    const failed = [...failedCloudResults.values()].sort(
+      (left, right) => left.stepIndex - right.stepIndex,
+    );
+    if (failed.length > 0) {
+      parentPort!.postMessage({
+        type: "result",
+        result: {
+          content: [
+            {
+              type: "text" as const,
+              text: failed
+                .map((result) => `Subagent ${result.state}: ${result.message}`)
+                .join("\n\n"),
+            },
+          ],
+          details: { state: "failed", failures: failed },
         },
       });
       return;
