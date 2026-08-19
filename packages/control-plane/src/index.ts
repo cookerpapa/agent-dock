@@ -13,6 +13,7 @@ export {
 } from "./tenant-identity.ts";
 
 export { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
+export { ConversationTreeService } from "./conversation-tree-service.ts";
 export {
   PublicTenantRegistrationError,
   PublicTenantRegistrationService,

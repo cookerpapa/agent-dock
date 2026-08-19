@@ -90,6 +90,7 @@ export type SessionViewState = {
   session: SessionResource | ConversationSessionResource | null;
   sessionState: SessionViewStatus;
   lastSequence: number;
+  inheritedMessages: ConversationDetailResource["inheritedMessages"];
   turns: readonly TurnView[];
   historyTruncated: boolean;
   connection: ConnectionView;
@@ -121,6 +122,7 @@ export function createInitialSessionView(): SessionViewState {
     session: null,
     sessionState: "none",
     lastSequence: 0,
+    inheritedMessages: [],
     turns: [],
     historyTruncated: false,
     connection: { phase: "offline", attempt: 0, message: null },
@@ -433,6 +435,7 @@ export function sessionViewReducer(
       session: action.conversation.session,
       sessionState: action.conversation.session.state,
       lastSequence: action.conversation.replayAfterSequence,
+      inheritedMessages: action.conversation.inheritedMessages,
       turns: action.conversation.turns.map((turn): TurnView => ({
         ...(turn.transcript === undefined
           ? {

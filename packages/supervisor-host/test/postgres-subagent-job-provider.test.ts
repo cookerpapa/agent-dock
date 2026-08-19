@@ -1,5 +1,9 @@
 import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
-import { ControlPlaneStore, createPrivateTenant } from "@pi-cloud/control-plane";
+import {
+  ControlPlaneStore,
+  ConversationTreeService,
+  createPrivateTenant,
+} from "@pi-cloud/control-plane";
 import { PostgresPiSessionRepository } from "@pi-cloud/pi-session-postgres";
 import { TURN_COMMAND_OUTBOX_TOPIC } from "@pi-cloud/protocol";
 import { RunCommandExecutor } from "@pi-cloud/runtime-core/run-command-executor";
@@ -299,6 +303,31 @@ describe.sequential("PostgresSubagentJobProvider", () => {
     await expect(provider.result(tenantId, started.executionId)).resolves.toMatchObject({
       state: "completed",
       output: "Subagent result from PostgreSQL",
+    });
+    const focusTree = await new ConversationTreeService({ database }).tree(
+      tenantId,
+      started.childSessionId,
+      "focus",
+    );
+    expect(focusTree).toMatchObject({
+      rootSessionId: started.childSessionId,
+      currentSessionId: started.childSessionId,
+      view: "focus",
+      branches: [
+        {
+          kind: "subagent",
+          sessionId: started.childSessionId,
+          parentSessionId: null,
+          current: true,
+          agentName: "scout",
+          contextMode: "fork",
+          workspaceMode: "shared_serialized",
+          entries: [
+            { role: "user", text: "Earlier context" },
+            { role: "assistant", text: "Subagent result from PostgreSQL" },
+          ],
+        },
+      ],
     });
   });
 

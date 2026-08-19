@@ -122,6 +122,7 @@ describe("session transcript reducer", () => {
   it("loads bounded historical prompt metadata before replaying its durable suffix", () => {
     const conversation: ConversationDetailResource = {
       project,
+      inheritedMessages: [],
       session: {
         ...session,
         state: "running",
@@ -165,6 +166,7 @@ describe("session transcript reducer", () => {
   it("hydrates an active durable snapshot before following later SSE events", () => {
     const conversation: ConversationDetailResource = {
       project,
+      inheritedMessages: [],
       session: {
         ...session,
         state: "running",
@@ -233,6 +235,7 @@ describe("session transcript reducer", () => {
       type: "conversation.loaded",
       conversation: {
         project,
+        inheritedMessages: [],
         session: {
           ...session,
           state: "running",
@@ -274,6 +277,7 @@ describe("session transcript reducer", () => {
   it("hydrates a completed semantic transcript without replaying historical deltas", () => {
     const conversation: ConversationDetailResource = {
       project,
+      inheritedMessages: [],
       session: {
         ...session,
         state: "idle",

@@ -468,6 +468,7 @@ const MAX_CONVERSATION_SUMMARIES = 100;
 const MAX_DELEGATED_SESSION_SUMMARIES = 500;
 const MAX_WORKSPACE_SUMMARIES = 100;
 const MAX_CONVERSATION_TURNS = 200;
+const MAX_INHERITED_MESSAGES = 10_000;
 const MAX_SESSION_RUNS = 100;
 const TURN_ACCEPTING_SESSION_STATES = new Set<SessionState>([
   "cold",
@@ -1562,6 +1563,10 @@ export class ControlPlaneStore {
     }
 
     const environment = await this.#loadActiveProjectEnvironment(conversation.projectId);
+    const inheritedMessages =
+      conversation.sessionKind === "subagent"
+        ? await this.#delegatedInheritedMessages(sessionId)
+        : [];
     const conversationSource: WorkspaceSourceRow = {
       ...conversation,
       ...(conversation.sourceKind === "repository_set"
@@ -1598,10 +1603,92 @@ export class ControlPlaneStore {
           ? {}
           : { parentSessionId: conversation.parentSessionId }),
       },
+      inheritedMessages,
       turns,
       historyTruncated,
       replayAfterSequence,
     };
+  }
+
+  async #delegatedInheritedMessages(
+    sessionId: string,
+  ): Promise<ConversationDetailResource["inheritedMessages"]> {
+    const execution = await this.#database
+      .selectFrom("subagent_executions")
+      .select(["context_mode as contextMode", "created_at as createdAt"])
+      .where("tenant_id", "=", this.#tenantId)
+      .where("child_session_id", "=", sessionId)
+      .executeTakeFirst();
+    if (execution === undefined) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Delegated Session has no execution record",
+      );
+    }
+    if (execution.contextMode !== "fork") return [];
+    const forkedBefore = new Date(execution.createdAt).valueOf();
+    if (!Number.isSafeInteger(forkedBefore) || forkedBefore < 0) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Delegated Session fork timestamp is invalid",
+      );
+    }
+    const rows = await this.#database
+      .selectFrom("pi_session_entries")
+      .select(["id", "timestamp_ms as timestampMs", "payload"])
+      .where("tenant_id", "=", this.#tenantId)
+      .where("session_id", "=", sessionId)
+      .where("type", "=", "message")
+      .where("timestamp_ms", "<", String(forkedBefore))
+      .orderBy("seq", "asc")
+      .limit(MAX_INHERITED_MESSAGES + 1)
+      .execute();
+    if (rows.length > MAX_INHERITED_MESSAGES) {
+      throw new ControlPlaneStoreError("invalid_request", "Inherited conversation is too large");
+    }
+    return rows.flatMap((row) => {
+      const message = row.payload.message;
+      if (typeof message !== "object" || message === null || Array.isArray(message)) return [];
+      const candidate = message as Record<string, unknown>;
+      if (candidate.role !== "user" && candidate.role !== "assistant") return [];
+      if (
+        candidate.role === "assistant" &&
+        (typeof candidate.stopReason !== "string" ||
+          ["toolUse", "error", "aborted", "pending"].includes(candidate.stopReason))
+      ) {
+        return [];
+      }
+      const text =
+        typeof candidate.content === "string"
+          ? candidate.content
+          : Array.isArray(candidate.content)
+            ? candidate.content
+                .flatMap((part) => {
+                  if (typeof part !== "object" || part === null || Array.isArray(part)) return [];
+                  const content = part as Record<string, unknown>;
+                  return content.type === "text" && typeof content.text === "string"
+                    ? [content.text]
+                    : [];
+                })
+                .join("\n")
+            : "";
+      if (text.length === 0) return [];
+      const createdAt = new Date(Number(row.timestampMs));
+      if (Number.isNaN(createdAt.valueOf())) {
+        throw new ControlPlaneStoreError(
+          "control_plane_misconfigured",
+          "Inherited Pi message timestamp is invalid",
+        );
+      }
+      return [
+        {
+          entryId: row.id,
+          role: candidate.role,
+          text,
+          createdAt: createdAt.toISOString(),
+        },
+      ];
+    });
   }
 
   async #conversationLineage(sessionId: string): Promise<ConversationLineageNode[]> {

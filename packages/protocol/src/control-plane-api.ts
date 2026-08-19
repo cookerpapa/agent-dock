@@ -648,6 +648,18 @@ export const ConversationDetailResourceSchema = Type.Object(
   {
     project: ProjectResourceSchema,
     session: ConversationSessionResourceSchema,
+    inheritedMessages: Type.Array(
+      Type.Object(
+        {
+          entryId: Type.String({ minLength: 1, maxLength: 512 }),
+          role: Type.Union([Type.Literal("user"), Type.Literal("assistant")]),
+          text: Type.String({ maxLength: 100_000 }),
+          createdAt: UtcTimestampSchema,
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 10_000 },
+    ),
     turns: Type.Array(ConversationTurnResourceSchema, { maxItems: 200 }),
     historyTruncated: Type.Boolean(),
     replayAfterSequence: NonNegativeSafeIntegerSchema,
@@ -672,12 +684,17 @@ export const ConversationTreeEntryResourceSchema = Type.Object(
 
 export const ConversationTreeBranchResourceSchema = Type.Object(
   {
+    kind: Type.Union([Type.Literal("conversation"), Type.Literal("subagent")]),
     sessionId: UuidSchema,
     title: Type.String({ minLength: 1, maxLength: 256 }),
     parentSessionId: Type.Union([UuidSchema, Type.Null()]),
     forkedFromTurnId: Type.Union([UuidSchema, Type.Null()]),
     forkedFromEntryId: Type.Union([UuidSchema, Type.Null()]),
     current: Type.Boolean(),
+    agentName: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    contextMode: Type.Optional(DelegatedSessionContextModeSchema),
+    workspaceMode: Type.Optional(DelegatedSessionWorkspaceModeSchema),
+    delegatedState: Type.Optional(DelegatedSessionStateSchema),
     entries: Type.Array(ConversationTreeEntryResourceSchema, { maxItems: 10_000 }),
   },
   { additionalProperties: false },

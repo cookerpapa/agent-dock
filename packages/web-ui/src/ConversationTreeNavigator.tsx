@@ -3,7 +3,6 @@ import type {
   ConversationTreeBranchResource,
   ConversationTreeResource,
   ConversationTreeView,
-  DelegatedSessionSummaryResource,
 } from "@pi-cloud/protocol";
 import { selectActiveTurn } from "./active-turn-selection.ts";
 import { useResizablePanel } from "./use-resizable-panel.ts";
@@ -36,22 +35,13 @@ function branchChildren(tree: ConversationTreeResource) {
   return children;
 }
 
-function delegatedChildren(tree: ConversationTreeResource) {
-  const children = new Map<string, DelegatedSessionSummaryResource[]>();
-  for (const delegated of tree.delegatedSessions) {
-    const key = `${delegated.parentSessionId}:${delegated.parentTurnId}`;
-    const siblings = children.get(key) ?? [];
-    siblings.push(delegated);
-    children.set(key, siblings);
-  }
-  return children;
-}
-
-function contextLabel(mode: DelegatedSessionSummaryResource["contextMode"]): string {
+function contextLabel(mode: NonNullable<ConversationTreeBranchResource["contextMode"]>): string {
   return mode === "fork" ? "继承上下文" : "独立上下文";
 }
 
-function workspaceLabel(mode: DelegatedSessionSummaryResource["workspaceMode"]): string {
+function workspaceLabel(
+  mode: NonNullable<ConversationTreeBranchResource["workspaceMode"]>,
+): string {
   if (mode === "shared_serialized") return "共享工作区";
   if (mode === "isolated") return "隔离工作区";
   return "无工具";
@@ -60,7 +50,6 @@ function workspaceLabel(mode: DelegatedSessionSummaryResource["workspaceMode"]):
 function TreeBranch({
   branch,
   children,
-  delegations,
   depth,
   activeTurnId,
   currentSessionId,
@@ -68,7 +57,6 @@ function TreeBranch({
 }: {
   branch: ConversationTreeBranchResource;
   children: ReadonlyMap<string, readonly ConversationTreeBranchResource[]>;
-  delegations: ReadonlyMap<string, readonly DelegatedSessionSummaryResource[]>;
   depth: number;
   activeTurnId: string | null;
   currentSessionId: string;
@@ -76,9 +64,9 @@ function TreeBranch({
 }) {
   return (
     <div className="product-tree-branch" style={{ "--tree-depth": depth } as React.CSSProperties}>
-      {branch.parentSessionId === null ? null : (
+      {branch.parentSessionId === null && branch.kind === "conversation" ? null : (
         <button
-          className={`product-tree-branch-label${branch.current ? " current" : ""}`}
+          className={`product-tree-branch-label ${branch.kind}${branch.current ? " current" : ""}`}
           onClick={() => {
             const first = branch.entries[0];
             if (first !== undefined) navigate(branch.sessionId, first.turnId);
@@ -86,15 +74,24 @@ function TreeBranch({
           title={branch.title}
           type="button"
         >
-          <span>↳</span>
-          <strong>{branch.title}</strong>
+          <span>{branch.kind === "subagent" ? "◈" : "↳"}</span>
+          <span>
+            <strong>
+              {branch.kind === "subagent" ? (branch.agentName ?? branch.title) : branch.title}
+            </strong>
+            {branch.kind === "subagent" &&
+            branch.contextMode !== undefined &&
+            branch.workspaceMode !== undefined ? (
+              <small>
+                {contextLabel(branch.contextMode)} · {workspaceLabel(branch.workspaceMode)} ·{" "}
+                {branch.delegatedState}
+              </small>
+            ) : null}
+          </span>
         </button>
       )}
       {branch.entries.map((entry) => {
         const nested = children.get(`${branch.sessionId}:${entry.entryId}`) ?? [];
-        const delegated = entry.finalAssistant
-          ? (delegations.get(`${branch.sessionId}:${entry.turnId}`) ?? [])
-          : [];
         return (
           <div className="product-tree-entry-wrap" key={`${branch.sessionId}:${entry.entryId}`}>
             <button
@@ -117,31 +114,10 @@ function TreeBranch({
                 branch={child}
                 children={children}
                 currentSessionId={currentSessionId}
-                delegations={delegations}
                 depth={depth + 1}
                 key={child.sessionId}
                 navigate={navigate}
               />
-            ))}
-            {delegated.map((child) => (
-              <button
-                className={`product-tree-delegated ${child.contextMode}${
-                  currentSessionId === child.sessionId ? " current" : ""
-                }`}
-                key={child.executionId}
-                onClick={() => navigate(child.sessionId)}
-                title={`${child.agentName} · ${contextLabel(child.contextMode)} · ${workspaceLabel(child.workspaceMode)}`}
-                type="button"
-              >
-                <span aria-hidden="true">{child.contextMode === "fork" ? "↳" : "⋯"}</span>
-                <span>
-                  <strong>{child.agentName}</strong>
-                  <small>
-                    {contextLabel(child.contextMode)} · {workspaceLabel(child.workspaceMode)} ·{" "}
-                    {child.state}
-                  </small>
-                </span>
-              </button>
             ))}
           </div>
         );
@@ -250,7 +226,6 @@ export function ConversationTreeNavigator({
 
   const root = tree?.branches.find((branch) => branch.parentSessionId === null) ?? null;
   const children = tree === null ? new Map() : branchChildren(tree);
-  const delegations = tree === null ? new Map() : delegatedChildren(tree);
   return (
     <aside
       className={`product-tree-panel product-resizable-panel${panel.collapsed ? " collapsed" : ""}`}
@@ -300,7 +275,6 @@ export function ConversationTreeNavigator({
               branch={root}
               children={children}
               currentSessionId={tree!.currentSessionId}
-              delegations={delegations}
               depth={0}
               navigate={navigate}
             />

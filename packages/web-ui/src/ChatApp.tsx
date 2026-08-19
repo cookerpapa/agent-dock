@@ -20,7 +20,7 @@ import { PiCloudApi, PiCloudApiError, newIdempotencyKey } from "./api.ts";
 import { AdminPage } from "./AdminPage.tsx";
 import { AuthScreen } from "./AuthScreen.tsx";
 import { ConversationTreeNavigator } from "./ConversationTreeNavigator.tsx";
-import { ConversationTurn } from "./ConversationTurn.tsx";
+import { ConversationTurn, Markdown } from "./ConversationTurn.tsx";
 import { activeTurn, createInitialSessionView, sessionViewReducer } from "./session-view.ts";
 import { streamSessionEvents } from "./sse.ts";
 import { errorMessage } from "./ui-errors.ts";
@@ -1217,6 +1217,34 @@ export default function ChatApp() {
               </div>
             ) : (
               <div className="product-transcript">
+                {state.inheritedMessages.length === 0 ? null : (
+                  <section className="product-inherited-context">
+                    <header>
+                      <strong>继承的对话上下文</strong>
+                      <span>以下内容来自 Subagent 创建时的父会话快照</span>
+                    </header>
+                    {state.inheritedMessages.map((message) => (
+                      <div
+                        className={`product-inherited-message ${message.role}`}
+                        key={message.entryId}
+                      >
+                        {message.role === "user" ? (
+                          <div className="product-user-bubble">{message.text}</div>
+                        ) : (
+                          <div className="product-inherited-assistant">
+                            <span className="product-avatar">A</span>
+                            <div className="product-assistant-content">
+                              <Markdown>{message.text}</Markdown>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    <div className="product-inherited-divider">
+                      <span>Subagent 独立执行从这里开始</span>
+                    </div>
+                  </section>
+                )}
                 {state.turns.map((turn) => {
                   const target = forkTargets.get(turn.turnId);
                   return (

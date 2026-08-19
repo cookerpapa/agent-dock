@@ -9,6 +9,7 @@ import type {
   ConversationTreeView,
   CreateConversationForkRequest,
   CreateConversationPruneRequest,
+  DelegatedSessionSummaryResource,
 } from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
@@ -300,17 +301,21 @@ export class ConversationTreeService {
     if (selected === undefined) {
       throw new ControlPlaneStoreError("not_found", "Conversation was not found");
     }
+    const selectedExecution =
+      selected.sessionKind === "subagent"
+        ? await this.#database
+            .selectFrom("subagent_executions")
+            .select([
+              "parent_session_id as parentSessionId",
+              "created_at as createdAt",
+              "context_mode as contextMode",
+            ])
+            .where("tenant_id", "=", tenantId)
+            .where("child_session_id", "=", selected.id)
+            .executeTakeFirst()
+        : undefined;
     const humanSessionId =
-      selected.sessionKind === "conversation"
-        ? selected.id
-        : (
-            await this.#database
-              .selectFrom("subagent_executions")
-              .select("parent_session_id as parentSessionId")
-              .where("tenant_id", "=", tenantId)
-              .where("child_session_id", "=", selected.id)
-              .executeTakeFirst()
-          )?.parentSessionId;
+      selected.sessionKind === "conversation" ? selected.id : selectedExecution?.parentSessionId;
     if (humanSessionId === undefined) {
       throw new ControlPlaneStoreError(
         "control_plane_misconfigured",
@@ -318,27 +323,38 @@ export class ConversationTreeService {
       );
     }
     const lineage = await this.#lineage(tenantId, humanSessionId);
-    const rootSessionId = lineage[0]!.id;
-    const sessions = view === "focus" ? lineage : await this.#family(tenantId, rootSessionId);
-    const sessionIds = sessions.map((session) => session.id);
-    const [entriesBySession, turnsBySession, leaves] = await Promise.all([
-      sessionEntries(this.#database, tenantId, sessionIds),
-      completedTurns(this.#database, tenantId, sessionIds),
-      mainLeaves(this.#database, tenantId, sessionIds),
-    ]);
-    const delegated = await loadDelegatedSessionSummaries(this.#database, {
+    const humanRootSessionId = lineage[0]!.id;
+    const humanSessions =
+      view === "focus" ? lineage : await this.#family(tenantId, humanRootSessionId);
+    const delegated = await this.#delegatedFamily(
       tenantId,
-      parentSessionIds: sessionIds,
-      maximum: MAX_TREE_DELEGATIONS,
-    });
-    if (delegated.truncated) {
-      throw new ControlPlaneStoreError(
-        "invalid_request",
-        "Conversation tree has too many delegates",
-      );
-    }
+      view === "full"
+        ? humanSessions.map((session) => session.id)
+        : selected.sessionKind === "subagent"
+          ? [selected.id]
+          : [],
+    );
+    const delegatedBySession = new Map(
+      delegated.map((summary) => [summary.sessionId, summary] as const),
+    );
+    const selectedDelegated =
+      selected.sessionKind === "subagent"
+        ? (delegatedBySession.get(selected.id) ??
+          (await this.#delegatedSummary(tenantId, selected.id)))
+        : undefined;
+    const sessionIds = [
+      ...humanSessions.map((session) => session.id),
+      ...delegated.map((summary) => summary.sessionId),
+      ...(selectedDelegated === undefined ? [] : [selectedDelegated.sessionId]),
+    ];
+    const uniqueSessionIds = [...new Set(sessionIds)];
+    const [entriesBySession, turnsBySession, leaves] = await Promise.all([
+      sessionEntries(this.#database, tenantId, uniqueSessionIds),
+      completedTurns(this.#database, tenantId, uniqueSessionIds),
+      mainLeaves(this.#database, tenantId, uniqueSessionIds),
+    ]);
     let entryCount = 0;
-    const branches: ConversationTreeBranchResource[] = sessions.map((session, index) => {
+    const humanBranches: ConversationTreeBranchResource[] = humanSessions.map((session, index) => {
       const allEntries = entriesBySession.get(session.id) ?? [];
       const branch = ownBranch(
         activeBranch(allEntries, leaves.get(session.id) ?? null),
@@ -346,7 +362,7 @@ export class ConversationTreeService {
       );
       let mapped = mappedConversationEntries(branch, turnsBySession.get(session.id) ?? []);
       if (view === "focus") {
-        const child = sessions[index + 1];
+        const child = humanSessions[index + 1];
         if (child?.parentSessionId === session.id && child.forkEntryId !== null) {
           const boundary = mapped.findIndex((entry) => entry.entryId === child.forkEntryId);
           if (boundary < 0) {
@@ -363,6 +379,7 @@ export class ConversationTreeService {
         throw new ControlPlaneStoreError("invalid_request", "Conversation tree is too large");
       }
       return {
+        kind: "conversation",
         sessionId: session.id,
         title: session.title,
         parentSessionId: session.parentSessionId,
@@ -372,7 +389,184 @@ export class ConversationTreeService {
         entries: mapped.map(({ index: _index, ...entry }) => entry),
       };
     });
-    return { rootSessionId, currentSessionId, view, branches, delegatedSessions: delegated.items };
+    const humanBranchBySession = new Map(
+      humanBranches.map((branch) => [branch.sessionId, branch] as const),
+    );
+
+    const delegatedBranches: ConversationTreeBranchResource[] = [];
+    for (const summary of delegated) {
+      const createdAt = new Date(summary.createdAt).valueOf();
+      const ownEntries = activeBranch(
+        entriesBySession.get(summary.sessionId) ?? [],
+        leaves.get(summary.sessionId) ?? null,
+      ).filter((entry) => safeInteger(entry.timestampMs, "Subagent entry timestamp") >= createdAt);
+      const mapped = mappedConversationEntries(
+        ownEntries,
+        turnsBySession.get(summary.sessionId) ?? [],
+      );
+      entryCount += mapped.length;
+      if (entryCount > MAX_TREE_ENTRIES) {
+        throw new ControlPlaneStoreError("invalid_request", "Conversation tree is too large");
+      }
+      const parentBranch =
+        humanBranchBySession.get(summary.parentSessionId) ??
+        delegatedBranches.find((branch) => branch.sessionId === summary.parentSessionId);
+      const anchor = parentBranch?.entries
+        .filter((entry) => entry.turnId === summary.parentTurnId)
+        .at(-1);
+      delegatedBranches.push({
+        kind: "subagent",
+        sessionId: summary.sessionId,
+        title: summary.title,
+        parentSessionId: summary.parentSessionId,
+        forkedFromTurnId: summary.parentTurnId,
+        forkedFromEntryId: anchor?.entryId ?? null,
+        current: summary.sessionId === currentSessionId,
+        agentName: summary.agentName,
+        contextMode: summary.contextMode,
+        workspaceMode: summary.workspaceMode,
+        delegatedState: summary.state,
+        entries: mapped.map(({ index: _index, ...entry }) => entry),
+      });
+    }
+
+    if (view === "focus" && selectedDelegated !== undefined) {
+      const active = activeBranch(
+        entriesBySession.get(selectedDelegated.sessionId) ?? [],
+        leaves.get(selectedDelegated.sessionId) ?? null,
+      );
+      const createdAt = new Date(selectedDelegated.createdAt).valueOf();
+      const inheritedBranch = active.filter(
+        (entry) => safeInteger(entry.timestampMs, "Subagent entry timestamp") < createdAt,
+      );
+      const inheritedTurns = lineage
+        .flatMap((session) => turnsBySession.get(session.id) ?? [])
+        .filter((turn) => turn.turnId !== selectedDelegated.parentTurnId);
+      const inherited = mappedConversationEntries(inheritedBranch, inheritedTurns);
+      const mappedInheritedIds = new Set(inherited.map((entry) => entry.entryId));
+      const pendingParentUser = [...inheritedBranch].reverse().find((entry) => {
+        if (mappedInheritedIds.has(entry.id) || entry.type !== "message") return false;
+        return messageFromPayload(entry.payload)?.role === "user";
+      });
+      if (pendingParentUser !== undefined) {
+        inherited.push({
+          entryId: pendingParentUser.id,
+          parentEntryId: pendingParentUser.parentId,
+          turnId: selectedDelegated.parentTurnId,
+          role: "user",
+          text: messageText(messageFromPayload(pendingParentUser.payload)!),
+          finalAssistant: false,
+          createdAt: isoFromMilliseconds(pendingParentUser.timestampMs),
+          index: active.indexOf(pendingParentUser),
+        });
+      }
+      const own = mappedConversationEntries(
+        active.filter(
+          (entry) => safeInteger(entry.timestampMs, "Subagent entry timestamp") >= createdAt,
+        ),
+        turnsBySession.get(selectedDelegated.sessionId) ?? [],
+      );
+      const mapped = [...inherited, ...own];
+      if (mapped.length > MAX_TREE_ENTRIES) {
+        throw new ControlPlaneStoreError("invalid_request", "Conversation tree is too large");
+      }
+      return {
+        rootSessionId: selectedDelegated.sessionId,
+        currentSessionId,
+        view,
+        branches: [
+          {
+            kind: "subagent",
+            sessionId: selectedDelegated.sessionId,
+            title: selectedDelegated.title,
+            parentSessionId: null,
+            forkedFromTurnId: null,
+            forkedFromEntryId: null,
+            current: true,
+            agentName: selectedDelegated.agentName,
+            contextMode: selectedDelegated.contextMode,
+            workspaceMode: selectedDelegated.workspaceMode,
+            delegatedState: selectedDelegated.state,
+            entries: mapped.map(({ index: _index, ...entry }) => entry),
+          },
+        ],
+        delegatedSessions: [selectedDelegated],
+      };
+    }
+
+    const branches = [...humanBranches, ...(view === "full" ? delegatedBranches : [])];
+    if (branches.length > MAX_TREE_BRANCHES) {
+      throw new ControlPlaneStoreError(
+        "invalid_request",
+        "Conversation tree has too many branches",
+      );
+    }
+    return {
+      rootSessionId: humanRootSessionId,
+      currentSessionId,
+      view,
+      branches,
+      delegatedSessions: delegated,
+    };
+  }
+
+  async #delegatedSummary(
+    tenantId: string,
+    childSessionId: string,
+  ): Promise<DelegatedSessionSummaryResource> {
+    const execution = await this.#database
+      .selectFrom("subagent_executions")
+      .select("parent_session_id as parentSessionId")
+      .where("tenant_id", "=", tenantId)
+      .where("child_session_id", "=", childSessionId)
+      .executeTakeFirst();
+    if (execution === undefined) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Delegated Session has no parent execution",
+      );
+    }
+    const loaded = await loadDelegatedSessionSummaries(this.#database, {
+      tenantId,
+      parentSessionIds: [execution.parentSessionId],
+      maximum: MAX_TREE_DELEGATIONS,
+    });
+    const summary = loaded.items.find((item) => item.sessionId === childSessionId);
+    if (summary === undefined) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Delegated Session projection is missing",
+      );
+    }
+    return summary;
+  }
+
+  async #delegatedFamily(
+    tenantId: string,
+    initialParentSessionIds: readonly string[],
+  ): Promise<DelegatedSessionSummaryResource[]> {
+    const pending = [...new Set(initialParentSessionIds)];
+    const loadedParents = new Set<string>();
+    const items: DelegatedSessionSummaryResource[] = [];
+    while (pending.length > 0) {
+      const parents = pending.splice(0, pending.length).filter((id) => !loadedParents.has(id));
+      if (parents.length === 0) continue;
+      for (const parent of parents) loadedParents.add(parent);
+      const loaded = await loadDelegatedSessionSummaries(this.#database, {
+        tenantId,
+        parentSessionIds: parents,
+        maximum: MAX_TREE_DELEGATIONS - items.length,
+      });
+      if (loaded.truncated) {
+        throw new ControlPlaneStoreError(
+          "invalid_request",
+          "Conversation tree has too many delegates",
+        );
+      }
+      items.push(...loaded.items);
+      pending.push(...loaded.items.map((item) => item.sessionId));
+    }
+    return items;
   }
 
   async prune(

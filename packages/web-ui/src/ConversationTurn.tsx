@@ -135,7 +135,7 @@ function displayedToolInput(item: Extract<TranscriptItem, { kind: "tool" }>): un
   }
 }
 
-function Markdown({ children }: { children: string }) {
+export function Markdown({ children }: { children: string }) {
   return (
     <div className="product-markdown">
       <ReactMarkdown

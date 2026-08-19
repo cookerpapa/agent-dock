@@ -385,6 +385,7 @@ describe("tenant-aware browser API", () => {
                   updatedAt: createdAt,
                   lastActiveAt: createdAt,
                 },
+                inheritedMessages: [],
                 turns: [],
                 historyTruncated: false,
                 replayAfterSequence: 0,
@@ -424,6 +425,7 @@ describe("tenant-aware browser API", () => {
             delegatedSessions: [],
             branches: [
               {
+                kind: "conversation",
                 sessionId,
                 title: "Root",
                 parentSessionId: null,

@@ -728,6 +728,58 @@ body.product-panel-resizing {
 .product-turn + .product-turn {
   margin-top: 34px;
 }
+
+.product-inherited-context {
+  display: grid;
+  gap: 22px;
+  margin-bottom: 34px;
+  opacity: 0.88;
+}
+
+.product-inherited-context > header {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #383247;
+  border-radius: 10px;
+  background: #211e2b;
+  color: #c8bdf0;
+}
+
+.product-inherited-context > header strong {
+  font-size: 12px;
+}
+
+.product-inherited-context > header span,
+.product-inherited-divider {
+  color: #9188a8;
+  font-size: 10px;
+}
+
+.product-inherited-message.user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.product-inherited-assistant {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+
+.product-inherited-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.product-inherited-divider::before,
+.product-inherited-divider::after {
+  height: 1px;
+  flex: 1 1 auto;
+  background: #35303f;
+  content: "";
+}
 .product-message {
   display: flex;
   width: 100%;
@@ -1678,10 +1730,28 @@ body.product-panel-resizing {
 }
 
 .product-tree-branch-label strong {
+  display: block;
   overflow: hidden;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.product-tree-branch-label small {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: #81799e;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-tree-branch-label.subagent {
+  margin: 3px 0;
+  border: 1px solid #3b3454;
+  border-radius: 7px;
+  background: #211e2b;
 }
 
 .product-tree-entry {
@@ -1731,53 +1801,6 @@ body.product-panel-resizing {
 .product-tree-entry-wrap > .product-tree-branch {
   margin-top: 2px;
   margin-bottom: 3px;
-}
-
-.product-tree-delegated {
-  display: grid;
-  width: calc(100% - 13px);
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 4px;
-  margin: 3px 0 5px 13px;
-  padding: 6px;
-  border: 0;
-  border-left: 1px solid #5f5190;
-  border-radius: 0 6px 6px 0;
-  background: #211e2b;
-  color: #a99cda;
-  text-align: left;
-}
-
-.product-tree-delegated.fresh {
-  border-left-style: dashed;
-}
-
-.product-tree-delegated:hover,
-.product-tree-delegated.current {
-  background: #302b46;
-  color: #e0dbf8;
-}
-
-.product-tree-delegated > span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.product-tree-delegated strong,
-.product-tree-delegated small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.product-tree-delegated strong {
-  font-size: 9px;
-}
-
-.product-tree-delegated small {
-  color: #81799e;
-  font-size: 8px;
 }
 
 .product-delegated-title {
