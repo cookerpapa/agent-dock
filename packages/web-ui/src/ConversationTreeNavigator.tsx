@@ -32,6 +32,14 @@ function entryElements(scroller: HTMLElement): ReadonlyMap<string, HTMLElement> 
   return elements;
 }
 
+export function selectConversationNavigationTarget<T>(
+  entries: ReadonlyMap<string, T>,
+  turns: ReadonlyMap<string, T>,
+  target: { turnId: string; entryId: string },
+): T | undefined {
+  return entries.get(target.entryId) ?? turns.get(target.turnId);
+}
+
 function branchChildren(tree: ConversationTreeResource) {
   const children = new Map<string, ConversationTreeBranchResource[]>();
   for (const branch of tree.branches) {
@@ -228,8 +236,11 @@ export function ConversationTreeNavigator({
     const target =
       scroller === null
         ? undefined
-        : (entryElements(scroller).get(targetIdentity.entryId) ??
-          turnElements(scroller).get(targetIdentity.turnId));
+        : selectConversationNavigationTarget(
+            entryElements(scroller),
+            turnElements(scroller),
+            targetIdentity,
+          );
     if (target === undefined) {
       onNavigate(sessionId, targetIdentity);
       return;
