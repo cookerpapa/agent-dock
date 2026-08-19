@@ -296,7 +296,7 @@ describe("pi-subagents cloud Tool adapter", () => {
         },
         status: () => ({
           providerJobId: "job-after-shim-timeout",
-          state: Date.now() - childStartedAt >= 250 ? "completed" : "running",
+          state: Date.now() - childStartedAt >= 1_500 ? "completed" : "running",
         }),
         result: () => ({
           providerJobId: "job-after-shim-timeout",
@@ -311,7 +311,7 @@ describe("pi-subagents cloud Tool adapter", () => {
       "tool-call-after-shim-timeout",
       {
         workflowScript:
-          'return runs.run("slow-cloud", {agent:"worker", task:"Finish remotely", timeoutMs:50})',
+          'return runs.run("slow-cloud", {agent:"worker", task:"Finish remotely", timeoutMs:1000})',
       },
       new AbortController().signal,
     );

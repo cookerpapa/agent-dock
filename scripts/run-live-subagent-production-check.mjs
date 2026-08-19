@@ -217,6 +217,21 @@ async function executionEvidence(parentRunId) {
       'parentWorkspaceId', parent_run.workspace_id,
       'childWorkspaceId', child_run.workspace_id,
       'childRunState', child_run.state,
+      'parentWorker', parent_attempt.claim_owner_id,
+      'childWorker', child_attempt.claim_owner_id,
+      'sameWorker', parent_attempt.claim_owner_id = child_attempt.claim_owner_id,
+      'inheritedReferenceCount', (
+        select count(*)
+        from pi_session_entry_refs ref
+        where ref.tenant_id = execution.tenant_id
+          and ref.session_id = execution.child_session_id::text
+      ),
+      'childOwnedEntryCount', (
+        select count(*)
+        from pi_session_entries entry
+        where entry.tenant_id = execution.tenant_id
+          and entry.session_id = execution.child_session_id::text
+      ),
       'workspaceKind', child_workspace.workspace_kind,
       'workspaceDeleted', child_workspace.deleted_at is not null,
       'patchContainsIsolatedFile', exists (
@@ -230,7 +245,9 @@ async function executionEvidence(parentRunId) {
     )::text
     from subagent_executions as execution
     join runs as parent_run on parent_run.id = execution.parent_run_id
+    join run_attempts as parent_attempt on parent_attempt.id = parent_run.current_attempt_id
     join runs as child_run on child_run.id = execution.child_run_id
+    join run_attempts as child_attempt on child_attempt.id = child_run.current_attempt_id
     join workspaces as child_workspace on child_workspace.id = child_run.workspace_id
     where execution.parent_run_id = ${sqlLiteral(parentRunId)}
     order by execution.created_at desc
@@ -249,7 +266,7 @@ const session = await api.createSession(
   project.projectId,
   project.workspaceId,
   `Subagent production acceptance ${suffix}`,
-  "persistent",
+  "ephemeral",
 );
 
 const none = await runTurn(
@@ -279,6 +296,7 @@ const sharedEvidence = await executionEvidence(shared.accepted.runId);
 assert.equal(sharedEvidence.workspaceMode, "shared_serialized");
 assert.equal(sharedEvidence.childWorkspaceId, sharedEvidence.parentWorkspaceId);
 assert.equal(sharedEvidence.childRunState, "completed");
+assert(sharedEvidence.inheritedReferenceCount > 0);
 
 const isolated = await runTurn(
   session.sessionId,
@@ -295,6 +313,7 @@ assert.notEqual(isolatedEvidence.childWorkspaceId, isolatedEvidence.parentWorksp
 assert.equal(isolatedEvidence.workspaceKind, "subagent_isolated");
 assert.equal(isolatedEvidence.workspaceDeleted, true);
 assert.equal(isolatedEvidence.patchContainsIsolatedFile, true);
+assert(isolatedEvidence.inheritedReferenceCount > 0);
 
 const tenantId = await psql(
   `select tenant_id::text from sessions where id = ${sqlLiteral(session.sessionId)}`,
