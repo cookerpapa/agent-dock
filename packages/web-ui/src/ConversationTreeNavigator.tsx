@@ -5,7 +5,7 @@ import type {
   ConversationTreeView,
   DelegatedSessionSummaryResource,
 } from "@pi-cloud/protocol";
-import { selectActiveOutlineTurn } from "./ConversationOutline.tsx";
+import { selectActiveTurn } from "./active-turn-selection.ts";
 import { useResizablePanel } from "./use-resizable-panel.ts";
 
 const PROGRAMMATIC_SCROLL_GUARD_MS = 1_000;
@@ -201,7 +201,7 @@ export function ConversationTreeNavigator({
       const bounds = scroller.getBoundingClientRect();
       const elements = turnElements(scroller);
       setActiveTurnId(
-        selectActiveOutlineTurn({
+        selectActiveTurn({
           anchors: currentTurnIds.flatMap((turnId) => {
             const element = elements.get(turnId);
             return element === undefined

@@ -23,7 +23,6 @@ import type {
   RunResource,
   SandboxRetentionPolicy,
   SessionResource,
-  TestResultListResource,
   WorkspaceSourceResource,
   WorkspaceSourceSetSnapshot,
   WorkspaceDeletionResource,
@@ -1666,43 +1665,6 @@ export class ControlPlaneStore {
 
   async getRun(runId: string): Promise<RunResource> {
     return this.#loadRunResource(runId);
-  }
-
-  async listTestResults(runId: string): Promise<TestResultListResource> {
-    const run = await this.#database
-      .selectFrom("runs")
-      .select("id")
-      .where("tenant_id", "=", this.#tenantId)
-      .where("id", "=", runId)
-      .executeTakeFirst();
-    if (run === undefined) throw new ControlPlaneStoreError("not_found", "Run was not found");
-    const rows = await this.#database
-      .selectFrom("test_results")
-      .selectAll()
-      .where("tenant_id", "=", this.#tenantId)
-      .where("run_id", "=", runId)
-      .orderBy("created_at")
-      .limit(100)
-      .execute();
-    return {
-      runId,
-      results: rows.map((row) => ({
-        testResultId: row.id,
-        runId: row.run_id,
-        ...(row.workspace_version_id === null
-          ? {}
-          : { workspaceVersionId: row.workspace_version_id }),
-        toolCallId: row.tool_call_id,
-        command: row.command,
-        suite: row.suite,
-        status: row.status,
-        ...(row.exit_code === null ? {} : { exitCode: row.exit_code }),
-        ...(row.duration_ms === null ? {} : { durationMs: row.duration_ms }),
-        ...(row.summary === null ? {} : { summary: row.summary }),
-        ...(row.artifact_id === null ? {} : { artifactId: row.artifact_id }),
-        createdAt: isoTimestamp(row.created_at),
-      })),
-    };
   }
 
   async acceptTurn(

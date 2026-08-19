@@ -139,9 +139,9 @@ export {
   type DeterministicExecutionRecord,
 } from "./deterministic-execution-backend.ts";
 export {
-  LocalSupervisorExecutionBackend,
-  type LocalSupervisorExecutionBackendOptions,
-} from "@pi-cloud/runtime-core/local-supervisor-execution-backend";
+  AgentRunExecutionBackend,
+  type AgentRunExecutionBackendOptions,
+} from "@pi-cloud/runtime-core/agent-run-execution-backend";
 export {
   RemoteSupervisorSteerBackend,
   type RemoteSupervisorSteerBackendOptions,

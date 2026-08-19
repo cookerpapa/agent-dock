@@ -47,7 +47,7 @@ export type PreparedTurnExecution = {
   revokeLease(): void;
 };
 
-export type LocalSupervisorHeartbeatIdentity = {
+export type AgentRunHeartbeatIdentity = {
   supervisorId: string;
   bootId: string;
   connectionId: string;
@@ -83,7 +83,7 @@ export type RevokedSupervisorAssignments = {
   revokedExecutions: number;
 };
 
-export type LocalSandboxSupervisorOptions = {
+export type AgentRunSupervisorOptions = {
   runner: SupervisorTurnRunner;
   eventSpoolFactory?: SupervisorEventSpoolFactory;
   eventSpoolRecovery?: SupervisorEventSpoolRecovery;
@@ -123,12 +123,12 @@ type Steer = {
   runPromise?: Promise<void>;
 };
 
-export class LocalSandboxSupervisorError extends Error {
+export class AgentRunSupervisorError extends Error {
   readonly code: string;
 
   constructor(code: string, message: string) {
     super(message);
-    this.name = "LocalSandboxSupervisorError";
+    this.name = "AgentRunSupervisorError";
     this.code = code;
   }
 }
@@ -163,7 +163,7 @@ function sameSteerIdentity(left: SteerTurnCommandMessage, right: SteerTurnComman
   return isDeepStrictEqual(left.payload, right.payload);
 }
 
-export class LocalSandboxSupervisor {
+export class AgentRunSupervisor {
   readonly #runner: SupervisorTurnRunner;
   readonly #eventSpoolFactory: SupervisorEventSpoolFactory;
   readonly #eventSpoolRecovery: SupervisorEventSpoolRecovery | undefined;
@@ -177,7 +177,7 @@ export class LocalSandboxSupervisor {
   readonly #highestFenceBySession = new Map<string, number>();
   #recoveringPendingEvents = false;
 
-  constructor(options: LocalSandboxSupervisorOptions) {
+  constructor(options: AgentRunSupervisorOptions) {
     this.#runner = options.runner;
     this.#eventSpoolFactory =
       options.eventSpoolFactory ?? ((spoolOptions) => new InMemoryEventSpool(spoolOptions));
@@ -201,7 +201,7 @@ export class LocalSandboxSupervisor {
         assignment.runPromise === undefined ? [] : [assignment.runPromise],
       );
       if (pending.length !== active.length) {
-        throw new LocalSandboxSupervisorError(
+        throw new AgentRunSupervisorError(
           "assignment_not_started",
           "Prepared assignments must be released before waiting for settlement",
         );
@@ -240,7 +240,7 @@ export class LocalSandboxSupervisor {
   }
 
   createHeartbeat(
-    identity: LocalSupervisorHeartbeatIdentity,
+    identity: AgentRunHeartbeatIdentity,
     acceptingAssignments = true,
   ): SupervisorHeartbeatMessage {
     const sessions = [...this.#currentBySession.values()]
@@ -270,10 +270,7 @@ export class LocalSandboxSupervisor {
       },
     });
     if (message.type !== "supervisor.heartbeat") {
-      throw new LocalSandboxSupervisorError(
-        "invalid_heartbeat",
-        "Supervisor heartbeat was invalid",
-      );
+      throw new AgentRunSupervisorError("invalid_heartbeat", "Supervisor heartbeat was invalid");
     }
     return message;
   }
@@ -288,7 +285,7 @@ export class LocalSandboxSupervisor {
       acknowledgement.payload.acknowledgedMessageId !== heartbeat.messageId ||
       acknowledgement.payload.connectionId !== heartbeat.payload.connectionId
     ) {
-      throw new LocalSandboxSupervisorError(
+      throw new AgentRunSupervisorError(
         "invalid_heartbeat_ack",
         "Heartbeat acknowledgement identity did not match",
       );
@@ -333,7 +330,7 @@ export class LocalSandboxSupervisor {
     publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage,
   ): Promise<SupervisorEventSpoolRecoveryResult> {
     if (this.#currentBySession.size !== 0 || this.#recoveringPendingEvents) {
-      throw new LocalSandboxSupervisorError(
+      throw new AgentRunSupervisorError(
         "invalid_state",
         "Pending event recovery requires an idle supervisor",
       );
@@ -362,9 +359,9 @@ export class LocalSandboxSupervisor {
   ): PreparedTurnExecution {
     const parsed = parseControlToSupervisorMessage(value);
     if (parsed.type !== "command.turn.execute") {
-      throw new LocalSandboxSupervisorError(
+      throw new AgentRunSupervisorError(
         "unsupported",
-        "Local supervisor only prepares turn.execute commands",
+        "Agent runner only prepares turn.execute commands",
       );
     }
     const command = parsed;
@@ -416,9 +413,9 @@ export class LocalSandboxSupervisor {
   prepareCancellation(value: unknown): PreparedTurnCancellation {
     const parsed = parseControlToSupervisorMessage(value);
     if (parsed.type !== "command.turn.cancel") {
-      throw new LocalSandboxSupervisorError(
+      throw new AgentRunSupervisorError(
         "unsupported",
-        "Local supervisor only prepares turn.cancel commands on this path",
+        "Agent runner only prepares turn.cancel commands on this path",
       );
     }
     const command = parsed;
@@ -478,9 +475,9 @@ export class LocalSandboxSupervisor {
   prepareSteer(value: unknown): PreparedTurnSteer {
     const parsed = parseControlToSupervisorMessage(value);
     if (parsed.type !== "command.turn.steer") {
-      throw new LocalSandboxSupervisorError(
+      throw new AgentRunSupervisorError(
         "unsupported",
-        "Local supervisor only prepares turn.steer commands on this path",
+        "Agent runner only prepares turn.steer commands on this path",
       );
     }
     const command = parsed;
@@ -556,8 +553,7 @@ export class LocalSandboxSupervisor {
   ): PreparedTurnExecution {
     return {
       ack: this.#ack(command, { status: "rejected", code, message, retryable }),
-      run: () =>
-        Promise.reject(new LocalSandboxSupervisorError(code, "Rejected command cannot run")),
+      run: () => Promise.reject(new AgentRunSupervisorError(code, "Rejected command cannot run")),
       releaseBeforeStart: () => undefined,
       revokeLease: () => undefined,
     };
@@ -583,7 +579,7 @@ export class LocalSandboxSupervisor {
     return {
       ack: this.#ack(command, { status: "rejected", code, message, retryable }),
       run: () =>
-        Promise.reject(new LocalSandboxSupervisorError(code, "Rejected cancellation cannot run")),
+        Promise.reject(new AgentRunSupervisorError(code, "Rejected cancellation cannot run")),
       releaseBeforeStart: () => undefined,
     };
   }
@@ -604,7 +600,7 @@ export class LocalSandboxSupervisor {
   ): PreparedTurnSteer {
     return {
       ack: this.#ack(command, { status: "rejected", code, message, retryable }),
-      run: () => Promise.reject(new LocalSandboxSupervisorError(code, "Rejected steer cannot run")),
+      run: () => Promise.reject(new AgentRunSupervisorError(code, "Rejected steer cannot run")),
       releaseBeforeStart: () => undefined,
     };
   }
@@ -635,7 +631,7 @@ export class LocalSandboxSupervisor {
       },
     });
     if (candidate.type !== "command.ack") {
-      throw new LocalSandboxSupervisorError("invalid_ack", "Supervisor ACK was invalid");
+      throw new AgentRunSupervisorError("invalid_ack", "Supervisor ACK was invalid");
     }
     return candidate;
   }
@@ -645,7 +641,7 @@ export class LocalSandboxSupervisor {
     const current = this.#currentBySession.get(assignment.command.payload.sessionId);
     if (current !== assignment || assignment.state !== "prepared") {
       return Promise.reject(
-        new LocalSandboxSupervisorError("stale_fence", "Prepared assignment is no longer current"),
+        new AgentRunSupervisorError("stale_fence", "Prepared assignment is no longer current"),
       );
     }
     assignment.state = "running";
@@ -673,7 +669,7 @@ export class LocalSandboxSupervisor {
       .then(
         (result) => {
           if (assignment.state === "cancelling") {
-            throw new LocalSandboxSupervisorError(
+            throw new AgentRunSupervisorError(
               "lease_revocation_not_confirmed",
               "Runner completed without confirming its requested termination",
             );
@@ -719,7 +715,7 @@ export class LocalSandboxSupervisor {
               latest !== assignment ||
               (assignment.state !== "running" && assignment.state !== "cancelling")
             ) {
-              throw new LocalSandboxSupervisorError(
+              throw new AgentRunSupervisorError(
                 "stale_fence",
                 "Stale assignment cannot publish events",
               );
@@ -729,7 +725,7 @@ export class LocalSandboxSupervisor {
               message.payload.fencingToken !== assignment.command.payload.fencingToken ||
               message.payload.commandId !== assignment.command.payload.commandId
             ) {
-              throw new LocalSandboxSupervisorError(
+              throw new AgentRunSupervisorError(
                 "invalid_event",
                 "Runner event identity does not match its assignment",
               );
@@ -738,7 +734,7 @@ export class LocalSandboxSupervisor {
               await eventSpool.append(message);
             } catch (error: unknown) {
               if (!(error instanceof EventSpoolError)) throw error;
-              throw new LocalSandboxSupervisorError(
+              throw new AgentRunSupervisorError(
                 "invalid_event_delivery",
                 "Supervisor event delivery contract was violated",
               );
@@ -746,7 +742,7 @@ export class LocalSandboxSupervisor {
             try {
               await publisher.enqueue(message);
             } catch {
-              throw new LocalSandboxSupervisorError(
+              throw new AgentRunSupervisorError(
                 "invalid_event_delivery",
                 "Supervisor event publisher rejected a queued event",
               );
@@ -758,7 +754,7 @@ export class LocalSandboxSupervisor {
         try {
           await publisher.drainToDurableBarrier();
         } catch {
-          throw new LocalSandboxSupervisorError(
+          throw new AgentRunSupervisorError(
             "invalid_event_delivery",
             "Supervisor batched event delivery could not be drained",
           );
@@ -768,8 +764,8 @@ export class LocalSandboxSupervisor {
   }
 
   #spoolOpenError(error: unknown): Error {
-    if (error instanceof LocalSandboxSupervisorError) return error;
-    return new LocalSandboxSupervisorError(
+    if (error instanceof AgentRunSupervisorError) return error;
+    return new AgentRunSupervisorError(
       "event_spool_unavailable",
       error instanceof EventSpoolError
         ? "Supervisor durable event spool could not be opened"
@@ -791,7 +787,7 @@ export class LocalSandboxSupervisor {
         observation.leaseId !== renewal.leaseId ||
         observation.fencingToken !== renewal.fencingToken
       ) {
-        throw new LocalSandboxSupervisorError(
+        throw new AgentRunSupervisorError(
           "invalid_heartbeat_ack",
           "Heartbeat acknowledgement renewed an unobserved assignment",
         );
@@ -825,10 +821,7 @@ export class LocalSandboxSupervisor {
       this.#currentBySession.get(assignment.command.payload.sessionId) !== assignment
     ) {
       return Promise.reject(
-        new LocalSandboxSupervisorError(
-          "invalid_state",
-          "Cancellation target is no longer running",
-        ),
+        new AgentRunSupervisorError("invalid_state", "Cancellation target is no longer running"),
       );
     }
 
@@ -843,7 +836,7 @@ export class LocalSandboxSupervisor {
     cancellation.runPromise = assignment.runPromise.then(
       () => {
         cancellation.state = "failed";
-        throw new LocalSandboxSupervisorError(
+        throw new AgentRunSupervisorError(
           "cancellation_not_confirmed",
           "Target execution ended without cancellation confirmation",
         );
@@ -855,7 +848,7 @@ export class LocalSandboxSupervisor {
         }
         if (error.reason !== cancellation.command.payload.reason) {
           cancellation.state = "failed";
-          throw new LocalSandboxSupervisorError(
+          throw new AgentRunSupervisorError(
             "invalid_event",
             "Cancellation confirmation reason changed",
           );
@@ -877,7 +870,7 @@ export class LocalSandboxSupervisor {
       this.#currentBySession.get(assignment.command.payload.sessionId) !== assignment
     ) {
       return Promise.reject(
-        new LocalSandboxSupervisorError("invalid_state", "Steer target is no longer running"),
+        new AgentRunSupervisorError("invalid_state", "Steer target is no longer running"),
       );
     }
     steer.state = "running";
@@ -885,10 +878,7 @@ export class LocalSandboxSupervisor {
     if (deliver === undefined) {
       steer.state = "failed";
       return Promise.reject(
-        new LocalSandboxSupervisorError(
-          "unsupported",
-          "Supervisor Runner does not support Pi steer",
-        ),
+        new AgentRunSupervisorError("unsupported", "Supervisor Runner does not support Pi steer"),
       );
     }
     steer.runPromise = deliver

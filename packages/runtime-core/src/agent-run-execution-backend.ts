@@ -1,6 +1,6 @@
 import {
-  LocalSandboxSupervisor,
-  LocalSandboxSupervisorError,
+  AgentRunSupervisor,
+  AgentRunSupervisorError,
   PiTurnCancelledError,
   PiTurnError,
 } from "@pi-cloud/sandbox-supervisor";
@@ -34,8 +34,8 @@ import {
   SessionLeaseCoordinatorError,
 } from "./session-lease-coordinator.ts";
 
-export type LocalSupervisorExecutionBackendOptions = {
-  supervisor: LocalSandboxSupervisor;
+export type AgentRunExecutionBackendOptions = {
+  supervisor: AgentRunSupervisor;
   leaseCoordinator: SessionLeaseCoordinator;
   eventIngestor: DurableEventIngestor;
   onEvent?: (message: EventPublishMessage) => Promise<void> | void;
@@ -46,7 +46,7 @@ export type LocalSupervisorExecutionBackendOptions = {
 };
 
 type TrackedLeaseExecution = {
-  prepared: ReturnType<LocalSandboxSupervisor["prepare"]>;
+  prepared: ReturnType<AgentRunSupervisor["prepare"]>;
   execution: Promise<TurnExecutionResult>;
   failure?: TurnExecutionBackendError;
 };
@@ -81,7 +81,7 @@ function postgresRetryCode(error: unknown): string | undefined {
 function validDate(clock: () => Date): Date {
   const value = clock();
   if (!(value instanceof Date) || Number.isNaN(value.valueOf())) {
-    throw new TypeError("local supervisor backend clock must return a valid Date");
+    throw new TypeError("agent runner backend clock must return a valid Date");
   }
   return value;
 }
@@ -117,7 +117,7 @@ function normalizeBackendError(error: unknown): TurnExecutionBackendError {
   if (error instanceof DurableEventStoreError) {
     return new TurnExecutionBackendError(error.code, error.message, error.retryable);
   }
-  if (error instanceof LocalSandboxSupervisorError) {
+  if (error instanceof AgentRunSupervisorError) {
     return new TurnExecutionBackendError(error.code, error.message, false);
   }
   if (error instanceof PiCloudWireProtocolError) {
@@ -127,11 +127,7 @@ function normalizeBackendError(error: unknown): TurnExecutionBackendError {
       false,
     );
   }
-  return new TurnExecutionBackendError(
-    "local_supervisor_error",
-    "Local supervisor execution failed",
-    true,
-  );
+  return new TurnExecutionBackendError("agent_runner_error", "Agent runner execution failed", true);
 }
 
 function normalizeCancellationError(error: unknown): TurnCancellationBackendError {
@@ -139,7 +135,7 @@ function normalizeCancellationError(error: unknown): TurnCancellationBackendErro
   if (error instanceof SessionLeaseCoordinatorError || error instanceof PiTurnError) {
     return new TurnCancellationBackendError(error.code, error.message, error.retryable);
   }
-  if (error instanceof LocalSandboxSupervisorError) {
+  if (error instanceof AgentRunSupervisorError) {
     return new TurnCancellationBackendError(error.code, error.message, false);
   }
   if (error instanceof PiCloudWireProtocolError) {
@@ -150,8 +146,8 @@ function normalizeCancellationError(error: unknown): TurnCancellationBackendErro
     );
   }
   return new TurnCancellationBackendError(
-    "local_supervisor_error",
-    "Local supervisor cancellation failed",
+    "agent_runner_error",
+    "Agent runner cancellation failed",
     true,
   );
 }
@@ -232,10 +228,8 @@ function validateCancellationAck(
   return parsed;
 }
 
-export class LocalSupervisorExecutionBackend
-  implements TurnExecutionBackend, TurnCancellationBackend
-{
-  readonly #supervisor: LocalSandboxSupervisor;
+export class AgentRunExecutionBackend implements TurnExecutionBackend, TurnCancellationBackend {
+  readonly #supervisor: AgentRunSupervisor;
   readonly #leaseCoordinator: SessionLeaseCoordinator;
   readonly #eventIngestor: DurableEventIngestor;
   readonly #onEvent: ((message: EventPublishMessage) => Promise<void> | void) | undefined;
@@ -248,7 +242,7 @@ export class LocalSupervisorExecutionBackend
   #heartbeatTask: Promise<void> | undefined;
   #heartbeatFailure: TurnExecutionBackendError | undefined;
 
-  constructor(options: LocalSupervisorExecutionBackendOptions) {
+  constructor(options: AgentRunExecutionBackendOptions) {
     this.#supervisor = options.supervisor;
     this.#leaseCoordinator = options.leaseCoordinator;
     this.#eventIngestor = options.eventIngestor;
@@ -272,7 +266,7 @@ export class LocalSupervisorExecutionBackend
           fencingToken: number;
         }
       | undefined;
-    let prepared: ReturnType<LocalSandboxSupervisor["prepare"]> | undefined;
+    let prepared: ReturnType<AgentRunSupervisor["prepare"]> | undefined;
     let durableStarted = false;
 
     try {
@@ -406,7 +400,7 @@ export class LocalSupervisorExecutionBackend
         }
       }
       const normalized = normalizeBackendError(error);
-      if (normalized.code === "local_supervisor_error") {
+      if (normalized.code === "agent_runner_error") {
         try {
           this.#onUnexpectedError?.(error);
         } catch {
@@ -473,7 +467,7 @@ export class LocalSupervisorExecutionBackend
 
   #registerLeaseExecution(
     sessionId: string,
-    prepared: ReturnType<LocalSandboxSupervisor["prepare"]>,
+    prepared: ReturnType<AgentRunSupervisor["prepare"]>,
     execution: Promise<TurnExecutionResult>,
   ): TrackedLeaseExecution {
     const tracked: TrackedLeaseExecution = { prepared, execution };
@@ -544,7 +538,7 @@ export class LocalSupervisorExecutionBackend
         }
         const result = this.#supervisor.applyHeartbeatAcknowledgement(heartbeat, acknowledgement);
         if (result.revokedAssignments !== result.revokedSessionIds.length) {
-          throw new LocalSandboxSupervisorError(
+          throw new AgentRunSupervisorError(
             "invalid_heartbeat_result",
             "Supervisor heartbeat result was internally inconsistent",
           );

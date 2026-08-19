@@ -1,79 +1,79 @@
 {
   "format": "pi-cloud.fault-eval-report.v1",
-  "generatedAt": "2026-08-16T12:31:15.763Z",
+  "generatedAt": "2026-08-19T03:53:38.955Z",
   "methodology": "deterministic_targeted_fault_injection",
   "liveChaosExperiment": false,
   "caseCount": 11,
   "successful": 11,
   "successRate": 1,
-  "p50DurationMs": 3046,
-  "p95DurationMs": 8129,
+  "p50DurationMs": 7168,
+  "p95DurationMs": 15120,
   "results": [
     {
       "id": "duplicate-command",
       "success": true,
       "invariant": "At-least-once delivery does not execute the same command twice.",
-      "durationMs": 2976
+      "durationMs": 9524
     },
     {
       "id": "stale-fencing-token",
       "success": true,
       "invariant": "A released or recovered old worker cannot reacquire an obsolete fence.",
-      "durationMs": 3046
+      "durationMs": 6409
     },
     {
       "id": "event-ack-loss",
       "success": true,
       "invariant": "A lost acknowledgement causes safe replay rather than event loss.",
-      "durationMs": 2930
+      "durationMs": 4881
     },
     {
       "id": "worker-process-sigkill-after-wal-sync",
       "success": true,
       "invariant": "A real Worker process death after local WAL sync cannot erase the durable delivery suffix.",
-      "durationMs": 1878
+      "durationMs": 3786
     },
     {
       "id": "control-plane-process-sigkill",
       "success": true,
       "invariant": "A Control Plane process replacement does not revoke a healthy fenced Agent Loop.",
-      "durationMs": 3041
+      "durationMs": 4936
     },
     {
       "id": "control-plane-recovery-ack-loss",
       "success": true,
       "invariant": "A Control Plane death with an in-flight recovery ACK cannot wedge Worker reconnection or discard the WAL suffix.",
-      "durationMs": 3224
+      "durationMs": 7168
     },
     {
       "id": "corrupt-event-spool",
       "success": true,
       "invariant": "Corrupt durable events are rejected rather than silently skipped.",
-      "durationMs": 2880
+      "durationMs": 5859
     },
     {
       "id": "checkpoint-corruption-and-cas",
       "success": true,
       "invariant": "Checkpoint integrity and compare-and-swap fencing survive cold recovery.",
-      "durationMs": 7538
+      "durationMs": 13483
     },
     {
       "id": "cancel-complete-race",
       "success": true,
       "invariant": "Exactly one terminal Run outcome wins a cancel/complete race.",
-      "durationMs": 7886
+      "durationMs": 15120
     },
     {
       "id": "stale-dispatch-claim",
       "success": true,
       "invariant": "A superseded dispatcher cannot start external work.",
-      "durationMs": 8129
+      "durationMs": 12876
     },
     {
       "id": "orphan-runtime-cleanup",
       "success": true,
       "invariant": "Expired ownership is reconciled only after the orphan runtime is terminated.",
-      "durationMs": 7611
+      "durationMs": 13293
     }
   ]
 }

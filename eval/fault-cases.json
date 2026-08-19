@@ -5,14 +5,14 @@
     {
       "id": "duplicate-command",
       "workspace": "@pi-cloud/sandbox-supervisor",
-      "file": "test/local-sandbox-supervisor.test.ts",
+      "file": "test/agent-run-supervisor.test.ts",
       "test": "deduplicates the same command and reuses one execution promise",
       "invariant": "At-least-once delivery does not execute the same command twice."
     },
     {
       "id": "stale-fencing-token",
       "workspace": "@pi-cloud/sandbox-supervisor",
-      "file": "test/local-sandbox-supervisor.test.ts",
+      "file": "test/agent-run-supervisor.test.ts",
       "test": "retains the high-water fence after a pre-start release",
       "invariant": "A released or recovered old worker cannot reacquire an obsolete fence."
     },

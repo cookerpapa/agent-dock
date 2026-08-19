@@ -882,29 +882,6 @@ export const RunListResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export const TestResultResourceSchema = Type.Object(
-  {
-    testResultId: UuidSchema,
-    runId: UuidSchema,
-    workspaceVersionId: Type.Optional(UuidSchema),
-    toolCallId: Type.String({ minLength: 1, maxLength: 256 }),
-    command: Type.String({ minLength: 1, maxLength: 4_096 }),
-    suite: Type.String({ minLength: 1, maxLength: 256 }),
-    status: Type.Union([Type.Literal("passed"), Type.Literal("failed"), Type.Literal("errored")]),
-    exitCode: Type.Optional(Type.Integer({ minimum: 0, maximum: 255 })),
-    durationMs: Type.Optional(NonNegativeSafeIntegerSchema),
-    summary: Type.Optional(Type.String({ maxLength: 2_000 })),
-    artifactId: Type.Optional(UuidSchema),
-    createdAt: UtcTimestampSchema,
-  },
-  { additionalProperties: false },
-);
-
-export const TestResultListResourceSchema = Type.Object(
-  { runId: UuidSchema, results: Type.Array(TestResultResourceSchema, { maxItems: 100 }) },
-  { additionalProperties: false },
-);
-
 export const WorkspaceVersionResourceSchema = Type.Object(
   {
     versionId: UuidSchema,
@@ -979,81 +956,6 @@ export const WorkspaceOperationResourceSchema = Type.Object(
     versionId: Type.Optional(UuidSchema),
     replayed: Type.Boolean(),
     createdAt: UtcTimestampSchema,
-  },
-  { additionalProperties: false },
-);
-
-export const GitHubInstallationResourceSchema = Type.Object(
-  {
-    installationId: PositiveSafeIntegerSchema,
-    accountId: PositiveSafeIntegerSchema,
-    accountLogin: Type.String({ minLength: 1, maxLength: 128 }),
-    targetType: Type.Union([Type.Literal("User"), Type.Literal("Organization")]),
-    repositorySelection: Type.Union([Type.Literal("all"), Type.Literal("selected")]),
-    status: Type.Union([
-      Type.Literal("active"),
-      Type.Literal("suspended"),
-      Type.Literal("removed"),
-    ]),
-    repositories: Type.Array(
-      Type.Object(
-        {
-          repositoryId: PositiveSafeIntegerSchema,
-          fullName: Type.String({ minLength: 3, maxLength: 140 }),
-          private: Type.Boolean(),
-          defaultBranch: Type.String({ minLength: 1, maxLength: 255 }),
-          enabled: Type.Boolean(),
-        },
-        { additionalProperties: false },
-      ),
-      { maxItems: 500 },
-    ),
-  },
-  { additionalProperties: false },
-);
-
-export const RegisterGitHubInstallationRequestSchema = Type.Object(
-  { installationId: PositiveSafeIntegerSchema },
-  { additionalProperties: false },
-);
-
-export const SetGitHubRepositoryRequestSchema = Type.Object(
-  { enabled: Type.Boolean() },
-  { additionalProperties: false },
-);
-
-export const CreateGitHubPullRequestRequestSchema = Type.Object(
-  {
-    repositoryId: PositiveSafeIntegerSchema,
-    baseBranch: Type.String({ minLength: 1, maxLength: 255 }),
-    baseCommitSha: Type.String({ pattern: "^[0-9a-f]{40}$" }),
-    headBranch: Type.String({ minLength: 1, maxLength: 255 }),
-    title: Type.String({ minLength: 1, maxLength: 256 }),
-    body: Type.String({ maxLength: 16_384 }),
-  },
-  { additionalProperties: false },
-);
-
-export const GitHubPullRequestDeliveryResourceSchema = Type.Object(
-  {
-    deliveryId: UuidSchema,
-    workspaceVersionId: UuidSchema,
-    repositoryId: PositiveSafeIntegerSchema,
-    state: Type.Union([
-      Type.Literal("pending"),
-      Type.Literal("delivering"),
-      Type.Literal("completed"),
-      Type.Literal("failed"),
-    ]),
-    headBranch: Type.String({ minLength: 1, maxLength: 255 }),
-    commitSha: Type.Optional(Type.String({ pattern: "^[0-9a-f]{40}$" })),
-    pullRequestNumber: Type.Optional(PositiveSafeIntegerSchema),
-    pullRequestUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2_048 })),
-    checkRunId: Type.Optional(PositiveSafeIntegerSchema),
-    failureCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-    replayed: Type.Boolean(),
-    createdAt: UtcTimestampSchema,
-    updatedAt: UtcTimestampSchema,
   },
   { additionalProperties: false },
 );
@@ -1183,23 +1085,12 @@ export type RunAttemptTransitionResource = Static<typeof RunAttemptTransitionRes
 export type RunAttemptResource = Static<typeof RunAttemptResourceSchema>;
 export type RunResource = Static<typeof RunResourceSchema>;
 export type RunListResource = Static<typeof RunListResourceSchema>;
-export type TestResultResource = Static<typeof TestResultResourceSchema>;
-export type TestResultListResource = Static<typeof TestResultListResourceSchema>;
 export type WorkspaceVersionResource = Static<typeof WorkspaceVersionResourceSchema>;
 export type WorkspaceVersionListResource = Static<typeof WorkspaceVersionListResourceSchema>;
 export type WorkspaceFileResource = Static<typeof WorkspaceFileResourceSchema>;
 export type WorkspaceFileListResource = Static<typeof WorkspaceFileListResourceSchema>;
 export type ArchiveSessionRequest = Static<typeof ArchiveSessionRequestSchema>;
 export type WorkspaceOperationResource = Static<typeof WorkspaceOperationResourceSchema>;
-export type GitHubInstallationResource = Static<typeof GitHubInstallationResourceSchema>;
-export type RegisterGitHubInstallationRequest = Static<
-  typeof RegisterGitHubInstallationRequestSchema
->;
-export type SetGitHubRepositoryRequest = Static<typeof SetGitHubRepositoryRequestSchema>;
-export type CreateGitHubPullRequestRequest = Static<typeof CreateGitHubPullRequestRequestSchema>;
-export type GitHubPullRequestDeliveryResource = Static<
-  typeof GitHubPullRequestDeliveryResourceSchema
->;
 export type CreateTurnCancellationRequest = Static<typeof CreateTurnCancellationRequestSchema>;
 export type AcceptedTurnCancellationResource = Static<
   typeof AcceptedTurnCancellationResourceSchema
@@ -1639,47 +1530,8 @@ export function parseRunListResource(value: unknown): RunListResource {
   return parseSchema(RunListResourceSchema, value, "run list resource");
 }
 
-export function parseTestResultListResource(value: unknown): TestResultListResource {
-  return parseSchema(TestResultListResourceSchema, value, "test-result-list resource");
-}
-
 export function parseArchiveSessionRequest(value: unknown): ArchiveSessionRequest {
   return parseSchema(ArchiveSessionRequestSchema, value, "archive-session request");
-}
-
-export function parseRegisterGitHubInstallationRequest(
-  value: unknown,
-): RegisterGitHubInstallationRequest {
-  return parseSchema(
-    RegisterGitHubInstallationRequestSchema,
-    value,
-    "register-GitHub-installation request",
-  );
-}
-
-export function parseSetGitHubRepositoryRequest(value: unknown): SetGitHubRepositoryRequest {
-  return parseSchema(SetGitHubRepositoryRequestSchema, value, "set-GitHub-repository request");
-}
-
-export function parseCreateGitHubPullRequestRequest(
-  value: unknown,
-): CreateGitHubPullRequestRequest {
-  const request = parseSchema(
-    CreateGitHubPullRequestRequestSchema,
-    value,
-    "create-GitHub-pull-request request",
-  );
-  if (
-    request.baseBranch.startsWith("/") ||
-    request.headBranch.startsWith("/") ||
-    request.baseBranch.includes("..") ||
-    request.headBranch.includes("..") ||
-    /[~^:?*[\\\u0000-\u0020\u007f]/.test(request.baseBranch) ||
-    /[~^:?*[\\\u0000-\u0020\u007f]/.test(request.headBranch)
-  ) {
-    throw new ControlPlaneApiValidationError("GitHub branch name is invalid");
-  }
-  return request;
 }
 
 export function parseWorkspaceVersionResource(value: unknown): WorkspaceVersionResource {
@@ -1701,20 +1553,6 @@ export function parseWorkspaceFileCursor(value: unknown): string | undefined {
 
 export function parseWorkspaceOperationResource(value: unknown): WorkspaceOperationResource {
   return parseSchema(WorkspaceOperationResourceSchema, value, "workspace-operation resource");
-}
-
-export function parseGitHubInstallationResource(value: unknown): GitHubInstallationResource {
-  return parseSchema(GitHubInstallationResourceSchema, value, "GitHub-installation resource");
-}
-
-export function parseGitHubPullRequestDeliveryResource(
-  value: unknown,
-): GitHubPullRequestDeliveryResource {
-  return parseSchema(
-    GitHubPullRequestDeliveryResourceSchema,
-    value,
-    "GitHub-pull-request-delivery resource",
-  );
 }
 
 export function parseAcceptedTurnCancellationResource(

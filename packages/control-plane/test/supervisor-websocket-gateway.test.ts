@@ -2,7 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import { parseSupervisorToControlMessage } from "@pi-cloud/protocol";
-import { LocalSandboxSupervisor, SupervisorWebSocketClient } from "@pi-cloud/sandbox-supervisor";
+import { AgentRunSupervisor, SupervisorWebSocketClient } from "@pi-cloud/sandbox-supervisor";
 import Fastify from "fastify";
 import { type Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -176,7 +176,7 @@ async function startGateway(options: {
 }
 
 function client(url: string, token: string, value: SupervisorBootIdentity) {
-  const runtime = new LocalSandboxSupervisor({
+  const runtime = new AgentRunSupervisor({
     runner: {
       async run() {
         return { stopReason: "unused" };

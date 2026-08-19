@@ -14,7 +14,7 @@ import type {
 import { parseControlToSupervisorMessage } from "@pi-cloud/protocol";
 import {
   WalEventSpoolStore,
-  LocalSandboxSupervisor,
+  AgentRunSupervisor,
   PiTurnCancelledError,
   PiTurnError,
   type SandboxAssignmentInventory,
@@ -32,7 +32,7 @@ import {
   AssignmentReconciler,
   DeterministicExecutionBackend,
   DurableEventStore,
-  LocalSupervisorExecutionBackend,
+  AgentRunExecutionBackend,
   RunCommandExecutor,
   RunCommandExecutorStaleClaimError,
   TurnExecutionCancelledError,
@@ -2470,14 +2470,14 @@ describe.sequential("single-user durable turn intake API", () => {
       sandboxId: IDS.sandbox,
       leaseDurationMs: 120_000,
     });
-    const supervisor = new LocalSandboxSupervisor({
+    const supervisor = new AgentRunSupervisor({
       runner: {
         async run() {
           throw new PiTurnError("model_timeout", "Model request timed out", true);
         },
       },
     });
-    const backend = new LocalSupervisorExecutionBackend({
+    const backend = new AgentRunExecutionBackend({
       supervisor,
       leaseCoordinator,
       eventIngestor: durableEventStore,
@@ -2629,7 +2629,7 @@ describe.sequential("single-user durable turn intake API", () => {
       sandboxId: IDS.heartbeatSandbox,
       leaseDurationMs: 90,
     });
-    const supervisor = new LocalSandboxSupervisor({
+    const supervisor = new AgentRunSupervisor({
       runner: {
         async run() {
           await runnerGate;
@@ -2639,7 +2639,7 @@ describe.sequential("single-user durable turn intake API", () => {
     });
     const dispatcher = new RunCommandExecutor({
       database,
-      backend: new LocalSupervisorExecutionBackend({
+      backend: new AgentRunExecutionBackend({
         supervisor,
         leaseCoordinator,
         eventIngestor: durableEventStore,
@@ -2716,7 +2716,7 @@ describe.sequential("single-user durable turn intake API", () => {
       sandboxId: IDS.expiredLeaseSandbox,
       leaseDurationMs: 60,
     });
-    const supervisor = new LocalSandboxSupervisor({
+    const supervisor = new AgentRunSupervisor({
       runner: {
         async run(_command, _publishEvent, signal) {
           return new Promise((_resolve, reject) => {
@@ -2734,7 +2734,7 @@ describe.sequential("single-user durable turn intake API", () => {
     });
     const dispatcher = new RunCommandExecutor({
       database,
-      backend: new LocalSupervisorExecutionBackend({
+      backend: new AgentRunExecutionBackend({
         supervisor,
         leaseCoordinator,
         eventIngestor: durableEventStore,
@@ -3049,7 +3049,7 @@ describe.sequential("single-user durable turn intake API", () => {
         leaseDurationMs: 120_000,
       });
       const firstStore = new WalEventSpoolStore({ rootDirectory: spoolRoot });
-      const supervisor = new LocalSandboxSupervisor({
+      const supervisor = new AgentRunSupervisor({
         runner: {
           async run(command, publishEvent) {
             const event: EventPublishMessage = {
@@ -3080,7 +3080,7 @@ describe.sequential("single-user durable turn intake API", () => {
         },
         eventSpoolFactory: (options) => firstStore.open(options),
       });
-      const backend = new LocalSupervisorExecutionBackend({
+      const backend = new AgentRunExecutionBackend({
         supervisor,
         leaseCoordinator,
         eventIngestor: durableEventStore,
@@ -3112,7 +3112,7 @@ describe.sequential("single-user durable turn intake API", () => {
       expect(persistedBeforeReplay[1]).toMatchObject({ seq: "2", type: "turn.failed" });
 
       const restartedStore = new WalEventSpoolStore({ rootDirectory: spoolRoot });
-      const restartedSupervisor = new LocalSandboxSupervisor({
+      const restartedSupervisor = new AgentRunSupervisor({
         runner: {
           async run() {
             throw new Error("Recovery must not start a new runner");

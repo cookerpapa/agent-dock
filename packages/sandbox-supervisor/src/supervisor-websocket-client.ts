@@ -17,7 +17,7 @@ import {
   type SupervisorRegisteredMessage,
 } from "@pi-cloud/protocol";
 import WebSocket, { type RawData } from "ws";
-import type { PreparedTurnSteer } from "./local-sandbox-supervisor.ts";
+import type { PreparedTurnSteer } from "./agent-run-supervisor.ts";
 import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";
 import { EventDeliveryRejectedError } from "./in-memory-event-spool.ts";
 import { PINNED_PI_CODING_AGENT_VERSION } from "./pi-turn-runtime.ts";

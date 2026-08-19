@@ -4,7 +4,7 @@ import { startServiceObservability } from "@pi-cloud/observability";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadSupervisorHostConfig } from "./config.ts";
-import { SupervisorHostRuntime } from "./runtime.ts";
+import { PiWorkerRuntime } from "./runtime.ts";
 
 type StopReason = "sigint" | "sigterm" | "owner_stopped" | "connection_failed";
 
@@ -19,7 +19,7 @@ function safeFailureCode(error: unknown): string {
     return error.code;
   }
   if (error instanceof TypeError) return "invalid_supervisor_configuration";
-  return "supervisor_host_start_failed";
+  return "pi_worker_start_failed";
 }
 
 function signalPromise(): Promise<"sigint" | "sigterm"> {
@@ -40,7 +40,7 @@ export async function startSupervisorHost(): Promise<void> {
     maxConnections: Math.max(4, config.maxConcurrentSessions * 4),
   });
   const objectStore = new PostgresCheckpointObjectStore(database);
-  const runtime = new SupervisorHostRuntime({
+  const runtime = new PiWorkerRuntime({
     config,
     database,
     objectStore,

@@ -6,7 +6,6 @@ import {
   PostgresSupervisorCredentialAuthorizer,
   SupervisorBootProvisioner,
   SupervisorConnectionManager,
-  SupervisorProvisioningGateway,
   SupervisorWebSocketGateway,
 } from "@pi-cloud/control-plane";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -19,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   PRODUCTION_CANCELLATION_PROBE_PROMPT,
   resolveProductionSandboxScenario,
-  SupervisorHostRuntime,
+  PiWorkerRuntime,
   type SupervisorHostConfig,
   type SupervisorToolBroker,
   type SupervisorRunWorker,
@@ -122,7 +121,7 @@ function toolBroker(): SupervisorToolBroker {
   };
 }
 
-describe("SupervisorHostRuntime", () => {
+describe("PiWorkerRuntime", () => {
   it("keeps the production fixture closed while providing a deterministic cancellation probe", () => {
     const context = (text: string, restoring = false) =>
       ({
@@ -151,7 +150,6 @@ describe("SupervisorHostRuntime", () => {
       maximumCapacity: 4,
       enrollmentToken: ENROLLMENT_TOKEN,
     });
-    new SupervisorProvisioningGateway({ provisioner }).install(server);
     const manager = new SupervisorConnectionManager({
       database,
       controlPlaneInstanceId: CONTROL_PLANE_ID,
@@ -218,7 +216,7 @@ describe("SupervisorHostRuntime", () => {
     };
     expect(
       () =>
-        new SupervisorHostRuntime({
+        new PiWorkerRuntime({
           config: {
             ...baseConfig,
             maxConcurrentSessions: 17,
@@ -229,15 +227,16 @@ describe("SupervisorHostRuntime", () => {
           runWorkerFactory,
         }),
     ).toThrow("Pi SDK Worker runtime capacity must be between 1 and 16");
-    let first: SupervisorHostRuntime | undefined;
-    let second: SupervisorHostRuntime | undefined;
+    let first: PiWorkerRuntime | undefined;
+    let second: PiWorkerRuntime | undefined;
     try {
-      first = new SupervisorHostRuntime({
+      first = new PiWorkerRuntime({
         config: baseConfig,
         database,
         objectStore: objectStore(),
         toolBroker: toolBroker(),
         runWorkerFactory,
+        provisioningClient: { provision: (request) => provisioner.provision(request) },
       });
       await first.start();
       expect(first.state).toBe("ready");
@@ -246,12 +245,13 @@ describe("SupervisorHostRuntime", () => {
       await first.close();
       expect(first.state).toBe("stopped");
 
-      second = new SupervisorHostRuntime({
+      second = new PiWorkerRuntime({
         config: baseConfig,
         database,
         objectStore: objectStore(),
         toolBroker: toolBroker(),
         runWorkerFactory,
+        provisioningClient: { provision: (request) => provisioner.provision(request) },
       });
       await second.start();
       expect(second.state).toBe("ready");

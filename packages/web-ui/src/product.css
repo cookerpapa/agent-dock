@@ -1564,105 +1564,6 @@ body.product-panel-resizing {
   background: #191919;
 }
 
-.product-conversation-outline {
-  display: grid;
-  min-width: 0;
-  min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
-  border-left: 1px solid #303030;
-  background: #191919;
-}
-
-.product-conversation-outline > header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 15px 14px 12px;
-  border-bottom: 1px solid #2d2d2d;
-}
-
-.product-conversation-outline > header > div {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.product-conversation-outline > header strong {
-  color: #d4d4d4;
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.product-conversation-outline > header span {
-  color: #696969;
-  font-size: 9px;
-}
-
-.product-conversation-outline > header small {
-  display: grid;
-  min-width: 22px;
-  height: 22px;
-  place-items: center;
-  border: 1px solid #3b3b3b;
-  border-radius: 7px;
-  color: #898989;
-  font-size: 9px;
-}
-
-.product-conversation-outline > nav {
-  min-height: 0;
-  overflow: auto;
-  padding: 8px;
-  scrollbar-color: #444 transparent;
-  scrollbar-width: thin;
-}
-
-.product-conversation-outline > nav button {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: start;
-  gap: 6px;
-  padding: 9px 8px;
-  border: 0;
-  background: transparent;
-  color: #8b8b8b;
-  text-align: left;
-}
-
-.product-conversation-outline > nav button:hover {
-  background: #242424;
-  color: #bdbdbd;
-}
-
-.product-conversation-outline > nav button.active {
-  background: #2d2a3b;
-  color: #ded9f7;
-}
-
-.product-conversation-outline > nav button > span {
-  padding-top: 1px;
-  color: #595959;
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
-}
-
-.product-conversation-outline > nav button.active > span {
-  color: #887bd4;
-}
-
-.product-conversation-outline > nav button > strong {
-  display: -webkit-box;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
 .product-tree-panel {
   z-index: 20;
   display: block;
@@ -2187,7 +2088,6 @@ body.product-panel-resizing {
   .product-mobile-menu {
     display: block;
   }
-  .product-conversation-outline,
   .product-tree-panel {
     display: none;
   }

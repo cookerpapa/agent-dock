@@ -11,8 +11,6 @@
     "packages/*"
   ],
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.1",
-    "@earendil-works/pi-tui": "0.84.1",
     "pi-security-brace-expansion": "npm:brace-expansion@5.0.9",
     "pi-security-protobufjs": "npm:protobufjs@7.6.5",
     "pi-security-undici": "npm:undici@8.10.0",
@@ -90,6 +88,7 @@
     "db:migrate": "npm run migrate --workspace @pi-cloud/database",
     "db:migrate:down": "npm run migrate:down --workspace @pi-cloud/database",
     "demo": "npm run production:deploy",
+    "docs:import-chatgpt-share": "node scripts/import-chatgpt-share.mjs",
     "check": "npm run typecheck && npm test",
     "security:audit": "node scripts/run-security-audit.mjs",
     "eval:coding": "node scripts/run-coding-eval.mjs",

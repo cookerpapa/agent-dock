@@ -50,12 +50,13 @@ must never appear in the DOM or browser developer logs.
 ## Deliberately omitted behavior
 
 The current product does not expose Web Preview, structured Diff, Artifact or
-test-result navigation, Fork/Rollback, GitHub App/PR delivery, or organization,
-RBAC and audit-search pages. Their unfinished routes and browser client methods
-were removed rather than presented as a partial product. Conversation archive,
-delete, Workspace browsing and active Pi steer remain supported.
+test-result navigation, Workspace rollback, GitHub App/PR delivery, or
+organization, RBAC and audit-search pages. Their unfinished routes and browser
+client methods were removed rather than presented as a partial product.
+Conversation forks, recursive tree deletion, tail pruning, Workspace browsing,
+the brokered terminal and active Pi steer are supported.
 
-## Phase 1 visual acceptance
+## Visual acceptance
 
 - A long Pi-style transcript remains readable without full-width chat bubbles.
 - Tool and thinking blocks can be expanded and collapsed with keyboard access.
@@ -70,10 +71,11 @@ delete, Workspace browsing and active Pi steer remain supported.
 
 `packages/web-ui` now enters through username/password login or registration and
 restores a durable HttpOnly-cookie session on reload. The authenticated shell
-shows tenant-scoped named conversations at left and the selected transcript at
-right. Starting a conversation requires selecting an existing named Workspace
-or creating a new empty one. The browser has no repository-import workflow. No
-API token, provider key, model profile, or model picker is shown to an ordinary
+shows tenant-scoped named conversations, typed Subagent children and a
+focused/full Pi Session tree at left, with the selected transcript at right.
+Starting a conversation requires selecting an existing named Workspace or
+creating a new empty one. The browser has no repository-import workflow. No API
+token, provider key, model profile, or model picker is shown to an ordinary
 user.
 
 The transcript preserves event order, merges adjacent text deltas, renders
@@ -105,10 +107,12 @@ files and the selected file body. Operational Runs, usage and environment
 diagnostics remain in telemetry/admin APIs, so a denied unrelated request
 cannot blank or repeatedly reload the directory.
 
-Preview is deliberately inert: at most 256 KiB of valid UTF-8 is rendered in an
+Preview is deliberately inert: at most 512 KiB of valid UTF-8 is rendered in an
 escaped `<pre>`, binary data is labelled, and repository HTML/scripts are never
-embedded. Deleting a conversation requires confirmation and leaves its shared
-Workspace intact.
+embedded. The same panel offers a brokered xterm session without exposing Cube
+ports or credentials. Deleting a parent recursively archives its human and
+Subagent descendants. Tail pruning retains the selected final answer and moves
+Pi's active lane back to it; neither operation rolls back Workspace bytes.
 
 A dedicated platform administrator bypasses the conversation shell and lands
 on the settings page for model and Cube proxy configuration. Tenant owners

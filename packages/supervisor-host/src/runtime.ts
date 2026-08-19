@@ -8,7 +8,7 @@ import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
 import { HttpDurableEventIngestor } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
 import { GroupedDurableEventIngestor } from "@pi-cloud/runtime-core/grouped-durable-event-ingestor";
 import { PostgresEventProjectionBarrier } from "@pi-cloud/runtime-core/event-projection-barrier";
-import { LocalSupervisorExecutionBackend } from "@pi-cloud/runtime-core/local-supervisor-execution-backend";
+import { AgentRunExecutionBackend } from "@pi-cloud/runtime-core/agent-run-execution-backend";
 import {
   PostgresTenantModelCredentialResolver,
   TenantModelCredentialVault,
@@ -30,7 +30,7 @@ import { ReplicatedToolBrokerClient } from "@pi-cloud/tool-broker";
 import {
   WalEventSpoolStore,
   createPiSubagentsCloudTool,
-  LocalSandboxSupervisor,
+  AgentRunSupervisor,
   RemoteToolSandboxTurnRunner,
   ReconnectingSupervisorWebSocketClient,
   type AgentTurnScenario,
@@ -56,14 +56,14 @@ import {
 import { SupervisorProvisioningClient } from "./provisioning-client.ts";
 import { GatewayGitHubWorkspaceImporter, PostgresWorkspaceSeedResolver } from "./workspace-seed.ts";
 
-export type SupervisorHostRuntimeState =
+export type PiWorkerRuntimeState =
   "idle" | "starting" | "ready" | "draining" | "stopped" | "failed";
 
-export type SupervisorHostRuntimeOptions = {
+export type PiWorkerRuntimeOptions = {
   config: SupervisorHostConfig;
   database?: Kysely<Database>;
   objectStore: CheckpointObjectStore & { checkHealth(): Promise<void>; destroy(): void };
-  provisioningClient?: SupervisorProvisioningClient;
+  provisioningClient?: Pick<SupervisorProvisioningClient, "provision">;
   toolBroker?: SupervisorToolBroker;
   idGenerator?: () => string;
   connectionSecretGenerator?: () => string;
@@ -138,13 +138,13 @@ export function resolveProductionSandboxScenario({
   return "java_repair";
 }
 
-export class SupervisorHostRuntimeError extends Error {
+export class PiWorkerRuntimeError extends Error {
   readonly code: string;
   readonly retryable: boolean;
 
   constructor(code: string, safeMessage: string, retryable: boolean, options?: ErrorOptions) {
     super(safeMessage, options);
-    this.name = "SupervisorHostRuntimeError";
+    this.name = "PiWorkerRuntimeError";
     this.code = code;
     this.retryable = retryable;
   }
@@ -157,7 +157,7 @@ function connectionSecret(value: string): string {
   return value;
 }
 
-export class SupervisorHostRuntime {
+export class PiWorkerRuntime {
   readonly #config: SupervisorHostConfig;
   readonly #database: Kysely<Database>;
   readonly #ownsDatabase: boolean;
@@ -165,7 +165,7 @@ export class SupervisorHostRuntime {
     checkHealth(): Promise<void>;
     destroy(): void;
   };
-  readonly #provisioningClient: SupervisorProvisioningClient;
+  readonly #provisioningClient: Pick<SupervisorProvisioningClient, "provision">;
   readonly #toolBroker: SupervisorToolBroker;
   readonly #idGenerator: () => string;
   readonly #connectionSecretGenerator: () => string;
@@ -175,9 +175,9 @@ export class SupervisorHostRuntime {
   readonly #resolveOwnerStopped: () => void;
   readonly #terminalPromise: Promise<SupervisorHostTerminalReason>;
   readonly #resolveTerminal: (reason: SupervisorHostTerminalReason) => void;
-  #state: SupervisorHostRuntimeState = "idle";
+  #state: PiWorkerRuntimeState = "idle";
   #identity: SupervisorHostBootIdentity | undefined;
-  #localSupervisor: LocalSandboxSupervisor | undefined;
+  #runSupervisor: AgentRunSupervisor | undefined;
   #client: ReconnectingSupervisorWebSocketClient | undefined;
   #managementServer: SupervisorManagementServer | undefined;
   #modelGateway: TenantModelGateway | undefined;
@@ -188,7 +188,7 @@ export class SupervisorHostRuntime {
   #terminalSettled = false;
   #terminalFailureCode: string | undefined;
 
-  constructor(options: SupervisorHostRuntimeOptions) {
+  constructor(options: PiWorkerRuntimeOptions) {
     if (
       !Number.isSafeInteger(options.config.maxConcurrentSessions) ||
       options.config.maxConcurrentSessions < 1 ||
@@ -238,7 +238,7 @@ export class SupervisorHostRuntime {
     this.#resolveTerminal = resolveTerminal;
   }
 
-  get state(): SupervisorHostRuntimeState {
+  get state(): PiWorkerRuntimeState {
     return this.#state;
   }
 
@@ -289,10 +289,10 @@ export class SupervisorHostRuntime {
         if (this.#state === "draining" || this.#state === "stopped") return;
         this.#state = "draining";
         client?.setAcceptingAssignments(false);
-        this.#localSupervisor?.revokeAllAssignments();
+        this.#runSupervisor?.revokeAllAssignments();
         await this.#runWorker?.stop();
         await client?.stop();
-        await this.#localSupervisor?.waitUntilAssignmentsSettled();
+        await this.#runSupervisor?.waitUntilAssignmentsSettled();
         if (!this.#ownerStopSettled) {
           this.#ownerStopSettled = true;
           this.#resolveOwnerStopped();
@@ -302,7 +302,7 @@ export class SupervisorHostRuntime {
       assignmentInventory: this.#toolBroker,
       artifactStore: this.#objectStore,
       steerCommand: async (command) => {
-        const local = this.#localSupervisor;
+        const local = this.#runSupervisor;
         if (local === undefined) {
           throw new SupervisorManagementServerError(
             "steer_target_unavailable",
@@ -552,13 +552,13 @@ export class SupervisorHostRuntime {
           identity.bootId,
         ),
       });
-      const localSupervisor = new LocalSandboxSupervisor({
+      const runSupervisor = new AgentRunSupervisor({
         runner,
         maxConcurrentSessions: this.#config.maxConcurrentSessions,
         eventSpoolFactory: (options) => spoolStore.open(options),
         eventSpoolRecovery: spoolStore,
       });
-      this.#localSupervisor = localSupervisor;
+      this.#runSupervisor = runSupervisor;
       client = new ReconnectingSupervisorWebSocketClient({
         url: this.#config.supervisorWebSocketUrl,
         authorizationHeader: `Bearer ${request.credentialId}.${secret}`,
@@ -566,7 +566,7 @@ export class SupervisorHostRuntime {
           ...identity,
           maxConcurrentSessions: this.#config.maxConcurrentSessions,
         },
-        runtime: localSupervisor,
+        runtime: runSupervisor,
       });
       // The WebSocket remains a liveness/ownership and management channel.
       // PostgreSQL is the sole production authority that assigns Run work.
@@ -602,13 +602,13 @@ export class SupervisorHostRuntime {
         database: this.#database,
         sandboxId: identity.sandboxId,
       });
-      const localBackend = new LocalSupervisorExecutionBackend({
-        supervisor: localSupervisor,
+      const runBackend = new AgentRunExecutionBackend({
+        supervisor: runSupervisor,
         leaseCoordinator,
         eventIngestor: groupedEventIngestor,
         onUnexpectedError: (error) =>
           operationalLog({
-            service: "pi-cloud-supervisor-host",
+            service: "pi-cloud-pi-worker",
             level: "error",
             event: "supervisor.execution-unexpected-failure",
             attributes: {
@@ -624,7 +624,7 @@ export class SupervisorHostRuntime {
         maximumConcurrentRuns: this.#config.maxConcurrentSessions,
         commandExecutor: new RunCommandExecutor({
           database: this.#database,
-          backend: localBackend,
+          backend: runBackend,
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
           ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
@@ -634,7 +634,7 @@ export class SupervisorHostRuntime {
         }),
         cancellationExecutor: new RunCancellationExecutor({
           database: this.#database,
-          backend: localBackend,
+          backend: runBackend,
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
           ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
@@ -642,7 +642,7 @@ export class SupervisorHostRuntime {
         }),
         onFailure: (operation, error) =>
           operationalLog({
-            service: "pi-cloud-supervisor-host",
+            service: "pi-cloud-pi-worker",
             level: "error",
             event: "postgres-run-worker.failure",
             attributes: {
@@ -667,9 +667,9 @@ export class SupervisorHostRuntime {
     } catch (error: unknown) {
       this.#state = "failed";
       await this.close().catch(() => undefined);
-      if (error instanceof SupervisorHostRuntimeError) throw error;
-      throw new SupervisorHostRuntimeError(
-        "supervisor_host_start_failed",
+      if (error instanceof PiWorkerRuntimeError) throw error;
+      throw new PiWorkerRuntimeError(
+        "pi_worker_start_failed",
         "Supervisor host failed to start",
         true,
         { cause: error },
@@ -693,7 +693,7 @@ export class SupervisorHostRuntime {
     // polling first and give the active Runs their bounded settlement window;
     // owner replacement still uses stopCurrentBoot(), which revokes immediately.
     await this.#runWorker?.stop().catch(() => undefined);
-    await this.#localSupervisor?.waitUntilAssignmentsSettled().catch(() => undefined);
+    await this.#runSupervisor?.waitUntilAssignmentsSettled().catch(() => undefined);
     await this.#client?.stop().catch(() => undefined);
     await this.#managementServer?.close().catch(() => undefined);
     await this.#modelGateway?.close().catch(() => undefined);
@@ -705,7 +705,7 @@ export class SupervisorHostRuntime {
   #observeClientStop(result: ReconnectingSupervisorWebSocketClientStop): void {
     if (this.#state === "draining" || this.#state === "stopped") return;
     operationalLog({
-      service: "pi-cloud-supervisor-host",
+      service: "pi-cloud-pi-worker",
       level: result.reason === "terminal_failure" ? "error" : "info",
       event: "worker-control-channel.stopped",
       attributes: {

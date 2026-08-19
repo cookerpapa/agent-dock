@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { AdminPage } from "../src/AdminPage.tsx";
 import { AuthScreen } from "../src/AuthScreen.tsx";
 import ChatApp from "../src/ChatApp.tsx";
-import { ConversationOutline } from "../src/ConversationOutline.tsx";
 import { ConversationTreeNavigator } from "../src/ConversationTreeNavigator.tsx";
 import { ConversationTurn, ToolActivity } from "../src/ConversationTurn.tsx";
 import { PiCloudApi } from "../src/api.ts";
@@ -90,22 +89,6 @@ describe("product chat experience", () => {
     expect(markup).toContain("/workspace");
     expect(markup).not.toContain("runs");
     expect(markup).not.toContain("usage");
-  });
-
-  it("renders historical user questions as a compact conversation navigator", () => {
-    const markup = renderToStaticMarkup(
-      <ConversationOutline
-        scrollerRef={{ current: null }}
-        turns={[
-          turn("10000000-0000-4000-8000-000000000011", "分析一下当前架构"),
-          turn("10000000-0000-4000-8000-000000000012", "然后修复所有测试"),
-        ]}
-      />,
-    );
-    expect(markup).toContain("对话导航");
-    expect(markup).toContain("分析一下当前架构");
-    expect(markup).toContain("然后修复所有测试");
-    expect(markup).toContain('aria-current="true"');
   });
 
   it("renders Pi conversation forks in focused and whole-tree navigation", () => {

@@ -38,6 +38,9 @@ The default production build does not build or start this profile.
 
 The following unfinished product workflows are not part of either core or the
 advanced Web product: Web Preview, structured Diff, Artifact download,
-test-result navigation, Fork/Rollback, GitHub App/PR delivery, and organization,
-RBAC or audit-search pages. Reintroducing one requires a new end-to-end product
-decision, public contract and acceptance suite.
+test-result navigation, Workspace rollback, GitHub App/PR delivery, and
+organization, RBAC or audit-search pages. Conversation forks, recursive tree
+deletion and conversation-tail pruning are current core features; none of them
+pretends to roll back Workspace bytes. Reintroducing a removed workflow
+requires a new end-to-end product decision, public contract and acceptance
+suite.

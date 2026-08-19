@@ -16,7 +16,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   WalEventSpoolStore,
-  LocalSandboxSupervisor,
+  AgentRunSupervisor,
   PiTurnCancelledError,
   type SupervisorTurnRunner,
 } from "../src/index.ts";
@@ -150,10 +150,10 @@ function rejectUnexpectedEvent(): never {
   throw new Error("Recording runner did not expect to publish an event");
 }
 
-describe("LocalSandboxSupervisor", () => {
+describe("AgentRunSupervisor", () => {
   it("returns a side-effect-free ACK and starts the runner only after run", async () => {
     const runner = new RecordingRunner();
-    const supervisor = new LocalSandboxSupervisor({ runner });
+    const supervisor = new AgentRunSupervisor({ runner });
     const prepared = supervisor.prepare(command(), rejectUnexpectedEvent);
 
     expect(prepared.ack.payload).toMatchObject({ status: "accepted", fencingToken: 1 });
@@ -167,7 +167,7 @@ describe("LocalSandboxSupervisor", () => {
 
   it("deduplicates the same command and reuses one execution promise", async () => {
     const runner = new RecordingRunner();
-    const supervisor = new LocalSandboxSupervisor({ runner });
+    const supervisor = new AgentRunSupervisor({ runner });
     const first = supervisor.prepare(command(), rejectUnexpectedEvent);
     const duplicate = supervisor.prepare(command(), rejectUnexpectedEvent);
 
@@ -178,7 +178,7 @@ describe("LocalSandboxSupervisor", () => {
 
   it("rejects a reused command ID when the immutable payload changed", () => {
     const runner = new RecordingRunner();
-    const supervisor = new LocalSandboxSupervisor({ runner });
+    const supervisor = new AgentRunSupervisor({ runner });
     supervisor.prepare(command(), rejectUnexpectedEvent);
     const changed = command();
     if (changed.payload.input.kind !== "prompt") throw new Error("Expected prompt input");
@@ -194,7 +194,7 @@ describe("LocalSandboxSupervisor", () => {
 
   it("retains the high-water fence after a pre-start release", () => {
     const runner = new RecordingRunner();
-    const supervisor = new LocalSandboxSupervisor({ runner });
+    const supervisor = new AgentRunSupervisor({ runner });
     const current = supervisor.prepare(
       command({ leaseId: IDS.lease2, fencingToken: 2 }),
       rejectUnexpectedEvent,
@@ -212,7 +212,7 @@ describe("LocalSandboxSupervisor", () => {
 
   it("rejects capacity overflow without invoking the second command", () => {
     const runner = new RecordingRunner();
-    const supervisor = new LocalSandboxSupervisor({ runner, maxConcurrentSessions: 1 });
+    const supervisor = new AgentRunSupervisor({ runner, maxConcurrentSessions: 1 });
     supervisor.prepare(command(), rejectUnexpectedEvent);
     const overflow = supervisor.prepare(
       command({
@@ -259,7 +259,7 @@ describe("LocalSandboxSupervisor", () => {
         return { stopReason: "stop" };
       },
     };
-    const supervisor = new LocalSandboxSupervisor({ runner: badRunner });
+    const supervisor = new AgentRunSupervisor({ runner: badRunner });
     const prepared = supervisor.prepare(command(), rejectUnexpectedEvent);
 
     await expect(prepared.run()).rejects.toThrow("does not match its assignment");
@@ -293,7 +293,7 @@ describe("LocalSandboxSupervisor", () => {
         return { stopReason: "stop" };
       },
     };
-    const supervisor = new LocalSandboxSupervisor({ runner: publishingRunner });
+    const supervisor = new AgentRunSupervisor({ runner: publishingRunner });
     const prepared = supervisor.prepare(command(), (message): EventAckMessage => ({
       protocolVersion: 1,
       messageId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -314,7 +314,7 @@ describe("LocalSandboxSupervisor", () => {
   });
 
   it("redelivers a locally durable event through a fresh spool store after the ACK path crashes", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-local-supervisor-spool-"));
+    const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-agent-runner-spool-"));
     try {
       const durableStore = new WalEventSpoolStore({ rootDirectory: root });
       const event: EventPublishMessage = {
@@ -346,7 +346,7 @@ describe("LocalSandboxSupervisor", () => {
         },
       };
       let committed: EventPublishMessage | EventPublishBatchMessage | undefined;
-      const supervisor = new LocalSandboxSupervisor({
+      const supervisor = new AgentRunSupervisor({
         runner: publishingRunner,
         eventSpoolFactory: (options) => durableStore.open(options),
       });
@@ -363,7 +363,7 @@ describe("LocalSandboxSupervisor", () => {
 
       const replayed: EventPublishMessage[] = [];
       const restartedStore = new WalEventSpoolStore({ rootDirectory: root });
-      const restartedSupervisor = new LocalSandboxSupervisor({
+      const restartedSupervisor = new AgentRunSupervisor({
         runner: new RecordingRunner(),
         eventSpoolFactory: (options) => restartedStore.open(options),
         eventSpoolRecovery: restartedStore,
@@ -414,7 +414,7 @@ describe("LocalSandboxSupervisor", () => {
         });
       },
     };
-    const supervisor = new LocalSandboxSupervisor({ runner: abortingRunner });
+    const supervisor = new AgentRunSupervisor({ runner: abortingRunner });
     const execute = command();
     const preparedExecution = supervisor.prepare(execute, rejectUnexpectedEvent);
     const execution = preparedExecution.run();
@@ -446,7 +446,7 @@ describe("LocalSandboxSupervisor", () => {
         observed.push({ targetCommandId, text });
       },
     };
-    const supervisor = new LocalSandboxSupervisor({ runner: steeringRunner });
+    const supervisor = new AgentRunSupervisor({ runner: steeringRunner });
     const execute = command();
     const execution = supervisor.prepare(execute, rejectUnexpectedEvent).run();
     const preparedSteer = supervisor.prepareSteer(steer(execute));
@@ -480,7 +480,7 @@ describe("LocalSandboxSupervisor", () => {
         });
       },
     };
-    const supervisor = new LocalSandboxSupervisor({ runner: abortingRunner, clock });
+    const supervisor = new AgentRunSupervisor({ runner: abortingRunner, clock });
     const prepared = supervisor.prepare(command(), rejectUnexpectedEvent);
     const execution = prepared.run();
     void execution.catch(() => undefined);
@@ -546,7 +546,7 @@ describe("LocalSandboxSupervisor", () => {
         });
       },
     };
-    const supervisor = new LocalSandboxSupervisor({
+    const supervisor = new AgentRunSupervisor({
       runner: abortingRunner,
       maxConcurrentSessions: 2,
       clock: () => new Date("2026-07-18T08:00:00.000Z"),
@@ -619,7 +619,7 @@ describe("LocalSandboxSupervisor", () => {
         });
       },
     };
-    const supervisor = new LocalSandboxSupervisor({ runner: abortingRunner });
+    const supervisor = new AgentRunSupervisor({ runner: abortingRunner });
     const prepared = supervisor.prepare(command(), rejectUnexpectedEvent);
     const execution = prepared.run();
     void execution.catch(() => undefined);
@@ -656,7 +656,7 @@ describe("LocalSandboxSupervisor", () => {
     const gate = new Promise<void>((resolvePromise) => {
       releaseRunner = resolvePromise;
     });
-    const supervisor = new LocalSandboxSupervisor({
+    const supervisor = new AgentRunSupervisor({
       runner: {
         async run() {
           await gate;
@@ -682,7 +682,7 @@ describe("LocalSandboxSupervisor", () => {
       finishTeardown = resolvePromise;
     });
     let abortObserved = false;
-    const supervisor = new LocalSandboxSupervisor({
+    const supervisor = new AgentRunSupervisor({
       runner: {
         async run(_command, _publishEvent, signal) {
           if (!signal.aborted) {

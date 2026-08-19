@@ -105,18 +105,18 @@ export {
 } from "./pi-settlement-gate.ts";
 
 export {
-  LocalSandboxSupervisor,
-  LocalSandboxSupervisorError,
+  AgentRunSupervisor,
+  AgentRunSupervisorError,
   type AppliedHeartbeatResult,
-  type LocalSupervisorHeartbeatIdentity,
-  type LocalSandboxSupervisorOptions,
+  type AgentRunHeartbeatIdentity,
+  type AgentRunSupervisorOptions,
   type PreparedTurnCancellation,
   type PreparedTurnExecution,
   type PreparedTurnSteer,
   type RevokedSupervisorAssignments,
   type SupervisorTurnCancellationResult,
   type SupervisorTurnRunner,
-} from "./local-sandbox-supervisor.ts";
+} from "./agent-run-supervisor.ts";
 
 export {
   SandboxAssignmentInventoryError,

@@ -13,7 +13,7 @@
     "./event-projection-barrier": "./src/event-projection-barrier.ts",
     "./grouped-durable-event-ingestor": "./src/grouped-durable-event-ingestor.ts",
     "./http-durable-event-ingestor": "./src/http-durable-event-ingestor.ts",
-    "./local-supervisor-execution-backend": "./src/local-supervisor-execution-backend.ts",
+    "./agent-run-execution-backend": "./src/agent-run-execution-backend.ts",
     "./live-session-event-store": "./src/live-session-event-store.ts",
     "./live-turn-snapshot": "./src/live-turn-snapshot.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",

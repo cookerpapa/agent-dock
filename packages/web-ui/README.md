@@ -1,56 +1,35 @@
 # PiCloud Web UI
 
-This workspace contains the Phase 1 Pi-`/export`-inspired React session page. It
-uses only the public control-plane REST and SSE contracts; it never reads Pi
-JSONL, launches a process, talks to Kubernetes/containerd, or receives a
-provider credential.
+This package is the browser product for PiCloud. It talks only to the public
+REST, resumable SSE and brokered Terminal endpoints; it never opens Pi,
+PostgreSQL, Kafka, Cube or provider credentials directly.
 
-## Behavior
+## Current behavior
 
-- creates or selects a named Workspace and durably submits Pi turns;
-- streams ordered assistant/tool/approval/terminal events;
-- reconnects with explicit `Last-Event-ID` and suppresses replay duplicates;
-- exposes cancellation only after the execution start event;
-- provides a keyboard-resizable desktop tree and mobile sidebar overlay.
-- verifies a pasted tenant credential through `/v1/identity`, displays the
-  tenant/user/role, keeps the token only in memory, clears session state on
-  logout, and disables mutation controls for `viewer`.
-- offers opt-in tenant registration, verifies the one-time owner token before
-  switching security context, and never stores that token in Web Storage or a
-  URL;
-- lists only the authenticated tenant's recent conversations, loads bounded
-  prompt history, and resumes the matching durable SSE suffix when a user
-  switches sessions;
-- exposes an expandable committed Workspace directory and inert source-file
-  preview;
-- supports conversation archive/delete and active Pi steer through idempotent
-  public API operations.
+- username/password registration and HttpOnly-cookie login;
+- tenant-scoped named Workspaces and conversations;
+- resizable conversation list and focused/full Pi Session tree;
+- typed, read-only Subagent child Sessions with context/Workspace-mode labels;
+- ordered assistant, thinking and Tool rendering from durable SSE;
+- active Turn cancellation and steer;
+- conversation forks, recursive subtree deletion and settled-answer tail
+  pruning;
+- committed Workspace directory/source preview and a brokered xterm terminal;
+- a separate administrator settings product for model and Cube proxy policy.
 
-All API resources and events are validated with `@pi-cloud/protocol`. Markdown
-raw HTML is disabled by default, remote images are replaced with inert labels,
-unknown tool values are rendered as bounded text, and Workspace/Artifact
-preview is escaped UTF-8 text capped at 256 KiB. Binary content is labelled and
-never embedded as active content. The client does not write request bodies,
-events, tokens, or credential references to the console.
+Tail pruning changes conversation context only. It retains the selected final
+Assistant entry, hides later Turns/branches/Subagents and lets the next Pi Run
+continue from that entry. Workspace files remain at their current revision.
 
-## Run and verify
+All public resources and events are validated with `@pi-cloud/protocol` before
+entering React state. Markdown raw HTML is disabled, remote images are inert,
+unknown Tool values are bounded, and file preview accepts at most 512 KiB of
+valid UTF-8. The browser never logs request bodies, events, tokens or credential
+references.
 
-From the repository root, start the supported persistent loopback product:
+## Verify
 
-```bash
-npm run demo
-```
-
-This is an alias for `npm run production:deploy`; it does not start a separate
-lower-security or browser-owned Agent runtime.
-
-For frontend-only work, start a compatible API on `127.0.0.1:3100` and run:
-
-```bash
-npm run dev --workspace @pi-cloud/web-ui
-```
-
-The production bundle, strict type check, and deterministic tests are:
+From the repository root:
 
 ```bash
 npm run build --workspace @pi-cloud/web-ui
@@ -58,9 +37,6 @@ npm run typecheck --workspace @pi-cloud/web-ui
 npm run test --workspace @pi-cloud/web-ui
 ```
 
-PostgreSQL SessionStorage permits later turns on the same Session while
-Workspace checkpoints restore files into the Session's Cube activation. Recent discovery
-survives a page reload after the user presents the token again. Arbitrary Git
-URLs, executable live previews, Diff/Artifact/test navigation, Fork/Rollback,
-GitHub PR delivery, organization/RBAC administration, public identity recovery,
-and Internet-facing anonymous SaaS remain excluded from the Web product.
+The supported persistent product is started with `npm run production:up` (or
+installed with `./install.sh`). Frontend-only development may point Vite at a
+compatible loopback API using the package's existing `dev` command.

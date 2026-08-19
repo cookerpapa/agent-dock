@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectActiveOutlineTurn } from "../src/ConversationOutline.tsx";
+import { selectActiveTurn } from "../src/active-turn-selection.ts";
 
 const anchors = [
   { turnId: "turn-1", top: 40 },
@@ -7,10 +7,10 @@ const anchors = [
   { turnId: "turn-3", top: 520 },
 ] as const;
 
-describe("conversation outline selection", () => {
-  it("selects the latest turn above the reading line", () => {
+describe("active conversation-turn selection", () => {
+  it("selects the latest Turn above the reading line", () => {
     expect(
-      selectActiveOutlineTurn({
+      selectActiveTurn({
         anchors,
         clientHeight: 600,
         scrollHeight: 1_600,
@@ -20,9 +20,9 @@ describe("conversation outline selection", () => {
     ).toBe("turn-2");
   });
 
-  it("selects the last turn at the bottom even when it cannot align with the reading line", () => {
+  it("selects the final Turn at the scroll boundary", () => {
     expect(
-      selectActiveOutlineTurn({
+      selectActiveTurn({
         anchors,
         clientHeight: 600,
         scrollHeight: 1_600,
@@ -30,11 +30,8 @@ describe("conversation outline selection", () => {
         scrollerTop: 0,
       }),
     ).toBe("turn-3");
-  });
-
-  it("selects the latest turn when the transcript fits without scrolling", () => {
     expect(
-      selectActiveOutlineTurn({
+      selectActiveTurn({
         anchors,
         clientHeight: 800,
         scrollHeight: 700,

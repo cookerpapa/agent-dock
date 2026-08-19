@@ -18,7 +18,7 @@ import {
 } from "@pi-cloud/workspace-runtime";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { SupervisorTurnRunner } from "./local-sandbox-supervisor.ts";
+import type { SupervisorTurnRunner } from "./agent-run-supervisor.ts";
 import { PiTurnError, type PiEventPublisher, type PiTurnResult } from "./pi-turn-runtime.ts";
 import {
   PiCloudTurnRunner,
