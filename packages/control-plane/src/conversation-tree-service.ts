@@ -35,6 +35,8 @@ type PiEntryRow = {
   customType: string | null;
   timestampMs: string;
   payload: Record<string, unknown>;
+  sourceSessionId: string;
+  sourceEntryId: string;
 };
 
 type CompletedTurnRow = {
@@ -187,7 +189,7 @@ async function sessionEntries(
 ): Promise<Map<string, PiEntryRow[]>> {
   if (sessionIds.length === 0) return new Map();
   const rows = await database
-    .selectFrom("pi_session_entries")
+    .selectFrom("pi_session_visible_entries")
     .select([
       "session_id",
       "id",
@@ -197,6 +199,8 @@ async function sessionEntries(
       "custom_type",
       "timestamp_ms",
       "payload",
+      "source_session_id",
+      "source_entry_id",
     ])
     .where("tenant_id", "=", tenantId)
     .where("session_id", "in", sessionIds)
@@ -214,6 +218,8 @@ async function sessionEntries(
       customType: row.custom_type,
       timestampMs: row.timestamp_ms,
       payload: row.payload,
+      sourceSessionId: row.source_session_id,
+      sourceEntryId: row.source_entry_id,
     });
     grouped.set(row.session_id, entries);
   }
@@ -1066,18 +1072,9 @@ export class ConversationTreeService {
         const createdAt = new Date();
         const copiedEntries = copiedBranch.map((entry, index) => {
           const sequence = index + 1;
-          const timestamp = safeInteger(entry.timestampMs, "Pi entry timestamp");
           return {
             ...entry,
             sequence,
-            completePayload: {
-              ...structuredClone(entry.payload),
-              id: entry.id,
-              type: entry.type,
-              parentId: entry.parentId,
-              seq: sequence,
-              timestamp,
-            },
           };
         });
 
@@ -1116,30 +1113,19 @@ export class ConversationTreeService {
           })
           .executeTakeFirstOrThrow();
         await transaction
-          .insertInto("pi_session_entries")
+          .insertInto("pi_session_entry_refs")
           .values(
             copiedEntries.map((entry) => ({
               tenant_id: tenantId,
               session_id: childSessionId,
               id: entry.id,
               seq: entry.sequence,
+              source_session_id: entry.sourceSessionId,
+              source_entry_id: entry.sourceEntryId,
               parent_id: entry.parentId,
               type: entry.type,
               custom_type: entry.customType,
               timestamp_ms: entry.timestampMs,
-              payload: entry.completePayload,
-            })),
-          )
-          .execute();
-        await transaction
-          .insertInto("pi_session_log")
-          .values(
-            copiedEntries.map((entry) => ({
-              tenant_id: tenantId,
-              session_id: childSessionId,
-              seq: entry.sequence,
-              kind: "entry",
-              payload: { entry: entry.completePayload },
             })),
           )
           .execute();

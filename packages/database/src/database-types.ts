@@ -1095,6 +1095,25 @@ export interface PiSessionEntryTable {
   payload: JsonObject;
 }
 
+export interface PiSessionEntryRefTable {
+  tenant_id: string;
+  session_id: string;
+  id: string;
+  seq: Int8;
+  source_session_id: string;
+  source_entry_id: string;
+  parent_id: string | null;
+  type: string;
+  custom_type: string | null;
+  timestamp_ms: Int8;
+}
+
+export interface PiSessionVisibleEntryTable extends PiSessionEntryTable {
+  source_session_id: string;
+  source_entry_id: string;
+  inherited: boolean;
+}
+
 export interface PiSessionRecordTable {
   tenant_id: string;
   session_id: string;
@@ -1195,6 +1214,8 @@ export interface Database {
   pi_sessions: PiSessionTable;
   pi_session_lanes: PiSessionLaneTable;
   pi_session_entries: PiSessionEntryTable;
+  pi_session_entry_refs: PiSessionEntryRefTable;
+  pi_session_visible_entries: PiSessionVisibleEntryTable;
   pi_session_records: PiSessionRecordTable;
   pi_session_labels: PiSessionLabelTable;
   pi_session_log: PiSessionLogTable;

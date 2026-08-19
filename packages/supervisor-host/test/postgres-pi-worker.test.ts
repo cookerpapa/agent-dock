@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { selectPiWorkerExecutionReferences } from "../src/postgres-pi-worker.ts";
+import {
+  canPrioritizeLocalSubagent,
+  selectPiWorkerExecutionReferences,
+} from "../src/postgres-pi-worker.ts";
 
 describe("PostgreSQL Pi Worker admission", () => {
   it("reserves one multi-slot Worker lane for durable Subagent children", () => {
@@ -28,5 +31,24 @@ describe("PostgreSQL Pi Worker admission", () => {
     expect(
       selectPiWorkerExecutionReferences([{ commandId: "parent", subagent: false }], [], 1),
     ).toEqual([{ commandId: "parent", subagent: false }]);
+  });
+
+  it("offers local Child work only while this Worker has immediate capacity", () => {
+    expect(canPrioritizeLocalSubagent("child", [{ commandId: "parent", subagent: false }], 2)).toBe(
+      true,
+    );
+    expect(
+      canPrioritizeLocalSubagent(
+        "child",
+        [
+          { commandId: "parent", subagent: false },
+          { commandId: "other-child", subagent: true },
+        ],
+        2,
+      ),
+    ).toBe(false);
+    expect(canPrioritizeLocalSubagent("child", [{ commandId: "child", subagent: true }], 2)).toBe(
+      false,
+    );
   });
 });

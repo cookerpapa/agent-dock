@@ -810,13 +810,21 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
       }),
     ]);
     const copiedEntries = await database
-      .selectFrom("pi_session_entries")
+      .selectFrom("pi_session_entry_refs")
       .select("id")
       .where("tenant_id", "=", alpha.tenantId)
       .where("session_id", "=", forked.session.sessionId)
       .orderBy("seq")
       .execute();
     expect(copiedEntries.map((entry) => entry.id)).toEqual([userEntryId, assistantEntryId]);
+    await expect(
+      database
+        .selectFrom("pi_session_entries")
+        .select(({ fn }) => fn.countAll<string>().as("count"))
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("session_id", "=", forked.session.sessionId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ count: "0" });
     expect(
       await database
         .selectFrom("pi_session_log")
@@ -826,8 +834,6 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
         .orderBy("seq")
         .execute(),
     ).toEqual([
-      { seq: "1", kind: "entry" },
-      { seq: "2", kind: "entry" },
       { seq: "3", kind: "lane" },
       { seq: "4", kind: "fact" },
     ]);

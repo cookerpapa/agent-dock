@@ -20,10 +20,10 @@ PiCloud adopts Pi's `/fork` product semantics:
 
 - a fork starts at a settled, final assistant entry;
 - it creates a new product Session and a new Pi Session;
-- the new Pi Session copies only the selected root-to-leaf branch from the
-  PostgreSQL SessionStorage tables;
-- copied entries keep their Pi entry IDs and parent links, while the child has
-  a fresh append sequence and no inherited open operation records;
+- the new Pi Session records copy-on-write references to the selected
+  root-to-leaf branch rather than copying immutable JSON payloads;
+- referenced entries keep their Pi entry IDs and parent links, while the child
+  has a fresh append sequence and no inherited open operation records;
 - the child continues to use the same Workspace as its parent. The fork changes
   conversation context; it does not rewind Workspace bytes;
 - Workspace serialization and Tool fencing remain unchanged.
@@ -34,7 +34,7 @@ assistant nodes. It supports a current-branch view and a whole-family view.
 Pi entry payloads remain an internal storage detail.
 
 Fork creation is transactional and idempotent. The child product Session,
-event cursor, copied Pi branch and fork operation commit together. A child
+event cursor, referenced Pi branch and fork operation commit together. A child
 conversation renders the inherited product transcript followed by its own
 Turns, while live SSE resumes only from the child Session's event cursor.
 

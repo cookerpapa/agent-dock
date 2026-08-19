@@ -36,8 +36,9 @@ execution path and failure semantics.
 
 - Every healthy Pi Worker competes for one shared PostgreSQL ready-Run queue.
   `LISTEN/NOTIFY` reduces wake-up latency; bounded polling preserves
-  correctness. There is no Temporal scheduler, execution Cell or Worker
-  affinity.
+  correctness. There is no Temporal scheduler, execution Cell or persistent
+  Worker affinity. A newly created Child may race for an immediately free slot
+  on its parent's Worker, then falls back to the shared queue without waiting.
 - A transactional claim creates a RunAttempt and monotonically fenced execution
   authority. The recorded Worker identity is temporary ownership, never a
   routing preference.
@@ -46,6 +47,9 @@ execution path and failure semantics.
   executes the Agent Loop and appends complete Pi messages incrementally.
   Cold Sessions retain no dedicated process and never download a lifetime
   JSONL transcript.
+- Fork context uses copy-on-write Entry references plus a bounded per-Worker
+  immutable-payload cache. Local Child placement can avoid retransferring the
+  inherited payload; remote placement remains a normal PostgreSQL read.
 - Pi remains responsible for model messages, Tool selection and compaction.
   Pi Cloud adds cloud admission, interruption/world-state facts, active steer,
   remote Tool routing and terminal settlement around Pi's public primitives.

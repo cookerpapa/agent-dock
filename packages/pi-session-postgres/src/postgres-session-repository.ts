@@ -2,7 +2,6 @@ import type { Database } from "@pi-cloud/database";
 import {
   Session,
   SessionError,
-  type Entry,
   type ForkOptions,
   type SessionCreateOptions,
   type SessionRepo,
@@ -10,6 +9,7 @@ import {
 import { uuidv7 } from "@earendil-works/pi-ai";
 import { sql, type Kysely, type Transaction } from "kysely";
 import type { ExecutionAuthority } from "./execution-authority.ts";
+import type { PostgresPiSessionEntryPayloadCache } from "./session-entry-payload-cache.ts";
 import {
   PostgresPiSessionStorage,
   type PiCloudPiSessionMetadata,
@@ -19,18 +19,20 @@ export type PostgresPiSessionRepositoryOptions = {
   database: Kysely<Database>;
   tenantId: string;
   authority?: ExecutionAuthority;
+  entryPayloadCache?: PostgresPiSessionEntryPayloadCache;
 };
 
 export type PostgresPiSessionCreateOptions = SessionCreateOptions;
 
-type StoredEntryRow = {
+type StoredEntryReferenceRow = {
   id: string;
   seq: string;
   parent_id: string | null;
   type: string;
   custom_type: string | null;
   timestamp_ms: string;
-  payload: Record<string, unknown>;
+  source_session_id: string;
+  source_entry_id: string;
 };
 
 function safeInteger(value: string | number, name: string): number {
@@ -39,16 +41,6 @@ function safeInteger(value: string | number, name: string): number {
     throw new SessionError("storage", `${name} is outside the JavaScript safe-integer range`);
   }
   return parsed;
-}
-
-function completeEntry(row: StoredEntryRow, sequence: number): Entry {
-  return {
-    ...structuredClone(row.payload),
-    id: row.id,
-    parentId: row.parent_id,
-    seq: sequence,
-    timestamp: safeInteger(row.timestamp_ms, "Pi entry timestamp"),
-  } as Entry;
 }
 
 /** Tenant-scoped implementation of Pi 0.84.1's public SessionRepo port. */
@@ -60,11 +52,13 @@ export class PostgresPiSessionRepository implements SessionRepo<
   readonly #database: Kysely<Database>;
   readonly #tenantId: string;
   readonly #authority: ExecutionAuthority | undefined;
+  readonly #entryPayloadCache: PostgresPiSessionEntryPayloadCache | undefined;
 
   constructor(options: PostgresPiSessionRepositoryOptions) {
     this.#database = options.database;
     this.#tenantId = options.tenantId;
     this.#authority = options.authority;
+    this.#entryPayloadCache = options.entryPayloadCache;
   }
 
   async create(
@@ -78,6 +72,9 @@ export class PostgresPiSessionRepository implements SessionRepo<
         ? {}
         : { parentSessionId: options.parentSessionId }),
       ...(this.#authority === undefined ? {} : { authority: this.#authority }),
+      ...(this.#entryPayloadCache === undefined
+        ? {}
+        : { entryPayloadCache: this.#entryPayloadCache }),
     });
     return storage.asSession();
   }
@@ -165,6 +162,9 @@ export class PostgresPiSessionRepository implements SessionRepo<
       tenantId: this.#tenantId,
       sessionId,
       ...(this.#authority === undefined ? {} : { authority: this.#authority }),
+      ...(this.#entryPayloadCache === undefined
+        ? {}
+        : { entryPayloadCache: this.#entryPayloadCache }),
     });
   }
 
@@ -212,12 +212,21 @@ export async function forkPostgresPiSessionInTransaction(
     throw new SessionError("already_exists", `Pi Session already exists: ${destinationId}`);
   }
 
-  let entries: StoredEntryRow[];
+  let entries: StoredEntryReferenceRow[];
   let lanes: { lane: string; leaf_id: string | null }[];
   if (options.scope === "tree") {
     entries = await transaction
-      .selectFrom("pi_session_entries")
-      .select(["id", "seq", "parent_id", "type", "custom_type", "timestamp_ms", "payload"])
+      .selectFrom("pi_session_visible_entries")
+      .select([
+        "id",
+        "seq",
+        "parent_id",
+        "type",
+        "custom_type",
+        "timestamp_ms",
+        "source_session_id",
+        "source_entry_id",
+      ])
       .where("tenant_id", "=", tenantId)
       .where("session_id", "=", sourceId)
       .orderBy("seq", "asc")
@@ -241,7 +250,7 @@ export async function forkPostgresPiSessionInTransaction(
     let targetId: string | null = null;
     if (selectedId !== null) {
       const selected = await transaction
-        .selectFrom("pi_session_entries")
+        .selectFrom("pi_session_visible_entries")
         .select(["id", "parent_id", "type"])
         .where("tenant_id", "=", tenantId)
         .where("session_id", "=", sourceId)
@@ -259,10 +268,17 @@ export async function forkPostgresPiSessionInTransaction(
     if (targetId === null) {
       entries = [];
     } else {
-      const result = await sql<StoredEntryRow>`
+      const result = await sql<StoredEntryReferenceRow>`
           with recursive branch as (
-            select id, seq, parent_id, type, custom_type, timestamp_ms, payload
-              from pi_session_entries
+            select id,
+                   seq,
+                   parent_id,
+                   type,
+                   custom_type,
+                   timestamp_ms,
+                   source_session_id,
+                   source_entry_id
+              from pi_session_visible_entries
              where tenant_id = ${tenantId}::uuid
                and session_id = ${sourceId}::text
                and id = ${targetId}::text
@@ -273,14 +289,22 @@ export async function forkPostgresPiSessionInTransaction(
                    parent.type,
                    parent.custom_type,
                    parent.timestamp_ms,
-                   parent.payload
-              from pi_session_entries parent
+                   parent.source_session_id,
+                   parent.source_entry_id
+              from pi_session_visible_entries parent
               join branch child
                 on parent.tenant_id = ${tenantId}::uuid
                and parent.session_id = ${sourceId}::text
                and parent.id = child.parent_id
           )
-          select id, seq, parent_id, type, custom_type, timestamp_ms, payload
+          select id,
+                 seq,
+                 parent_id,
+                 type,
+                 custom_type,
+                 timestamp_ms,
+                 source_session_id,
+                 source_entry_id
             from branch
            order by seq asc
         `.execute(transaction);
@@ -290,33 +314,22 @@ export async function forkPostgresPiSessionInTransaction(
   }
 
   let nextSequence = 1;
-  const copiedEntries = entries.map((row) => completeEntry(row, nextSequence++));
-  if (copiedEntries.length > 0) {
+  const sharedEntries = entries.map((row) => ({ ...row, localSeq: nextSequence++ }));
+  if (sharedEntries.length > 0) {
     await transaction
-      .insertInto("pi_session_entries")
+      .insertInto("pi_session_entry_refs")
       .values(
-        copiedEntries.map((entry) => ({
+        sharedEntries.map((entry) => ({
           tenant_id: tenantId,
           session_id: destinationId,
           id: entry.id,
-          seq: entry.seq,
-          parent_id: entry.parentId,
+          seq: entry.localSeq,
+          source_session_id: entry.source_session_id,
+          source_entry_id: entry.source_entry_id,
+          parent_id: entry.parent_id,
           type: entry.type,
-          custom_type: entry.type === "custom" ? entry.customType : null,
-          timestamp_ms: entry.timestamp,
-          payload: entry as unknown as Record<string, unknown>,
-        })),
-      )
-      .execute();
-    await transaction
-      .insertInto("pi_session_log")
-      .values(
-        copiedEntries.map((entry) => ({
-          tenant_id: tenantId,
-          session_id: destinationId,
-          seq: entry.seq,
-          kind: "entry",
-          payload: { entry },
+          custom_type: entry.custom_type,
+          timestamp_ms: entry.timestamp_ms,
         })),
       )
       .execute();
@@ -359,7 +372,7 @@ export async function forkPostgresPiSessionInTransaction(
       .executeTakeFirst();
   }
 
-  const copiedIds = copiedEntries.map((entry) => entry.id);
+  const copiedIds = sharedEntries.map((entry) => entry.id);
   const labels =
     copiedIds.length === 0
       ? []
@@ -371,7 +384,7 @@ export async function forkPostgresPiSessionInTransaction(
           .where("target_id", "in", copiedIds)
           .execute();
   const labelsByTarget = new Map(labels.map((label) => [label.target_id, label.label]));
-  for (const entry of copiedEntries) {
+  for (const entry of sharedEntries) {
     const label = labelsByTarget.get(entry.id);
     if (label === undefined) continue;
     const sequence = nextSequence++;

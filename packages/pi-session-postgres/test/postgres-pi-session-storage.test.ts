@@ -3,7 +3,11 @@ import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { createDatabase, runMigrations, type Database } from "@pi-cloud/database";
 import type { Kysely } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PostgresPiSessionRepository, PostgresPiSessionStorage } from "../src/index.ts";
+import {
+  PostgresPiSessionEntryPayloadCache,
+  PostgresPiSessionRepository,
+  PostgresPiSessionStorage,
+} from "../src/index.ts";
 
 const TENANT_ID = "d1000000-0000-4000-8000-000000000001";
 const SESSION_ID = "d1000000-0000-4000-8000-000000000002";
@@ -141,6 +145,75 @@ describe.sequential("PostgresPiSessionStorage", () => {
     await expect(storage.setName("rejected")).rejects.toThrow("stale authority");
     expect(receivedTransaction).toBe(true);
     await expect(storage.getName()).resolves.toBe("durable session");
+  });
+
+  it("forks by reference without copying inherited JSON payloads", async () => {
+    const entryPayloadCache = new PostgresPiSessionEntryPayloadCache({
+      maximumBytes: 1024 * 1024,
+      maximumEntryBytes: 256 * 1024,
+    });
+    const repository = new PostgresPiSessionRepository({
+      database,
+      tenantId: TENANT_ID,
+      entryPayloadCache,
+    });
+    const source = await repository.openById(SESSION_ID);
+    await source.view("main").findEntriesOnBranch();
+    const warmed = entryPayloadCache.snapshot();
+    expect(warmed.entries).toBe(4);
+    const fork = await repository.fork(await source.getMetadata(), {
+      id: "shared-entry-fork",
+      scope: "branch",
+    });
+    const inherited = await database
+      .selectFrom("pi_session_entry_refs")
+      .select(["id", "source_session_id as sourceSessionId"])
+      .where("tenant_id", "=", TENANT_ID)
+      .where("session_id", "=", "shared-entry-fork")
+      .orderBy("seq")
+      .execute();
+    expect(inherited).toHaveLength(4);
+    expect(new Set(inherited.map((entry) => entry.sourceSessionId))).toEqual(new Set([SESSION_ID]));
+    await expect(
+      database
+        .selectFrom("pi_session_entries")
+        .select(({ fn }) => fn.countAll<string>().as("count"))
+        .where("tenant_id", "=", TENANT_ID)
+        .where("session_id", "=", "shared-entry-fork")
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ count: "0" });
+    expect((await fork.view("main").findEntriesOnBranch()).map((entry) => entry.id)).toEqual(
+      inherited.map((entry) => entry.id).reverse(),
+    );
+    expect(entryPayloadCache.snapshot()).toMatchObject({
+      misses: warmed.misses,
+      hits: warmed.hits + 4,
+    });
+    const ownEntryId = await fork.appendMessage({
+      role: "user",
+      content: "fork-only delta",
+      timestamp: 1_700_000_000_003,
+    });
+    await expect(fork.getEntry(ownEntryId)).resolves.toMatchObject({
+      message: { role: "user", content: "fork-only delta" },
+    });
+    expect((await fork.getLog()).filter((item) => item.kind === "entry")).toHaveLength(5);
+
+    const nested = await repository.fork(await fork.getMetadata(), {
+      id: "nested-shared-entry-fork",
+      scope: "branch",
+    });
+    await expect(
+      database
+        .selectFrom("pi_session_entry_refs")
+        .select(({ fn }) => fn.countAll<string>().as("count"))
+        .where("tenant_id", "=", TENANT_ID)
+        .where("session_id", "=", "nested-shared-entry-fork")
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ count: "5" });
+    expect((await nested.view("main").findEntriesOnBranch()).map((entry) => entry.id)).toContain(
+      ownEntryId,
+    );
   });
 
   it("matches Pi branch ordering, bounds, filters and limits in one recursive query", async () => {

@@ -1634,7 +1634,7 @@ export class ControlPlaneStore {
       );
     }
     const rows = await this.#database
-      .selectFrom("pi_session_entries")
+      .selectFrom("pi_session_visible_entries")
       .select(["id", "timestamp_ms as timestampMs", "payload"])
       .where("tenant_id", "=", this.#tenantId)
       .where("session_id", "=", sessionId)

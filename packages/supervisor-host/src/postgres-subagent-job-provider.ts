@@ -46,6 +46,7 @@ export type CloudSubagentJobHandle = Readonly<{
   executionId: string;
   childSessionId: string;
   childRunId: string;
+  childCommandId: string;
   state: SubagentExecutionState;
 }>;
 
@@ -235,13 +236,25 @@ export class PostgresSubagentJobProvider {
 
     const pending = await this.#database.transaction().execute(async (transaction) => {
       const replay = await transaction
-        .selectFrom("subagent_executions")
-        .select(["id", "child_session_id", "child_run_id", "state", "request_sha256"])
-        .where("tenant_id", "=", input.tenantId)
-        .where("parent_run_id", "=", input.parentRunId)
-        .where("parent_tool_call_id", "=", input.parentToolCallId)
-        .where("workflow_run_id", "=", input.workflowRunId)
-        .where("step_index", "=", input.stepIndex)
+        .selectFrom("subagent_executions as execution")
+        .innerJoin("runs as child_run", (join) =>
+          join
+            .onRef("child_run.tenant_id", "=", "execution.tenant_id")
+            .onRef("child_run.id", "=", "execution.child_run_id"),
+        )
+        .select([
+          "execution.id",
+          "execution.child_session_id",
+          "execution.child_run_id",
+          "execution.state",
+          "execution.request_sha256",
+          "child_run.command_id as childCommandId",
+        ])
+        .where("execution.tenant_id", "=", input.tenantId)
+        .where("execution.parent_run_id", "=", input.parentRunId)
+        .where("execution.parent_tool_call_id", "=", input.parentToolCallId)
+        .where("execution.workflow_run_id", "=", input.workflowRunId)
+        .where("execution.step_index", "=", input.stepIndex)
         .executeTakeFirst();
 
       const parent = await transaction
@@ -319,6 +332,7 @@ export class PostgresSubagentJobProvider {
           executionId: replay.id,
           childSessionId: replay.child_session_id,
           childRunId: replay.child_run_id,
+          childCommandId: replay.childCommandId,
           state: replay.state,
           prepareIsolated: replay.state === "preparing",
         };
@@ -474,13 +488,13 @@ export class PostgresSubagentJobProvider {
           }>`
             with recursive branch as (
               select id, seq, parent_id, type, payload
-                from pi_session_entries
+                from pi_session_visible_entries
                where tenant_id = ${input.tenantId}::uuid
                  and session_id = ${input.parentSessionId}
                  and id = ${leaf.leaf_id}
               union all
               select parent.id, parent.seq, parent.parent_id, parent.type, parent.payload
-                from pi_session_entries parent
+                from pi_session_visible_entries parent
                 join branch child on child.parent_id = parent.id
                where parent.tenant_id = ${input.tenantId}::uuid
                  and parent.session_id = ${input.parentSessionId}
@@ -658,6 +672,7 @@ export class PostgresSubagentJobProvider {
         executionId,
         childSessionId,
         childRunId,
+        childCommandId,
         state: input.workspaceMode === "isolated" ? ("preparing" as const) : ("queued" as const),
         prepareIsolated: input.workspaceMode === "isolated",
       };
@@ -916,6 +931,7 @@ export class PostgresSubagentJobProvider {
         "execution.id as executionId",
         "execution.child_session_id as childSessionId",
         "execution.child_run_id as childRunId",
+        "child_run.command_id as childCommandId",
         "execution.child_workspace_id as childWorkspaceId",
         "execution.workspace_mode as workspaceMode",
         "execution.state as executionState",
@@ -934,6 +950,7 @@ export class PostgresSubagentJobProvider {
         executionId: row.executionId,
         childSessionId: row.childSessionId,
         childRunId: row.childRunId,
+        childCommandId: row.childCommandId,
         state: "preparing",
       };
     }
@@ -977,6 +994,7 @@ export class PostgresSubagentJobProvider {
       executionId: row.executionId,
       childSessionId: row.childSessionId,
       childRunId: row.childRunId,
+      childCommandId: row.childCommandId,
       state,
       ...(row.failureCode === null ? {} : { failureCode: row.failureCode }),
       ...(row.failureMessage === null ? {} : { failureMessage: row.failureMessage }),
@@ -1226,6 +1244,13 @@ export class PostgresSubagentJobProvider {
           executionId: row.id,
           childSessionId: row.childSessionId,
           childRunId: row.childRunId,
+          childCommandId: await this.#database
+            .selectFrom("runs")
+            .select("command_id")
+            .where("tenant_id", "=", row.tenantId)
+            .where("id", "=", row.childRunId)
+            .executeTakeFirstOrThrow()
+            .then((run) => run.command_id),
           state: row.state,
         },
         "workspace_fork_abandoned",

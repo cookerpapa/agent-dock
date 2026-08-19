@@ -3,6 +3,7 @@ import type { Session } from "@earendil-works/pi-agent-core";
 import type { Kysely } from "kysely";
 import { PostgresRunExecutionAuthority } from "./postgres-execution-authority.ts";
 import { PostgresPiSessionRepository } from "./postgres-session-repository.ts";
+import type { PostgresPiSessionEntryPayloadCache } from "./session-entry-payload-cache.ts";
 
 export type CloudAgentExecutionScope = Readonly<{
   tenantId: string;
@@ -18,6 +19,7 @@ export type OpenPostgresDurableAgentSessionOptions = Readonly<{
   fencingToken: number;
   pollIntervalMs?: number;
   clock?: () => Date;
+  entryPayloadCache?: PostgresPiSessionEntryPayloadCache;
 }>;
 
 export type PostgresDurableAgentSession = Readonly<{
@@ -50,6 +52,9 @@ export async function openPostgresDurableAgentSession(
       database: options.database,
       tenantId: options.scope.tenantId,
       authority,
+      ...(options.entryPayloadCache === undefined
+        ? {}
+        : { entryPayloadCache: options.entryPayloadCache }),
     });
     const session = await repository.openOrCreate({ id: options.scope.sessionId });
     return {

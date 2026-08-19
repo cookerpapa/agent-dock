@@ -1,3 +1,4 @@
+export { PostgresPiSessionEntryPayloadCache } from "./session-entry-payload-cache.ts";
 export {
   PostgresPiSessionStorage,
   type PiCloudPiSessionMetadata,

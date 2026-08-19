@@ -43,6 +43,17 @@ export function selectPiWorkerExecutionReferences(
   return selected;
 }
 
+export function canPrioritizeLocalSubagent(
+  commandId: string,
+  active: readonly ExecutionReference[],
+  maximumConcurrentRuns: number,
+): boolean {
+  positiveInteger(maximumConcurrentRuns, "maximumConcurrentRuns");
+  return (
+    !active.some((entry) => entry.commandId === commandId) && active.length < maximumConcurrentRuns
+  );
+}
+
 type CancellationReference = {
   targetCommandId: string;
 };
@@ -169,6 +180,25 @@ export class PostgresPiWorker {
     await Promise.allSettled([...this.#activeCommands.values()].map((entry) => entry.execution));
     await this.#listener?.end().catch(() => undefined);
     this.#state = "stopped";
+  }
+
+  prioritizeSubagent(commandId: string): boolean {
+    bounded(commandId, "Subagent commandId", 256);
+    if (this.#state !== "running" || !this.#canClaimRuns()) return false;
+    const active = [...this.#activeCommands.entries()].map(([activeCommandId, entry]) => ({
+      commandId: activeCommandId,
+      subagent: entry.subagent,
+    }));
+    if (!canPrioritizeLocalSubagent(commandId, active, this.#maximumConcurrentRuns)) return false;
+    const execution = (async () => {
+      if (!(await this.#admitRunClaims())) return;
+      await this.#execute({ commandId, subagent: true });
+    })().finally(() => {
+      this.#activeCommands.delete(commandId);
+      this.#wake?.();
+    });
+    this.#activeCommands.set(commandId, { execution, subagent: true });
+    return true;
   }
 
   async #startListener(): Promise<void> {

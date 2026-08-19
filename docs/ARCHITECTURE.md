@@ -22,6 +22,9 @@ The current Worker invariant is deliberately precise:
 - there is one shared PostgreSQL ready-Run queue;
 - no user, Session or Workspace stores a preferred Worker;
 - any healthy Worker with a free slot may claim the next eligible Run;
+- a Worker that creates a Child Run may make one immediate local claim attempt
+  when its reserved Child slot is free; this is an opportunistic race, never a
+  queued or persisted affinity decision;
 - the Worker/Supervisor identity on a live RunAttempt is ephemeral execution
   ownership used for heartbeat, cancellation and fencing, not affinity;
 - later Turns restore their bounded Pi context from PostgreSQL and therefore
@@ -86,6 +89,13 @@ Pi identifiers are stored as `text`; PiCloud product UUIDs are one valid
 subset. Tenant isolation and execution-authority fencing are additional cloud
 contracts layered around the official port.
 
+Forked Pi entries use copy-on-write references. PostgreSQL stores the selected
+branch's IDs, parent links and local sequence in the Child, while immutable
+JSON payloads remain in their canonical source rows. A per-Worker 64 MiB LRU
+caches those payloads. A colocated Child therefore reuses context already read
+by its parent; a remote Worker misses safely and fetches the same canonical
+rows. Cache contents are never authoritative and are not required for recovery.
+
 The production coding adapter is a deliberately thin `CloudAgentRuntime`. It
 loads only the newest native compaction plus its active suffix, constructs one
 Pi `Agent` for the active Run, and appends complete user, assistant and Tool
@@ -96,9 +106,9 @@ model-context authority.
 
 Human tree navigation is a bounded projection of the same parent-linked Pi
 entries. Forking a settled final response creates a child product/Pi Session
-and transactionally copies the selected root-to-leaf branch. The child shares
-the Workspace and begins with no open operation records. Tree navigation is
-not exposed to the model or added to its context.
+and transactionally records references to the selected root-to-leaf branch.
+The child shares the Workspace and begins with no open operation records. Tree
+navigation is not exposed to the model or added to its context.
 
 Deleting a parent archives its whole human descendant subtree and their typed
 Subagent Sessions after proving every Run has settled. Pruning after a settled

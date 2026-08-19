@@ -70,6 +70,7 @@ import * as subagentRunSystemPrompt from "./068_subagent_run_system_prompt.ts";
 import * as isolatedSubagentWorkspaces from "./069_isolated_subagent_workspaces.ts";
 import * as conversationTailPruning from "./070_conversation_tail_pruning.ts";
 import * as subagentSupervisorChannel from "./071_subagent_supervisor_channel.ts";
+import * as sharedPiSessionEntries from "./072_shared_pi_session_entries.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -145,6 +146,7 @@ export const migrationProvider: MigrationProvider = {
       "069_isolated_subagent_workspaces": isolatedSubagentWorkspaces,
       "070_conversation_tail_pruning": conversationTailPruning,
       "071_subagent_supervisor_channel": subagentSupervisorChannel,
+      "072_shared_pi_session_entries": sharedPiSessionEntries,
     };
   },
 };
@@ -409,3 +411,7 @@ export {
   down as downSubagentSupervisorChannel,
   up as upSubagentSupervisorChannel,
 } from "./071_subagent_supervisor_channel.ts";
+export {
+  down as downSharedPiSessionEntries,
+  up as upSharedPiSessionEntries,
+} from "./072_shared_pi_session_entries.ts";

@@ -21,7 +21,10 @@ import { HttpTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/termina
 import { createDatabase, type Database } from "@pi-cloud/database";
 import { GitHubGatewayClient } from "@pi-cloud/github-gateway";
 import { operationalLog, type PiCloudMetrics } from "@pi-cloud/observability";
-import { openPostgresDurableAgentSession } from "@pi-cloud/pi-session-postgres";
+import {
+  PostgresPiSessionEntryPayloadCache,
+  openPostgresDurableAgentSession,
+} from "@pi-cloud/pi-session-postgres";
 import {
   parseCloudToolCapabilitySnapshot,
   type SupervisorBootProvisionRequest,
@@ -80,6 +83,7 @@ export type SupervisorRunWorker = {
   readonly state: PostgresPiWorkerState;
   start(): Promise<void>;
   stop(): Promise<void>;
+  prioritizeSubagent?(commandId: string): boolean;
 };
 
 function subagentExternalState(state: string) {
@@ -409,6 +413,7 @@ export class PiWorkerRuntime {
       await modelGateway.start();
       this.#modelGateway = modelGateway;
       const runWorkerIdentity = `postgres:${identity.supervisorId}:${identity.bootId}`;
+      const sessionEntryPayloadCache = new PostgresPiSessionEntryPayloadCache();
       const subagentJobs = new PostgresSubagentJobProvider({
         database: this.#database,
         forkWorkspace: (request) => this.#toolBroker.forkWorkspace(request),
@@ -436,6 +441,7 @@ export class PiWorkerRuntime {
             },
             claimOwnerId: runWorkerIdentity,
             fencingToken: command.payload.fencingToken,
+            entryPayloadCache: sessionEntryPayloadCache,
           }),
         createOrchestrationTools: async (command, orchestrationContext) => {
           const session = await this.#database
@@ -517,6 +523,7 @@ export class PiWorkerRuntime {
                       ? {}
                       : { parentActivation: orchestrationContext.activation }),
                   });
+                  this.#runWorker?.prioritizeSubagent?.(child.childCommandId);
                   return {
                     providerJobId: child.executionId,
                     state: subagentExternalState(child.state),
