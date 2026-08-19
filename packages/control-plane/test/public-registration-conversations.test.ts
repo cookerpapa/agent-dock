@@ -5,6 +5,7 @@ import type {
   AcceptedTurnResource,
   ConversationDetailResource,
   ConversationListResource,
+  ConversationPruneResource,
   ConversationTreeResource,
   ConversationForkResource,
   ProjectResource,
@@ -845,6 +846,226 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
       headers: authorization(bravo.apiToken),
     });
     expect(foreignTree.statusCode).toBe(404);
+
+    const laterTurnResponse = await http.inject({
+      method: "POST",
+      url: `/v1/sessions/${alphaSession.sessionId}/turns`,
+      headers: {
+        ...authorization(alpha.apiToken),
+        "idempotency-key": "alpha-later-turn",
+      },
+      payload: { prompt: "later branch that should be pruned" },
+    });
+    expect(laterTurnResponse.statusCode).toBe(202);
+    const laterTurn = laterTurnResponse.json<AcceptedTurnResource>();
+    const laterUserEntryId = "10000000-0000-4000-8000-000000000003";
+    const laterAssistantEntryId = "10000000-0000-4000-8000-000000000004";
+    await database.transaction().execute(async (transaction) => {
+      await transaction
+        .updateTable("commands")
+        .set({ state: "completed" })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", laterTurn.commandId)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("turns")
+        .set({ state: "completed", stop_reason: "stop", settled_at: NOW })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", laterTurn.turnId)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("runs")
+        .set({ state: "completed", stop_reason: "stop", settled_at: NOW })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", laterTurn.runId)
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("sessions")
+        .set({ state: "idle" })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", alphaSession.sessionId)
+        .executeTakeFirstOrThrow();
+      const laterEntries = [
+        {
+          id: laterUserEntryId,
+          seq: 3,
+          parentId: assistantEntryId,
+          timestamp: NOW.valueOf() + 2,
+          message: {
+            role: "user",
+            content: "later branch that should be pruned",
+            timestamp: NOW.valueOf() + 2,
+          },
+        },
+        {
+          id: laterAssistantEntryId,
+          seq: 4,
+          parentId: laterUserEntryId,
+          timestamp: NOW.valueOf() + 3,
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "later answer" }],
+            provider: "test",
+            model: "test",
+            api: "test",
+            usage: {
+              input: 1,
+              output: 1,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 2,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+            stopReason: "stop",
+            timestamp: NOW.valueOf() + 3,
+          },
+        },
+      ];
+      await transaction
+        .insertInto("pi_session_entries")
+        .values(
+          laterEntries.map((entry) => ({
+            tenant_id: alpha.tenantId,
+            session_id: alphaSession.sessionId,
+            id: entry.id,
+            seq: entry.seq,
+            parent_id: entry.parentId,
+            type: "message",
+            custom_type: null,
+            timestamp_ms: entry.timestamp,
+            payload: {
+              id: entry.id,
+              seq: entry.seq,
+              type: "message",
+              parentId: entry.parentId,
+              timestamp: entry.timestamp,
+              message: entry.message,
+            },
+          })),
+        )
+        .execute();
+      await transaction
+        .insertInto("pi_session_log")
+        .values(
+          laterEntries.map((entry) => ({
+            tenant_id: alpha.tenantId,
+            session_id: alphaSession.sessionId,
+            seq: entry.seq,
+            kind: "entry",
+            payload: { entry: { id: entry.id, type: "message" } },
+          })),
+        )
+        .execute();
+      await transaction
+        .updateTable("pi_session_lanes")
+        .set({ leaf_id: laterAssistantEntryId })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("session_id", "=", alphaSession.sessionId)
+        .where("lane", "=", "main")
+        .executeTakeFirstOrThrow();
+      await transaction
+        .updateTable("pi_sessions")
+        .set({ next_seq: 5 })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", alphaSession.sessionId)
+        .executeTakeFirstOrThrow();
+    });
+
+    const pruneRequest = {
+      method: "POST" as const,
+      url: `/v1/conversations/${alphaSession.sessionId}/prunes`,
+      headers: {
+        ...authorization(alpha.apiToken),
+        "idempotency-key": "prune-alpha-after-first-answer",
+      },
+      payload: { turnId: alphaTurn.turnId, entryId: assistantEntryId },
+    };
+    const prunedResponse = await http.inject(pruneRequest);
+    expect(prunedResponse.statusCode).toBe(201);
+    expect(prunedResponse.json<ConversationPruneResource>()).toMatchObject({
+      anchorTurnId: alphaTurn.turnId,
+      anchorEntryId: assistantEntryId,
+      prunedTurnCount: 1,
+      archivedSessionCount: 1,
+      replayed: false,
+    });
+    expect((await http.inject(pruneRequest)).json<ConversationPruneResource>()).toMatchObject({
+      replayed: true,
+    });
+    expect(
+      await database
+        .selectFrom("turns")
+        .select("pruned_at as prunedAt")
+        .where("id", "=", laterTurn.turnId)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({ prunedAt: expect.anything() });
+    expect(
+      await database
+        .selectFrom("pi_session_lanes")
+        .select("leaf_id as leafId")
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("session_id", "=", alphaSession.sessionId)
+        .where("lane", "=", "main")
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ leafId: assistantEntryId });
+    expect(
+      await database
+        .selectFrom("sessions")
+        .select("archived_at as archivedAt")
+        .where("id", "=", forked.session.sessionId)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({ archivedAt: expect.anything() });
+    const afterPruneTree = await http.inject({
+      method: "GET",
+      url: `/v1/conversations/${alphaSession.sessionId}/tree?view=full`,
+      headers: authorization(alpha.apiToken),
+    });
+    expect(afterPruneTree.json<ConversationTreeResource>()).toMatchObject({
+      branches: [
+        {
+          sessionId: alphaSession.sessionId,
+          entries: [
+            { turnId: alphaTurn.turnId, role: "user" },
+            { turnId: alphaTurn.turnId, role: "assistant" },
+          ],
+        },
+      ],
+    });
+
+    const replacementFork = await http.inject({
+      ...forkRequest,
+      headers: {
+        ...authorization(alpha.apiToken),
+        "idempotency-key": "fork-alpha-before-subtree-delete",
+      },
+      payload: {
+        turnId: alphaTurn.turnId,
+        entryId: assistantEntryId,
+        title: "Child removed with parent",
+      },
+    });
+    expect(replacementFork.statusCode).toBe(201);
+    const replacementChildId = replacementFork.json<ConversationForkResource>().session.sessionId;
+    const deletedTree = await http.inject({
+      method: "DELETE",
+      url: `/v1/conversations/${alphaSession.sessionId}`,
+      headers: {
+        ...authorization(alpha.apiToken),
+        "idempotency-key": "delete-alpha-conversation-tree",
+      },
+    });
+    expect(deletedTree.statusCode).toBe(200);
+    expect(
+      await database
+        .selectFrom("sessions")
+        .select(["id", "archived_at as archivedAt"])
+        .where("id", "in", [alphaSession.sessionId, replacementChildId])
+        .orderBy("id")
+        .execute(),
+    ).toEqual([
+      expect.objectContaining({ archivedAt: expect.anything() }),
+      expect.objectContaining({ archivedAt: expect.anything() }),
+    ]);
   });
 
   it("serializes concurrent registration at the configured total-tenant cap", async () => {

@@ -797,6 +797,12 @@ body.product-panel-resizing {
   color: #bfb7e8;
 }
 
+.product-answer-actions .product-prune-action:hover:not(:disabled) {
+  border-color: #604040;
+  background: #2d2020;
+  color: #e5b0b0;
+}
+
 .product-answer-actions button:disabled {
   display: none;
 }

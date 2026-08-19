@@ -8,6 +8,7 @@ import {
   parseConversationListResource,
   parseConversationTreeResource,
   parseConversationForkResource,
+  parseConversationPruneResource,
   parseLiveTurnSnapshotResource,
   parseControlPlaneApiError,
   parseModelConfigurationResource,
@@ -31,6 +32,7 @@ import {
   type ConversationTreeResource,
   type ConversationTreeView,
   type ConversationForkResource,
+  type ConversationPruneResource,
   type LiveTurnSnapshotResource,
   type AcceptedTurnCancellationResource,
   type AcceptedTurnResource,
@@ -368,6 +370,22 @@ export class PiCloudApi {
     );
   }
 
+  async pruneConversation(
+    sessionId: string,
+    turnId: string,
+    entryId: string,
+    idempotencyKey: string,
+  ): Promise<ConversationPruneResource> {
+    return parseConversationPruneResource(
+      await request(
+        this.#fetch,
+        `/v1/conversations/${encodeURIComponent(sessionId)}/prunes`,
+        jsonRequest({ turnId, entryId }, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
   async getLiveTurnSnapshot(sessionId: string): Promise<LiveTurnSnapshotResource> {
     return parseLiveTurnSnapshotResource(
       await request(
@@ -548,7 +566,7 @@ export class PiCloudApi {
 }
 
 export function newIdempotencyKey(
-  prefix: "turn" | "cancel" | "steer" | "archive" | "delete" | "retry" | "fork",
+  prefix: "turn" | "cancel" | "steer" | "archive" | "delete" | "retry" | "fork" | "prune",
 ): string {
   return `${prefix}:${globalThis.crypto.randomUUID()}`;
 }

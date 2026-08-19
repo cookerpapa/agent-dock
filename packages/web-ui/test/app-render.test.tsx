@@ -230,11 +230,14 @@ describe("product chat experience", () => {
     const markup = renderToStaticMarkup(
       <ConversationTurn
         canFork
+        canPrune
         onFork={() => undefined}
+        onPrune={() => undefined}
         turn={turn("10000000-0000-4000-8000-000000000026", "保留这一条路径")}
       />,
     );
     expect(markup).toContain("从此对话开始");
+    expect(markup).toContain("删除后续");
   });
 
   it("renders Pi-style command output instead of a collapsed JSON tool card", () => {

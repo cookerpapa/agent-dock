@@ -714,6 +714,27 @@ export const ConversationForkResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const CreateConversationPruneRequestSchema = Type.Object(
+  {
+    turnId: UuidSchema,
+    entryId: UuidSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const ConversationPruneResourceSchema = Type.Object(
+  {
+    sessionId: UuidSchema,
+    anchorTurnId: UuidSchema,
+    anchorEntryId: UuidSchema,
+    prunedTurnCount: NonNegativeSafeIntegerSchema,
+    archivedSessionCount: NonNegativeSafeIntegerSchema,
+    replayed: Type.Boolean(),
+    createdAt: UtcTimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
 export const LiveTurnSnapshotResourceSchema = Type.Object(
   {
     sessionId: UuidSchema,
@@ -1151,6 +1172,8 @@ export type ConversationTreeBranchResource = Static<typeof ConversationTreeBranc
 export type ConversationTreeResource = Static<typeof ConversationTreeResourceSchema>;
 export type CreateConversationForkRequest = Static<typeof CreateConversationForkRequestSchema>;
 export type ConversationForkResource = Static<typeof ConversationForkResourceSchema>;
+export type CreateConversationPruneRequest = Static<typeof CreateConversationPruneRequestSchema>;
+export type ConversationPruneResource = Static<typeof ConversationPruneResourceSchema>;
 export type LiveTurnSnapshotResource = Static<typeof LiveTurnSnapshotResourceSchema>;
 export type AcceptTurnRequest = Static<typeof AcceptTurnRequestSchema>;
 export type AcceptedTurnResource = Static<typeof AcceptedTurnResourceSchema>;
@@ -1578,6 +1601,16 @@ export function parseCreateConversationForkRequest(value: unknown): CreateConver
 
 export function parseConversationForkResource(value: unknown): ConversationForkResource {
   return parseSchema(ConversationForkResourceSchema, value, "conversation fork resource");
+}
+
+export function parseCreateConversationPruneRequest(
+  value: unknown,
+): CreateConversationPruneRequest {
+  return parseSchema(CreateConversationPruneRequestSchema, value, "conversation prune request");
+}
+
+export function parseConversationPruneResource(value: unknown): ConversationPruneResource {
+  return parseSchema(ConversationPruneResourceSchema, value, "conversation prune resource");
 }
 
 export function parseLiveTurnSnapshotResource(value: unknown): LiveTurnSnapshotResource {

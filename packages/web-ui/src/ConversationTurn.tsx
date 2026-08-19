@@ -269,10 +269,14 @@ export function ConversationTurn({
   turn,
   canFork = false,
   onFork,
+  canPrune = false,
+  onPrune,
 }: {
   turn: TurnView;
   canFork?: boolean;
   onFork?: () => void;
+  canPrune?: boolean;
+  onPrune?: () => void;
 }) {
   const working =
     turn.status === "queued" || turn.status === "running" || turn.status === "cancelling";
@@ -317,12 +321,25 @@ export function ConversationTurn({
             </div>
           ) : null}
           {turn.cancellation ? <div className="product-muted-line">已停止生成</div> : null}
-          {turn.status === "completed" && onFork ? (
+          {turn.status === "completed" && (onFork || onPrune) ? (
             <div className="product-answer-actions">
-              <button disabled={!canFork} onClick={onFork} type="button">
-                <span aria-hidden="true">↳</span>
-                从此对话开始
-              </button>
+              {onFork ? (
+                <button disabled={!canFork} onClick={onFork} type="button">
+                  <span aria-hidden="true">↳</span>
+                  从此对话开始
+                </button>
+              ) : null}
+              {onPrune ? (
+                <button
+                  className="product-prune-action"
+                  disabled={!canPrune}
+                  onClick={onPrune}
+                  type="button"
+                >
+                  <span aria-hidden="true">⌫</span>
+                  删除后续
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>

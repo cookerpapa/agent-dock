@@ -460,6 +460,18 @@ export interface ConversationForkOperationTable {
   created_at: GeneratedTimestamp;
 }
 
+export interface ConversationPruneOperationTable {
+  tenant_id: string;
+  session_id: string;
+  idempotency_key: string;
+  request_sha256: string;
+  anchor_turn_id: string;
+  anchor_entry_id: string;
+  pruned_turn_count: number;
+  archived_session_count: number;
+  created_at: GeneratedTimestamp;
+}
+
 export interface TurnTable {
   id: string;
   tenant_id: string;
@@ -477,6 +489,7 @@ export interface TurnTable {
   failure_code: string | null;
   failure_message: string | null;
   failure_retryable: boolean | null;
+  pruned_at: NullableTimestamp;
   created_at: GeneratedTimestamp;
   started_at: NullableTimestamp;
   settled_at: NullableTimestamp;
@@ -1131,6 +1144,7 @@ export interface Database {
   tenant_model_credentials: TenantModelCredentialTable;
   sessions: SessionTable;
   subagent_executions: SubagentExecutionTable;
+  conversation_prune_operations: ConversationPruneOperationTable;
   turns: TurnTable;
   runs: RunTable;
   run_attempts: RunAttemptTable;

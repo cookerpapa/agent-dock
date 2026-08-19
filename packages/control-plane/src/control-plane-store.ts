@@ -1266,7 +1266,8 @@ export class ControlPlaneStore {
       .leftJoin("turns as turn", (join) =>
         join
           .onRef("turn.tenant_id", "=", "session_row.tenant_id")
-          .onRef("turn.session_id", "=", "session_row.id"),
+          .onRef("turn.session_id", "=", "session_row.id")
+          .on("turn.pruned_at", "is", null),
       )
       .select([
         "session_row.id as sessionId",
@@ -1437,6 +1438,7 @@ export class ControlPlaneStore {
         .where("command.tenant_id", "=", this.#tenantId)
         .where("command.session_id", "=", node.sessionId)
         .where("command.kind", "=", "turn.execute")
+        .where("turn.pruned_at", "is", null)
         .where("command.mailbox_position", "is not", null)
         .$if(forkMailboxPosition !== null && forkMailboxPosition !== undefined, (query) =>
           query.where("command.mailbox_position", "<=", forkMailboxPosition!.mailbox_position!),

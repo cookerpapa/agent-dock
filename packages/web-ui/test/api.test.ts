@@ -406,7 +406,7 @@ describe("tenant-aware browser API", () => {
     ).resolves.toMatchObject({ session: { state: "idle" } });
   });
 
-  it("loads a Pi tree and creates an idempotent conversation fork", async () => {
+  it("loads a Pi tree, forks it, and prunes a later tail", async () => {
     const sessionId = "20000000-0000-4000-8000-000000000011";
     const childSessionId = "20000000-0000-4000-8000-000000000012";
     const turnId = "20000000-0000-4000-8000-000000000013";
@@ -447,6 +447,22 @@ describe("tenant-aware browser API", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
+      if (path.endsWith("/prunes")) {
+        expect(new Headers(init?.headers).get("idempotency-key")).toBe("prune:test");
+        expect(JSON.parse(String(init?.body))).toEqual({ turnId, entryId });
+        return new Response(
+          JSON.stringify({
+            sessionId,
+            anchorTurnId: turnId,
+            anchorEntryId: entryId,
+            prunedTurnCount: 2,
+            archivedSessionCount: 1,
+            replayed: false,
+            createdAt,
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
       expect(path).toBe(`/v1/conversations/${sessionId}/forks`);
       expect(new Headers(init?.headers).get("idempotency-key")).toBe("fork:test");
       expect(JSON.parse(String(init?.body))).toEqual({
@@ -481,6 +497,9 @@ describe("tenant-aware browser API", () => {
     await expect(
       api.forkConversation(sessionId, turnId, entryId, "Alternative", "fork:test"),
     ).resolves.toMatchObject({ session: { sessionId: childSessionId } });
+    await expect(
+      api.pruneConversation(sessionId, turnId, entryId, "prune:test"),
+    ).resolves.toMatchObject({ prunedTurnCount: 2, archivedSessionCount: 1 });
   });
 
   it("loads binary Workspace content", async () => {

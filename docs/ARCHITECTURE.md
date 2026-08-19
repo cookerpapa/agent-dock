@@ -32,8 +32,9 @@ The current Worker invariant is deliberately precise:
 ### Web and Control Plane
 
 The Web product provides authentication, resizable conversation/tree panels,
-focused or whole-tree navigation, conversation forks, named Workspaces,
-resumable output, file browsing and administrator settings. The Control Plane
+focused or whole-tree navigation, conversation forks, recursive subtree
+deletion, settled-message tail pruning, named Workspaces, resumable output,
+file browsing and administrator settings. The Control Plane
 commits each idempotent message and its Run command in one PostgreSQL
 transaction. It enforces tenant quota and same-Session serialization.
 
@@ -93,6 +94,13 @@ entries. Forking a settled final response creates a child product/Pi Session
 and transactionally copies the selected root-to-leaf branch. The child shares
 the Workspace and begins with no open operation records. Tree navigation is
 not exposed to the model or added to its context.
+
+Deleting a parent archives its whole human descendant subtree and their typed
+Subagent Sessions after proving every Run has settled. Pruning after a settled
+final response keeps that response, marks later product Turns invisible and
+moves Pi's native `main` lane back to the retained entry. Later immutable
+entries remain audit evidence but are unreachable from UI and model context;
+Workspace bytes are deliberately not rolled back.
 
 The runtime keeps only the cloud behavior the product needs: automatic
 compaction, model retry, active steer, reviewed event mapping, remote Tools,

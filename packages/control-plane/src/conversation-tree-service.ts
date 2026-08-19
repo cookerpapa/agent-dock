@@ -2,11 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "@pi-cloud/database";
 import type {
   ConversationForkResource,
+  ConversationPruneResource,
   ConversationTreeBranchResource,
   ConversationTreeEntryResource,
   ConversationTreeResource,
   ConversationTreeView,
   CreateConversationForkRequest,
+  CreateConversationPruneRequest,
 } from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
@@ -238,6 +240,7 @@ async function completedTurns(
     .where("command.tenant_id", "=", tenantId)
     .where("command.session_id", "in", sessionIds)
     .where("command.kind", "=", "turn.execute")
+    .where("turn.pruned_at", "is", null)
     .where("command.mailbox_position", "is not", null)
     .where("turn.state", "=", "completed")
     .orderBy("command.session_id")
@@ -370,6 +373,333 @@ export class ConversationTreeService {
       };
     });
     return { rootSessionId, currentSessionId, view, branches, delegatedSessions: delegated.items };
+  }
+
+  async prune(
+    tenantId: string,
+    sessionId: string,
+    idempotencyKey: string,
+    request: CreateConversationPruneRequest,
+  ): Promise<ConversationPruneResource> {
+    const requestSha256 = sha256(request);
+    try {
+      return await this.#database.transaction().execute(async (transaction) => {
+        const replay = await transaction
+          .selectFrom("conversation_prune_operations")
+          .selectAll()
+          .where("tenant_id", "=", tenantId)
+          .where("session_id", "=", sessionId)
+          .where("idempotency_key", "=", idempotencyKey)
+          .executeTakeFirst();
+        if (replay !== undefined) {
+          if (replay.request_sha256 !== requestSha256) {
+            throw new ControlPlaneStoreError(
+              "idempotency_conflict",
+              "Idempotency key was already used for a different conversation prune",
+            );
+          }
+          return {
+            sessionId,
+            anchorTurnId: replay.anchor_turn_id,
+            anchorEntryId: replay.anchor_entry_id,
+            prunedTurnCount: replay.pruned_turn_count,
+            archivedSessionCount: replay.archived_session_count,
+            replayed: true,
+            createdAt: new Date(replay.created_at).toISOString(),
+          };
+        }
+
+        const session = await transaction
+          .selectFrom("sessions")
+          .select([
+            "id",
+            "state",
+            "session_kind as sessionKind",
+            "conversation_fork_entry_id as forkEntryId",
+            "archived_at as archivedAt",
+          ])
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", sessionId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (
+          session === undefined ||
+          session.archivedAt !== null ||
+          session.sessionKind !== "conversation"
+        ) {
+          throw new ControlPlaneStoreError("not_found", "Conversation was not found");
+        }
+        if (!(session.state === "cold" || session.state === "idle" || session.state === "failed")) {
+          throw new ControlPlaneStoreError(
+            "conflict",
+            "Wait for the current conversation run to settle before deleting later messages",
+          );
+        }
+        const unsettled = await transaction
+          .selectFrom("turns")
+          .select("id")
+          .where("tenant_id", "=", tenantId)
+          .where("session_id", "=", sessionId)
+          .where("pruned_at", "is", null)
+          .where("state", "in", [
+            "queued",
+            "dispatching",
+            "running",
+            "waiting_approval",
+            "cancelling",
+          ])
+          .limit(1)
+          .executeTakeFirst();
+        if (unsettled !== undefined) {
+          throw new ControlPlaneStoreError(
+            "conflict",
+            "Wait for the current conversation run to settle before deleting later messages",
+          );
+        }
+
+        const [entriesBySession, turnsBySession, leaves] = await Promise.all([
+          sessionEntries(transaction, tenantId, [sessionId]),
+          completedTurns(transaction, tenantId, [sessionId]),
+          mainLeaves(transaction, tenantId, [sessionId]),
+        ]);
+        const branch = ownBranch(
+          activeBranch(entriesBySession.get(sessionId) ?? [], leaves.get(sessionId) ?? null),
+          session.forkEntryId,
+        );
+        const target = mappedConversationEntries(branch, turnsBySession.get(sessionId) ?? []).find(
+          (entry) =>
+            entry.finalAssistant &&
+            entry.turnId === request.turnId &&
+            entry.entryId === request.entryId,
+        );
+        if (target === undefined) {
+          throw new ControlPlaneStoreError(
+            "invalid_request",
+            "Conversation prune target is not an owned completed final response",
+          );
+        }
+        const anchorCommand = await transaction
+          .selectFrom("commands")
+          .select("mailbox_position as mailboxPosition")
+          .where("tenant_id", "=", tenantId)
+          .where("session_id", "=", sessionId)
+          .where("turn_id", "=", request.turnId)
+          .where("kind", "=", "turn.execute")
+          .executeTakeFirstOrThrow();
+        if (anchorCommand.mailboxPosition === null) {
+          throw new ControlPlaneStoreError(
+            "control_plane_misconfigured",
+            "Conversation prune anchor has no mailbox position",
+          );
+        }
+
+        const prunedTurns = await transaction
+          .selectFrom("commands as command")
+          .innerJoin("turns as turn", (join) =>
+            join
+              .onRef("turn.tenant_id", "=", "command.tenant_id")
+              .onRef("turn.id", "=", "command.turn_id"),
+          )
+          .select("turn.id")
+          .where("command.tenant_id", "=", tenantId)
+          .where("command.session_id", "=", sessionId)
+          .where("command.kind", "=", "turn.execute")
+          .where("command.mailbox_position", ">", anchorCommand.mailboxPosition)
+          .where("turn.pruned_at", "is", null)
+          .execute();
+        const prunedTurnIds = prunedTurns.map((turn) => turn.id);
+
+        const descendantResult = await sql<{ id: string }>`
+          with recursive descendants as (
+            select child.id
+              from sessions child
+              join commands anchor
+                on anchor.tenant_id = child.tenant_id
+               and anchor.session_id = child.conversation_parent_session_id
+               and anchor.turn_id = child.conversation_fork_turn_id
+               and anchor.kind = 'turn.execute'
+             where child.tenant_id = ${tenantId}::uuid
+               and child.conversation_parent_session_id = ${sessionId}::uuid
+               and child.session_kind = 'conversation'
+               and child.archived_at is null
+               and anchor.mailbox_position >= ${anchorCommand.mailboxPosition}::bigint
+            union
+            select child.id
+              from sessions child
+              join descendants parent on child.conversation_parent_session_id = parent.id
+             where child.tenant_id = ${tenantId}::uuid
+               and child.session_kind = 'conversation'
+               and child.archived_at is null
+          )
+          select id from descendants
+        `.execute(transaction);
+        const descendantIds = descendantResult.rows.map((row) => row.id);
+        if (descendantIds.length > 0) {
+          const activeDescendant = await transaction
+            .selectFrom("sessions")
+            .select("id")
+            .where("tenant_id", "=", tenantId)
+            .where("id", "in", descendantIds)
+            .where("state", "not in", ["cold", "idle", "failed"])
+            .limit(1)
+            .executeTakeFirst();
+          const unsettledDescendant = await transaction
+            .selectFrom("turns")
+            .select("id")
+            .where("tenant_id", "=", tenantId)
+            .where("session_id", "in", descendantIds)
+            .where("pruned_at", "is", null)
+            .where("state", "in", [
+              "queued",
+              "dispatching",
+              "running",
+              "waiting_approval",
+              "cancelling",
+            ])
+            .limit(1)
+            .executeTakeFirst();
+          if (activeDescendant !== undefined || unsettledDescendant !== undefined) {
+            throw new ControlPlaneStoreError(
+              "conflict",
+              "A descendant conversation is still running",
+            );
+          }
+        }
+
+        const subagentRows =
+          descendantIds.length === 0 && prunedTurnIds.length === 0
+            ? []
+            : await transaction
+                .selectFrom("subagent_executions as execution")
+                .innerJoin("runs as parent_run", (join) =>
+                  join
+                    .onRef("parent_run.tenant_id", "=", "execution.tenant_id")
+                    .onRef("parent_run.id", "=", "execution.parent_run_id"),
+                )
+                .select([
+                  "execution.child_session_id as sessionId",
+                  "execution.state as executionState",
+                ])
+                .where("execution.tenant_id", "=", tenantId)
+                .where((expression) =>
+                  expression.or([
+                    ...(descendantIds.length === 0
+                      ? []
+                      : [expression("execution.parent_session_id", "in", descendantIds)]),
+                    ...(prunedTurnIds.length === 0
+                      ? []
+                      : [expression("parent_run.turn_id", "in", prunedTurnIds)]),
+                  ]),
+                )
+                .execute();
+        if (
+          subagentRows.some(
+            (row) =>
+              row.executionState === "preparing" ||
+              row.executionState === "queued" ||
+              row.executionState === "running",
+          )
+        ) {
+          throw new ControlPlaneStoreError("conflict", "Delegated work is still active");
+        }
+        const subagentSessionIds = [...new Set(subagentRows.map((row) => row.sessionId))];
+        const sessionsToArchive = [...new Set([...descendantIds, ...subagentSessionIds])];
+        const now = new Date();
+        if (prunedTurnIds.length > 0) {
+          await transaction
+            .updateTable("turns")
+            .set({ pruned_at: now })
+            .where("tenant_id", "=", tenantId)
+            .where("id", "in", prunedTurnIds)
+            .execute();
+        }
+        if (sessionsToArchive.length > 0) {
+          await transaction
+            .updateTable("sessions")
+            .set({
+              archived_at: now,
+              updated_at: now,
+              row_version: sql<string>`${sql.ref("row_version")} + 1`,
+            })
+            .where("tenant_id", "=", tenantId)
+            .where("id", "in", sessionsToArchive)
+            .where("archived_at", "is", null)
+            .execute();
+        }
+
+        const piSession = await transaction
+          .selectFrom("pi_sessions")
+          .select("next_seq as nextSequence")
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", sessionId)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("pi_session_lanes")
+          .set({ leaf_id: request.entryId })
+          .where("tenant_id", "=", tenantId)
+          .where("session_id", "=", sessionId)
+          .where("lane", "=", "main")
+          .executeTakeFirstOrThrow();
+        await transaction
+          .insertInto("pi_session_log")
+          .values({
+            tenant_id: tenantId,
+            session_id: sessionId,
+            seq: piSession.nextSequence,
+            kind: "lane",
+            payload: { lane: "main", leafId: request.entryId },
+          })
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("pi_sessions")
+          .set({ next_seq: sql<string>`${sql.ref("next_seq")} + 1` })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", sessionId)
+          .executeTakeFirstOrThrow();
+        await transaction
+          .updateTable("sessions")
+          .set({ state: "idle", updated_at: now, last_active_at: now })
+          .where("tenant_id", "=", tenantId)
+          .where("id", "=", sessionId)
+          .executeTakeFirstOrThrow();
+        await transaction
+          .insertInto("conversation_prune_operations")
+          .values({
+            tenant_id: tenantId,
+            session_id: sessionId,
+            idempotency_key: idempotencyKey,
+            request_sha256: requestSha256,
+            anchor_turn_id: request.turnId,
+            anchor_entry_id: request.entryId,
+            pruned_turn_count: prunedTurnIds.length,
+            archived_session_count: sessionsToArchive.length,
+            created_at: now,
+          })
+          .executeTakeFirstOrThrow();
+        return {
+          sessionId,
+          anchorTurnId: request.turnId,
+          anchorEntryId: request.entryId,
+          prunedTurnCount: prunedTurnIds.length,
+          archivedSessionCount: sessionsToArchive.length,
+          replayed: false,
+          createdAt: now.toISOString(),
+        };
+      });
+    } catch (error: unknown) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "23505" &&
+        "constraint" in error &&
+        error.constraint === "conversation_prune_operations_pkey"
+      ) {
+        return this.prune(tenantId, sessionId, idempotencyKey, request);
+      }
+      throw error;
+    }
   }
 
   async fork(

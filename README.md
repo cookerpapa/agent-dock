@@ -34,7 +34,8 @@ schema or maintained deployment. The current sources of truth are this README,
 
 - browser registration/login with tenant-isolated conversations and Workspaces;
 - Chat-style multi-round Pi conversations and resumable streaming;
-- Pi Session tree navigation with focused/full-tree views and conversation forks;
+- Pi Session tree navigation with focused/full-tree views, conversation forks,
+  recursive subtree deletion and settled-message tail pruning;
 - the pinned community `pi-subagents` workflow contract, with durable Child
   Sessions/Runs, visible delegated branches and shared or isolated Cube execution;
 - pure chat without Sandbox activation;

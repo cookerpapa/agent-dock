@@ -6,6 +6,7 @@ export {
   type ArtifactKind,
   type CommandKind,
   type CommandState,
+  type ConversationPruneOperationTable,
   type ConversationTurnProjectionTable,
   type CredentialBindingStatus,
   type CredentialKind,
@@ -117,6 +118,8 @@ export {
   downSubagentRunSystemPrompt,
   upIsolatedSubagentWorkspaces,
   downIsolatedSubagentWorkspaces,
+  upConversationTailPruning,
+  downConversationTailPruning,
 } from "./migrations/index.ts";
 
 export {

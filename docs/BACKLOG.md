@@ -41,7 +41,9 @@ retired and remain only in Git history or explicitly superseded ADRs.
 - [x] Allow a new Workspace terminal to consume its active `pending`
       deployment environment while continuing to reject `failed` versions;
       keep formal validation evidence bound to a fenced Agent Run/Attempt.
-- [ ] Add branch rename and leaf-first deletion controls to the tree UI.
+- [x] Add recursive conversation-subtree deletion and settled-message tail
+      pruning without rewriting Pi's immutable entry history.
+- [ ] Add branch rename controls to the tree UI.
 - [ ] Expand orphan reconciliation for Cube activations and persistent Volumes.
 - [ ] Publish sustained Kafka/Valkey projection and SSE reconnect evidence.
 

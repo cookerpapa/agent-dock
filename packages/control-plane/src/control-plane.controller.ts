@@ -24,6 +24,7 @@ import {
   parseCreateTurnCancellationRequest,
   parseCreateTurnSteerRequest,
   parseCreateConversationForkRequest,
+  parseCreateConversationPruneRequest,
   parseConversationTreeView,
   parseIdempotencyKey,
   parseLastEventIdHeader,
@@ -39,6 +40,7 @@ import {
   type ConversationListResource,
   type ConversationTreeResource,
   type ConversationForkResource,
+  type ConversationPruneResource,
   type ProjectResource,
   type ModelConfigurationResource,
   type CubeProxyConfigurationResource,
@@ -271,6 +273,23 @@ export class ControlPlaneController {
       sessionId,
       parseIdempotencyKey(idempotencyKeyValue),
       parseCreateConversationForkRequest(body),
+    );
+  }
+
+  @Post("conversations/:sessionId/prunes")
+  async pruneConversation(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<ConversationPruneResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const identity = this.tenantRequestContext.requireMutation(request);
+    return this.conversationTrees.prune(
+      identity.tenantId,
+      sessionId,
+      parseIdempotencyKey(idempotencyKeyValue),
+      parseCreateConversationPruneRequest(body),
     );
   }
 

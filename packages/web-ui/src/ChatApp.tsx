@@ -84,6 +84,7 @@ export default function ChatApp() {
     | "cancelling"
     | "steering"
     | "forking"
+    | "pruning"
     | "deleting-conversation"
     | "deleting-workspace"
     | null
@@ -491,6 +492,48 @@ export default function ChatApp() {
     }
   }
 
+  async function pruneConversationTail(target: {
+    sourceSessionId: string;
+    turnId: string;
+    entryId: string;
+  }): Promise<void> {
+    if (
+      operation !== null ||
+      state.session?.sessionId !== target.sourceSessionId ||
+      !window.confirm(
+        "保留这条回复，删除它之后的对话、分支和 Subagent 记录？Workspace 文件不会回滚。",
+      )
+    ) {
+      return;
+    }
+    setOperation("pruning");
+    update({ type: "api.error.cleared" });
+    try {
+      await api.pruneConversation(
+        target.sourceSessionId,
+        target.turnId,
+        target.entryId,
+        newIdempotencyKey("prune"),
+      );
+      const loaded = await loadConversation(target.sourceSessionId);
+      lastSequenceRef.current = loaded.replayAfterSequence;
+      update({
+        type: "conversation.loaded",
+        conversation: loaded.conversation,
+        ...(loaded.liveSnapshot === undefined ? {} : { liveSnapshot: loaded.liveSnapshot }),
+      });
+      await Promise.all([
+        refreshConversations(),
+        refreshConversationTree(target.sourceSessionId, treeView),
+        refreshWorkspaces(),
+      ]);
+    } catch (error: unknown) {
+      update({ type: "api.error", message: errorMessage(error) });
+    } finally {
+      setOperation(null);
+    }
+  }
+
   function beginNewConversation(initialPrompt: string | null = null): void {
     resetConversation();
     setPendingInitialPrompt(initialPrompt);
@@ -556,9 +599,16 @@ export default function ChatApp() {
   }
 
   async function deleteConversation(conversation: ConversationSummaryResource): Promise<void> {
+    const deletesChildren =
+      (conversationChildren.get(conversation.sessionId)?.length ?? 0) > 0 ||
+      (delegatesByParent.get(conversation.sessionId)?.length ?? 0) > 0;
     if (
       operation !== null ||
-      !window.confirm(`删除对话“${conversation.title}”？Workspace 文件不会被删除。`)
+      !window.confirm(
+        deletesChildren
+          ? `删除对话“${conversation.title}”及其全部分支和 Subagent？Workspace 文件不会被删除。`
+          : `删除对话“${conversation.title}”？Workspace 文件不会被删除。`,
+      )
     ) {
       return;
     }
@@ -1177,6 +1227,13 @@ export default function ChatApp() {
                         currentTurn === undefined &&
                         target !== undefined
                       }
+                      canPrune={
+                        canMutate &&
+                        operation === null &&
+                        currentTurn === undefined &&
+                        target !== undefined &&
+                        target.sourceSessionId === state.session?.sessionId
+                      }
                       key={turn.turnId}
                       {...(target === undefined
                         ? {}
@@ -1185,6 +1242,7 @@ export default function ChatApp() {
                               setForkTitle("");
                               setForkTarget(target);
                             },
+                            onPrune: () => void pruneConversationTail(target),
                           })}
                       turn={turn}
                     />

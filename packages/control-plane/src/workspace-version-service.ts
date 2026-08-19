@@ -323,19 +323,64 @@ export class WorkspaceVersionService {
           throw new WorkspaceVersionError("conflict", "Session archive state already matches");
         }
         await this.#assertNoUnsettledTurns(transaction, tenantId, sessionId);
+        let descendantSessionIds: string[] = [];
         if (request.archived) {
-          const child = await transaction
-            .selectFrom("sessions")
+          const descendants = await sql<{ id: string; state: string }>`
+            with recursive family as (
+              select child.id, child.state
+                from sessions child
+               where child.tenant_id = ${tenantId}::uuid
+                 and child.conversation_parent_session_id = ${sessionId}::uuid
+                 and child.session_kind = 'conversation'
+                 and child.archived_at is null
+              union
+              select child.id, child.state
+                from sessions child
+                join family parent on child.conversation_parent_session_id = parent.id
+               where child.tenant_id = ${tenantId}::uuid
+                 and child.session_kind = 'conversation'
+                 and child.archived_at is null
+            )
+            select id, state from family
+          `.execute(transaction);
+          descendantSessionIds = descendants.rows.map((row) => row.id);
+          if (
+            descendants.rows.some(
+              (row) => row.state !== "cold" && row.state !== "idle" && row.state !== "failed",
+            )
+          ) {
+            throw new WorkspaceVersionError("conflict", "A child conversation is still active");
+          }
+          if (descendantSessionIds.length > 0) {
+            const unsettledDescendant = await transaction
+              .selectFrom("turns")
+              .select("id")
+              .where("tenant_id", "=", tenantId)
+              .where("session_id", "in", descendantSessionIds)
+              .where("pruned_at", "is", null)
+              .where("state", "in", [
+                "queued",
+                "dispatching",
+                "running",
+                "waiting_approval",
+                "cancelling",
+              ])
+              .limit(1)
+              .executeTakeFirst();
+            if (unsettledDescendant !== undefined) {
+              throw new WorkspaceVersionError("conflict", "A child conversation is still active");
+            }
+          }
+          const activeSubagent = await transaction
+            .selectFrom("subagent_executions")
             .select("id")
             .where("tenant_id", "=", tenantId)
-            .where("conversation_parent_session_id", "=", sessionId)
-            .where("archived_at", "is", null)
+            .where("parent_session_id", "in", [sessionId, ...descendantSessionIds])
+            .where("state", "in", ["preparing", "queued", "running"])
+            .limit(1)
             .executeTakeFirst();
-          if (child !== undefined) {
-            throw new WorkspaceVersionError(
-              "conflict",
-              "Delete child conversation branches before deleting their parent",
-            );
+          if (activeSubagent !== undefined) {
+            throw new WorkspaceVersionError("conflict", "Delegated work is still active");
           }
         }
         if (!request.archived) {
@@ -396,6 +441,18 @@ export class WorkspaceVersionService {
           .where("tenant_id", "=", tenantId)
           .where("id", "=", sessionId)
           .executeTakeFirstOrThrow();
+        if (request.archived && descendantSessionIds.length > 0) {
+          await transaction
+            .updateTable("sessions")
+            .set({
+              archived_at: now,
+              row_version: sql<string>`${sql.ref("row_version")} + 1`,
+              updated_at: now,
+            })
+            .where("tenant_id", "=", tenantId)
+            .where("id", "in", descendantSessionIds)
+            .execute();
+        }
         await transaction
           .updateTable("sessions")
           .set({
@@ -411,7 +468,7 @@ export class WorkspaceVersionService {
               .selectFrom("subagent_executions")
               .select("child_session_id")
               .where("tenant_id", "=", tenantId)
-              .where("parent_session_id", "=", sessionId),
+              .where("parent_session_id", "in", [sessionId, ...descendantSessionIds]),
           )
           .execute();
         const operationId = this.#idGenerator();

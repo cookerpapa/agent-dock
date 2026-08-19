@@ -26,6 +26,11 @@ export async function loadDelegatedSessionSummaries(
         .onRef("parent_run.tenant_id", "=", "execution.tenant_id")
         .onRef("parent_run.id", "=", "execution.parent_run_id"),
     )
+    .innerJoin("turns as parent_turn", (join) =>
+      join
+        .onRef("parent_turn.tenant_id", "=", "parent_run.tenant_id")
+        .onRef("parent_turn.id", "=", "parent_run.turn_id"),
+    )
     .innerJoin("projects as project", (join) =>
       join
         .onRef("project.tenant_id", "=", "child.tenant_id")
@@ -47,6 +52,7 @@ export async function loadDelegatedSessionSummaries(
     ])
     .where("execution.tenant_id", "=", input.tenantId)
     .where("execution.parent_session_id", "in", input.parentSessionIds)
+    .where("parent_turn.pruned_at", "is", null)
     .where("child.archived_at", "is", null)
     .orderBy("execution.created_at", "asc")
     .orderBy("execution.id", "asc")
