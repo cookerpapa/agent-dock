@@ -48,6 +48,7 @@ import {
 import { sql, type Kysely, type Transaction } from "kysely";
 import { materializeConversationTurnProjections } from "@pi-cloud/runtime-core/conversation-turn-projection";
 import type { PiCloudMetrics } from "@pi-cloud/observability";
+import { loadDelegatedSessionSummaries } from "./delegated-session-projection.ts";
 
 export type ControlPlaneStoreOptions = {
   database: Kysely<Database>;
@@ -465,6 +466,7 @@ function isPostgresConstraint(error: unknown, constraint: string): boolean {
 
 const DEFAULT_CANCELLATION_GRACE_PERIOD_MS = 1_000;
 const MAX_CONVERSATION_SUMMARIES = 100;
+const MAX_DELEGATED_SESSION_SUMMARIES = 500;
 const MAX_WORKSPACE_SUMMARIES = 100;
 const MAX_CONVERSATION_TURNS = 200;
 const MAX_SESSION_RUNS = 100;
@@ -1258,8 +1260,14 @@ export class ControlPlaneStore {
       .orderBy("session_row.id", "desc")
       .limit(MAX_CONVERSATION_SUMMARIES + 1)
       .execute();
+    const visibleRows = rows.slice(0, MAX_CONVERSATION_SUMMARIES);
+    const delegated = await loadDelegatedSessionSummaries(this.#database, {
+      tenantId: this.#tenantId,
+      parentSessionIds: visibleRows.map((row) => row.sessionId),
+      maximum: MAX_DELEGATED_SESSION_SUMMARIES,
+    });
     return {
-      conversations: rows.slice(0, MAX_CONVERSATION_SUMMARIES).map((row) => ({
+      conversations: visibleRows.map((row) => ({
         sessionId: row.sessionId,
         title: row.title,
         projectId: row.projectId,
@@ -1273,7 +1281,8 @@ export class ControlPlaneStore {
         lastActiveAt: isoTimestamp(row.lastActiveAt),
         ...(row.parentSessionId === null ? {} : { parentSessionId: row.parentSessionId }),
       })),
-      truncated: rows.length > MAX_CONVERSATION_SUMMARIES,
+      delegatedSessions: delegated.items,
+      truncated: rows.length > MAX_CONVERSATION_SUMMARIES || delegated.truncated,
     };
   }
 
@@ -1298,6 +1307,7 @@ export class ControlPlaneStore {
       )
       .select([
         "session_row.id as sessionId",
+        "session_row.session_kind as sessionKind",
         "session_row.title as sessionTitle",
         "session_row.project_id as projectId",
         "session_row.workspace_id as workspaceId",
@@ -1323,14 +1333,16 @@ export class ControlPlaneStore {
       ])
       .where("session_row.tenant_id", "=", this.#tenantId)
       .where("session_row.id", "=", sessionId)
-      .where("session_row.session_kind", "=", "conversation")
       .where("session_row.archived_at", "is", null)
       .executeTakeFirst();
     if (conversation === undefined) {
       throw new ControlPlaneStoreError("not_found", "Conversation was not found");
     }
 
-    const lineage = await this.#conversationLineage(sessionId);
+    const lineage =
+      conversation.sessionKind === "conversation"
+        ? await this.#conversationLineage(sessionId)
+        : [{ sessionId, parentSessionId: null, forkTurnId: null }];
     const lineageTurnRows: ConversationHistoryRow[] = [];
     for (let index = 0; index < lineage.length; index += 1) {
       const node = lineage[index]!;
@@ -1918,6 +1930,7 @@ export class ControlPlaneStore {
           "project_id",
           "workspace_id",
           "desired_model_profile_id",
+          "session_kind",
           "state",
           "next_event_seq",
           "next_mailbox_position",
@@ -1933,6 +1946,12 @@ export class ControlPlaneStore {
         .executeTakeFirst();
       if (!session) {
         throw new ControlPlaneStoreError("not_found", "Session was not found");
+      }
+      if (session.session_kind !== "conversation") {
+        throw new ControlPlaneStoreError(
+          "conflict",
+          "Delegated Sessions are read-only from the human conversation API",
+        );
       }
       const workspace = await transaction
         .selectFrom("workspaces as workspace")

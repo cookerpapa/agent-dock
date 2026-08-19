@@ -346,6 +346,22 @@ describe("tenant-aware browser API", () => {
                     lastActiveAt: createdAt,
                   },
                 ],
+                delegatedSessions: [
+                  {
+                    executionId: "60000000-0000-4000-8000-000000000001",
+                    sessionId: "60000000-0000-4000-8000-000000000002",
+                    parentSessionId: "20000000-0000-4000-8000-000000000001",
+                    parentTurnId: "60000000-0000-4000-8000-000000000003",
+                    title: "worker · subagent",
+                    agentName: "worker",
+                    contextMode: "fork",
+                    workspaceMode: "shared_serialized",
+                    state: "completed",
+                    workspaceName: "Alpha repair",
+                    createdAt,
+                    settledAt: createdAt,
+                  },
+                ],
                 truncated: false,
               }
             : {
@@ -381,6 +397,9 @@ describe("tenant-aware browser API", () => {
 
     await expect(api.listConversations()).resolves.toMatchObject({
       conversations: [{ title: "Repair checkout", workspaceName: "Alpha repair" }],
+      delegatedSessions: [
+        { agentName: "worker", contextMode: "fork", workspaceMode: "shared_serialized" },
+      ],
     });
     await expect(
       api.getConversation("20000000-0000-4000-8000-000000000001"),
@@ -402,6 +421,7 @@ describe("tenant-aware browser API", () => {
             rootSessionId: sessionId,
             currentSessionId: sessionId,
             view: "full",
+            delegatedSessions: [],
             branches: [
               {
                 sessionId,

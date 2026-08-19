@@ -10,9 +10,11 @@ import type {
 } from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { ControlPlaneStoreError } from "./control-plane-store.ts";
+import { loadDelegatedSessionSummaries } from "./delegated-session-projection.ts";
 
 const MAX_TREE_BRANCHES = 100;
 const MAX_TREE_ENTRIES = 10_000;
+const MAX_TREE_DELEGATIONS = 500;
 
 type SessionRow = {
   id: string;
@@ -285,7 +287,34 @@ export class ConversationTreeService {
     currentSessionId: string,
     view: ConversationTreeView,
   ): Promise<ConversationTreeResource> {
-    const lineage = await this.#lineage(tenantId, currentSessionId);
+    const selected = await this.#database
+      .selectFrom("sessions")
+      .select(["id", "session_kind as sessionKind"])
+      .where("tenant_id", "=", tenantId)
+      .where("id", "=", currentSessionId)
+      .where("archived_at", "is", null)
+      .executeTakeFirst();
+    if (selected === undefined) {
+      throw new ControlPlaneStoreError("not_found", "Conversation was not found");
+    }
+    const humanSessionId =
+      selected.sessionKind === "conversation"
+        ? selected.id
+        : (
+            await this.#database
+              .selectFrom("subagent_executions")
+              .select("parent_session_id as parentSessionId")
+              .where("tenant_id", "=", tenantId)
+              .where("child_session_id", "=", selected.id)
+              .executeTakeFirst()
+          )?.parentSessionId;
+    if (humanSessionId === undefined) {
+      throw new ControlPlaneStoreError(
+        "control_plane_misconfigured",
+        "Delegated Session has no parent execution",
+      );
+    }
+    const lineage = await this.#lineage(tenantId, humanSessionId);
     const rootSessionId = lineage[0]!.id;
     const sessions = view === "focus" ? lineage : await this.#family(tenantId, rootSessionId);
     const sessionIds = sessions.map((session) => session.id);
@@ -294,6 +323,17 @@ export class ConversationTreeService {
       completedTurns(this.#database, tenantId, sessionIds),
       mainLeaves(this.#database, tenantId, sessionIds),
     ]);
+    const delegated = await loadDelegatedSessionSummaries(this.#database, {
+      tenantId,
+      parentSessionIds: sessionIds,
+      maximum: MAX_TREE_DELEGATIONS,
+    });
+    if (delegated.truncated) {
+      throw new ControlPlaneStoreError(
+        "invalid_request",
+        "Conversation tree has too many delegates",
+      );
+    }
     let entryCount = 0;
     const branches: ConversationTreeBranchResource[] = sessions.map((session, index) => {
       const allEntries = entriesBySession.get(session.id) ?? [];
@@ -329,7 +369,7 @@ export class ConversationTreeService {
         entries: mapped.map(({ index: _index, ...entry }) => entry),
       };
     });
-    return { rootSessionId, currentSessionId, view, branches };
+    return { rootSessionId, currentSessionId, view, branches, delegatedSessions: delegated.items };
   }
 
   async fork(
@@ -719,6 +759,7 @@ export class ConversationTreeService {
         ])
         .where("tenant_id", "=", tenantId)
         .where("id", "=", cursor)
+        .where("session_kind", "=", "conversation")
         .where("archived_at", "is", null)
         .executeTakeFirst();
       if (row === undefined) {

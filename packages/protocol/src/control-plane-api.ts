@@ -437,9 +437,54 @@ export const ConversationSummaryResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const DelegatedSessionContextModeSchema = Type.Union([
+  Type.Literal("fresh"),
+  Type.Literal("fork"),
+]);
+
+export const DelegatedSessionWorkspaceModeSchema = Type.Union([
+  Type.Literal("none"),
+  Type.Literal("shared_serialized"),
+  Type.Literal("isolated"),
+]);
+
+export const DelegatedSessionStateSchema = Type.Union([
+  Type.Literal("preparing"),
+  Type.Literal("queued"),
+  Type.Literal("running"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+  Type.Literal("cancelled"),
+  Type.Literal("unknown"),
+]);
+
+/**
+ * A delegated Pi Session is visible product history, but it is not a normal
+ * human conversation fork. The parent Turn is the causal/UI anchor while the
+ * context and Workspace modes describe two independent inheritance axes.
+ */
+export const DelegatedSessionSummaryResourceSchema = Type.Object(
+  {
+    executionId: UuidSchema,
+    sessionId: UuidSchema,
+    parentSessionId: UuidSchema,
+    parentTurnId: UuidSchema,
+    title: Type.String({ minLength: 1, maxLength: 256 }),
+    agentName: Type.String({ minLength: 1, maxLength: 128 }),
+    contextMode: DelegatedSessionContextModeSchema,
+    workspaceMode: DelegatedSessionWorkspaceModeSchema,
+    state: DelegatedSessionStateSchema,
+    workspaceName: Type.String({ minLength: 1, maxLength: 256 }),
+    createdAt: UtcTimestampSchema,
+    settledAt: Type.Optional(UtcTimestampSchema),
+  },
+  { additionalProperties: false },
+);
+
 export const ConversationListResourceSchema = Type.Object(
   {
     conversations: Type.Array(ConversationSummaryResourceSchema, { maxItems: 100 }),
+    delegatedSessions: Type.Array(DelegatedSessionSummaryResourceSchema, { maxItems: 500 }),
     truncated: Type.Boolean(),
   },
   { additionalProperties: false },
@@ -644,6 +689,7 @@ export const ConversationTreeResourceSchema = Type.Object(
     currentSessionId: UuidSchema,
     view: ConversationTreeViewSchema,
     branches: Type.Array(ConversationTreeBranchResourceSchema, { maxItems: 100 }),
+    delegatedSessions: Type.Array(DelegatedSessionSummaryResourceSchema, { maxItems: 500 }),
   },
   { additionalProperties: false },
 );
@@ -1085,6 +1131,10 @@ export type WorkspaceListResource = Static<typeof WorkspaceListResourceSchema>;
 export type WorkspaceDeletionResource = Static<typeof WorkspaceDeletionResourceSchema>;
 export type ConversationTurnState = Static<typeof ConversationTurnStateSchema>;
 export type ConversationSummaryResource = Static<typeof ConversationSummaryResourceSchema>;
+export type DelegatedSessionContextMode = Static<typeof DelegatedSessionContextModeSchema>;
+export type DelegatedSessionWorkspaceMode = Static<typeof DelegatedSessionWorkspaceModeSchema>;
+export type DelegatedSessionState = Static<typeof DelegatedSessionStateSchema>;
+export type DelegatedSessionSummaryResource = Static<typeof DelegatedSessionSummaryResourceSchema>;
 export type ConversationListResource = Static<typeof ConversationListResourceSchema>;
 export type ConversationSessionResource = Static<typeof ConversationSessionResourceSchema>;
 export type ConversationTranscriptItemResource = Static<

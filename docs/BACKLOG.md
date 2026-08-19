@@ -66,12 +66,15 @@ retired and remain only in Git history or explicitly superseded ADRs.
 
 ## Multi-agent execution
 
-- [ ] Map `spawn_agent` to a child Session and child Run rather than a local Pi
-      subprocess; forbid nested children in the first release.
-- [ ] Support explicit `shared_readonly`, `shared_serialized` and `isolated`
-      Workspace modes without equating conversation forks with file forks.
-- [ ] Implement an isolated Workspace branch provider before allowing parallel
-      mutating child Agents.
+- [x] Map the maintained `pi-subagents` contract to Child Sessions/Runs rather
+      than local Pi subprocesses; forbid nested children in the first release.
+- [x] Support Tool-free, `shared_serialized` and isolated Workspace modes
+      without equating conversation forks with file forks.
+- [x] Implement a trusted persistent-Volume branch for parallel isolated
+      mutating children and return their settled patch to the parent.
+- [x] Project fresh and fork-context Child Sessions as typed, read-only nodes in
+      the conversation list and tree while preserving their distinct execution
+      relation.
 
 ## Product expansion rule
 

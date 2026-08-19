@@ -123,6 +123,36 @@ describe("product chat experience", () => {
           rootSessionId,
           currentSessionId: childSessionId,
           view: "full",
+          delegatedSessions: [
+            {
+              executionId: "10000000-0000-4000-8000-000000000031",
+              sessionId: "10000000-0000-4000-8000-000000000032",
+              parentSessionId: rootSessionId,
+              parentTurnId: rootTurnId,
+              title: "worker · subagent",
+              agentName: "worker",
+              contextMode: "fork",
+              workspaceMode: "shared_serialized",
+              state: "completed",
+              workspaceName: "sorting",
+              createdAt: "2026-08-15T00:00:00.500Z",
+              settledAt: "2026-08-15T00:00:01.500Z",
+            },
+            {
+              executionId: "10000000-0000-4000-8000-000000000033",
+              sessionId: "10000000-0000-4000-8000-000000000034",
+              parentSessionId: rootSessionId,
+              parentTurnId: rootTurnId,
+              title: "scout · subagent",
+              agentName: "scout",
+              contextMode: "fresh",
+              workspaceMode: "none",
+              state: "completed",
+              workspaceName: "sorting",
+              createdAt: "2026-08-15T00:00:00.600Z",
+              settledAt: "2026-08-15T00:00:01.600Z",
+            },
+          ],
           branches: [
             {
               sessionId: rootSessionId,
@@ -173,6 +203,12 @@ describe("product chat experience", () => {
     expect(markup).toContain("改用泛型实现");
     expect(markup).toContain("product-tree-user");
     expect(markup).toContain("product-tree-assistant");
+    expect(markup).toContain("worker");
+    expect(markup).toContain("继承上下文");
+    expect(markup).toContain("共享工作区");
+    expect(markup).toContain("scout");
+    expect(markup).toContain("独立上下文");
+    expect(markup).toContain("无工具");
   });
 
   it("does not render the removed per-turn patch viewer", () => {

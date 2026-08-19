@@ -36,7 +36,7 @@ schema or maintained deployment. The current sources of truth are this README,
 - Chat-style multi-round Pi conversations and resumable streaming;
 - Pi Session tree navigation with focused/full-tree views and conversation forks;
 - the pinned community `pi-subagents` workflow contract, with durable Child
-  Sessions/Runs and shared or isolated Cube execution;
+  Sessions/Runs, visible delegated branches and shared or isolated Cube execution;
 - pure chat without Sandbox activation;
 - lazy Cube activation, warm reuse and optional persistent Sandbox retention;
 - a Workspace directory/source browser, isolated Web Terminal, and safe deletion;
@@ -106,7 +106,9 @@ Child Run on the same Worker pool. Tool-free reviewers consume no Cube;
 `shared_serialized` children temporarily receive the parent's Cube authority;
 `worktree:true` creates a trusted persistent-Volume fork and an independent
 Cube with fresh model context, then returns the settled patch to the parent. Child Session entries and
-compaction remain native Pi PostgreSQL records. Parent cancellation is relayed
+compaction remain native Pi PostgreSQL records. The UI exposes each Child as a
+typed, read-only branch and labels context inheritance separately from
+Workspace sharing. Parent cancellation is relayed
 to admitted children, and Worker capacity reserves a child lane so a pool of
 waiting parents cannot starve every delegated Run.
 

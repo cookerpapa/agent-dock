@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import type {
   ConversationTreeResource,
   ConversationTreeView,
   ConversationSummaryResource,
+  DelegatedSessionSummaryResource,
   SandboxRetentionPolicy,
   TenantIdentityResource,
   WorkspaceSummaryResource,
@@ -42,12 +51,27 @@ function relativeTime(value: string): string {
   return new Date(value).toLocaleDateString();
 }
 
+function delegatedContextLabel(mode: DelegatedSessionSummaryResource["contextMode"]): string {
+  return mode === "fork" ? "继承上下文" : "独立上下文";
+}
+
+function delegatedWorkspaceLabel(mode: DelegatedSessionSummaryResource["workspaceMode"]): string {
+  if (mode === "shared_serialized") return "共享工作区";
+  if (mode === "isolated") return "隔离工作区";
+  return "无工具";
+}
+
 export default function ChatApp() {
   const api = useMemo(() => new PiCloudApi(), []);
   const [authPhase, setAuthPhase] = useState<AuthPhase>("checking");
   const [identity, setIdentity] = useState<TenantIdentityResource | null>(null);
   const [state, setState] = useState(createInitialSessionView);
   const [conversations, setConversations] = useState<readonly ConversationSummaryResource[]>([]);
+  const [delegatedSessions, setDelegatedSessions] = useState<
+    readonly DelegatedSessionSummaryResource[]
+  >([]);
+  const [selectedDelegatedSession, setSelectedDelegatedSession] =
+    useState<DelegatedSessionSummaryResource | null>(null);
   const [conversationTree, setConversationTree] = useState<ConversationTreeResource | null>(null);
   const [treeView, setTreeView] = useState<ConversationTreeView>("focus");
   const [treeLoading, setTreeLoading] = useState(false);
@@ -91,12 +115,39 @@ export default function ChatApp() {
   });
   const canMutate = identity?.role !== "viewer";
   const canQueue =
-    state.session === null ||
-    state.sessionState === "cold" ||
-    state.sessionState === "idle" ||
-    state.sessionState === "running" ||
-    state.sessionState === "waiting_approval" ||
-    state.sessionState === "cancelling";
+    selectedDelegatedSession === null &&
+    (state.session === null ||
+      state.sessionState === "cold" ||
+      state.sessionState === "idle" ||
+      state.sessionState === "running" ||
+      state.sessionState === "waiting_approval" ||
+      state.sessionState === "cancelling");
+  const conversationChildren = useMemo(() => {
+    const children = new Map<string, ConversationSummaryResource[]>();
+    for (const conversation of conversations) {
+      if (conversation.parentSessionId === undefined) continue;
+      const siblings = children.get(conversation.parentSessionId) ?? [];
+      siblings.push(conversation);
+      children.set(conversation.parentSessionId, siblings);
+    }
+    return children;
+  }, [conversations]);
+  const rootConversations = useMemo(() => {
+    const known = new Set(conversations.map((conversation) => conversation.sessionId));
+    return conversations.filter(
+      (conversation) =>
+        conversation.parentSessionId === undefined || !known.has(conversation.parentSessionId),
+    );
+  }, [conversations]);
+  const delegatesByParent = useMemo(() => {
+    const children = new Map<string, DelegatedSessionSummaryResource[]>();
+    for (const delegated of delegatedSessions) {
+      const siblings = children.get(delegated.parentSessionId) ?? [];
+      siblings.push(delegated);
+      children.set(delegated.parentSessionId, siblings);
+    }
+    return children;
+  }, [delegatedSessions]);
   const forkTargets = useMemo(() => {
     const targets = new Map<string, { sourceSessionId: string; turnId: string; entryId: string }>();
     for (const branch of conversationTree?.branches ?? []) {
@@ -119,6 +170,7 @@ export default function ChatApp() {
   const refreshConversations = useCallback(async (): Promise<void> => {
     const listed = await api.listConversations();
     setConversations(listed.conversations);
+    setDelegatedSessions(listed.delegatedSessions);
   }, [api]);
 
   const refreshWorkspaces = useCallback(async (): Promise<void> => {
@@ -185,7 +237,10 @@ export default function ChatApp() {
     let cancelled = false;
     void api.listConversations().then(
       (listed) => {
-        if (!cancelled) setConversations(listed.conversations);
+        if (!cancelled) {
+          setConversations(listed.conversations);
+          setDelegatedSessions(listed.delegatedSessions);
+        }
       },
       (error: unknown) => {
         if (!cancelled) update({ type: "api.error", message: errorMessage(error) });
@@ -347,6 +402,7 @@ export default function ChatApp() {
     setInspectorOpen(false);
     setSidebarOpen(false);
     setConversationTree(null);
+    setSelectedDelegatedSession(null);
     setPendingTreeJump(null);
   }
 
@@ -358,6 +414,7 @@ export default function ChatApp() {
     }
     resetConversation();
     setConversations([]);
+    setDelegatedSessions([]);
     setWorkspaces([]);
     setIdentity(null);
     setAuthPhase("anonymous");
@@ -367,6 +424,7 @@ export default function ChatApp() {
     sessionId: string,
     jumpToTurnId?: string,
     allowDuringOperation = false,
+    delegatedSession: DelegatedSessionSummaryResource | null = null,
   ): Promise<void> {
     if (conversationLoading !== null || (!allowDuringOperation && operation !== null)) return;
     setConversationLoading(sessionId);
@@ -379,6 +437,7 @@ export default function ChatApp() {
         conversation: loaded.conversation,
         ...(loaded.liveSnapshot === undefined ? {} : { liveSnapshot: loaded.liveSnapshot }),
       });
+      setSelectedDelegatedSession(delegatedSession);
       if (jumpToTurnId !== undefined) setPendingTreeJump(jumpToTurnId);
       setSidebarOpen(false);
     } catch (error: unknown) {
@@ -389,7 +448,13 @@ export default function ChatApp() {
   }
 
   async function openConversation(conversation: ConversationSummaryResource): Promise<void> {
-    return openConversationSession(conversation.sessionId);
+    return openConversationSession(conversation.sessionId, undefined, false, null);
+  }
+
+  async function openDelegatedSession(
+    delegatedSession: DelegatedSessionSummaryResource,
+  ): Promise<void> {
+    return openConversationSession(delegatedSession.sessionId, undefined, false, delegatedSession);
   }
 
   async function createConversationFork(): Promise<void> {
@@ -597,6 +662,72 @@ export default function ChatApp() {
     }
   }
 
+  function renderConversationNode(conversation: ConversationSummaryResource, depth = 0): ReactNode {
+    const childConversations = conversationChildren.get(conversation.sessionId) ?? [];
+    const childDelegates = delegatesByParent.get(conversation.sessionId) ?? [];
+    return (
+      <div className="product-conversation-tree-node" key={conversation.sessionId}>
+        <div
+          className={`product-conversation-row${depth === 0 ? "" : " branch"}${
+            state.session?.sessionId === conversation.sessionId ? " active" : ""
+          }`}
+          style={{ "--conversation-depth": depth } as CSSProperties}
+        >
+          <button
+            disabled={conversationLoading !== null || operation !== null}
+            onClick={() => void openConversation(conversation)}
+            type="button"
+          >
+            <strong>
+              {depth === 0 ? null : <span className="product-conversation-branch-mark">↳ </span>}
+              {conversation.title}
+            </strong>
+            <small>
+              {conversation.workspaceName} · {relativeTime(conversation.lastActiveAt)}
+            </small>
+          </button>
+          <button
+            aria-label={`删除对话 ${conversation.title}`}
+            className="product-delete-conversation"
+            disabled={conversationLoading !== null || operation !== null}
+            onClick={() => void deleteConversation(conversation)}
+            title="删除对话"
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+        {childConversations.map((child) => renderConversationNode(child, depth + 1))}
+        {childDelegates.map((delegated) => (
+          <div
+            className={`product-conversation-row product-delegated-session ${delegated.contextMode}${
+              state.session?.sessionId === delegated.sessionId ? " active" : ""
+            }`}
+            key={delegated.executionId}
+            style={{ "--conversation-depth": depth + 1 } as CSSProperties}
+          >
+            <button
+              disabled={conversationLoading !== null || operation !== null}
+              onClick={() => void openDelegatedSession(delegated)}
+              type="button"
+            >
+              <strong>
+                <span className="product-conversation-branch-mark">
+                  {delegated.contextMode === "fork" ? "↳" : "⋯"}
+                </span>
+                {delegated.agentName} · Subagent
+              </strong>
+              <small>
+                {delegatedContextLabel(delegated.contextMode)} ·{" "}
+                {delegatedWorkspaceLabel(delegated.workspaceMode)} · {delegated.state}
+              </small>
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   if (authPhase === "checking") {
     return (
       <main className="product-loading-page">
@@ -663,40 +794,7 @@ export default function ChatApp() {
             {conversations.length === 0 ? (
               <div className="product-conversation-empty">还没有对话</div>
             ) : (
-              conversations.map((conversation) => (
-                <div
-                  className={`product-conversation-row${
-                    conversation.parentSessionId === undefined ? "" : " branch"
-                  }${state.session?.sessionId === conversation.sessionId ? " active" : ""}`}
-                  key={conversation.sessionId}
-                >
-                  <button
-                    disabled={conversationLoading !== null || operation !== null}
-                    onClick={() => void openConversation(conversation)}
-                    type="button"
-                  >
-                    <strong>
-                      {conversation.parentSessionId === undefined ? null : (
-                        <span className="product-conversation-branch-mark">↳ </span>
-                      )}
-                      {conversation.title}
-                    </strong>
-                    <small>
-                      {conversation.workspaceName} · {relativeTime(conversation.lastActiveAt)}
-                    </small>
-                  </button>
-                  <button
-                    aria-label={`删除对话 ${conversation.title}`}
-                    className="product-delete-conversation"
-                    disabled={conversationLoading !== null || operation !== null}
-                    onClick={() => void deleteConversation(conversation)}
-                    title="删除对话"
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))
+              rootConversations.map((conversation) => renderConversationNode(conversation))
             )}
           </nav>
           <footer className="product-account">
@@ -736,7 +834,12 @@ export default function ChatApp() {
 
       <ConversationTreeNavigator
         loading={treeLoading}
-        onNavigate={(sessionId, turnId) => void openConversationSession(sessionId, turnId)}
+        onNavigate={(sessionId, turnId) => {
+          const delegated = conversationTree?.delegatedSessions.find(
+            (candidate) => candidate.sessionId === sessionId,
+          );
+          void openConversationSession(sessionId, turnId, false, delegated ?? null);
+        }}
         onViewChange={setTreeView}
         scrollerRef={chatScrollerRef}
         tree={conversationTree}
@@ -754,6 +857,13 @@ export default function ChatApp() {
           </button>
           <div className="product-topbar-title">
             <strong>{state.session?.title ?? "新对话"}</strong>
+            {selectedDelegatedSession === null ? null : (
+              <span className="product-delegated-title">
+                {selectedDelegatedSession.agentName} ·{" "}
+                {delegatedContextLabel(selectedDelegatedSession.contextMode)} ·{" "}
+                {delegatedWorkspaceLabel(selectedDelegatedSession.workspaceMode)} · 只读
+              </span>
+            )}
             {state.project ? (
               <span>
                 /workspace · {state.project.name}
@@ -773,8 +883,13 @@ export default function ChatApp() {
               </button>
             ) : null}
             <button
-              disabled={state.session === null}
+              disabled={state.session === null || selectedDelegatedSession !== null}
               onClick={() => setInspectorOpen((value) => !value)}
+              title={
+                selectedDelegatedSession === null
+                  ? "查看 Workspace"
+                  : "Subagent 执行记录为只读；请从父会话查看 Workspace"
+              }
               type="button"
             >
               工作区
@@ -1085,6 +1200,11 @@ export default function ChatApp() {
         </div>
 
         <footer className="product-composer-area">
+          {selectedDelegatedSession === null ? null : (
+            <div className="product-delegated-readonly">
+              这是一次 Subagent 执行记录。后续消息请回到父会话发送。
+            </div>
+          )}
           <div className="product-composer">
             <textarea
               aria-label="发送消息"
@@ -1123,7 +1243,7 @@ export default function ChatApp() {
             ) : (
               <button
                 className="product-send-button"
-                disabled={!prompt.trim() || operation !== null}
+                disabled={!prompt.trim() || !canQueue || operation !== null}
                 onClick={() => void submitTurn()}
                 title="发送"
                 type="button"

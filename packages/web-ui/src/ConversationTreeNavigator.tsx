@@ -3,6 +3,7 @@ import type {
   ConversationTreeBranchResource,
   ConversationTreeResource,
   ConversationTreeView,
+  DelegatedSessionSummaryResource,
 } from "@pi-cloud/protocol";
 import { selectActiveOutlineTurn } from "./ConversationOutline.tsx";
 import { useResizablePanel } from "./use-resizable-panel.ts";
@@ -35,18 +36,43 @@ function branchChildren(tree: ConversationTreeResource) {
   return children;
 }
 
+function delegatedChildren(tree: ConversationTreeResource) {
+  const children = new Map<string, DelegatedSessionSummaryResource[]>();
+  for (const delegated of tree.delegatedSessions) {
+    const key = `${delegated.parentSessionId}:${delegated.parentTurnId}`;
+    const siblings = children.get(key) ?? [];
+    siblings.push(delegated);
+    children.set(key, siblings);
+  }
+  return children;
+}
+
+function contextLabel(mode: DelegatedSessionSummaryResource["contextMode"]): string {
+  return mode === "fork" ? "继承上下文" : "独立上下文";
+}
+
+function workspaceLabel(mode: DelegatedSessionSummaryResource["workspaceMode"]): string {
+  if (mode === "shared_serialized") return "共享工作区";
+  if (mode === "isolated") return "隔离工作区";
+  return "无工具";
+}
+
 function TreeBranch({
   branch,
   children,
+  delegations,
   depth,
   activeTurnId,
+  currentSessionId,
   navigate,
 }: {
   branch: ConversationTreeBranchResource;
   children: ReadonlyMap<string, readonly ConversationTreeBranchResource[]>;
+  delegations: ReadonlyMap<string, readonly DelegatedSessionSummaryResource[]>;
   depth: number;
   activeTurnId: string | null;
-  navigate: (sessionId: string, turnId: string) => void;
+  currentSessionId: string;
+  navigate: (sessionId: string, turnId?: string) => void;
 }) {
   return (
     <div className="product-tree-branch" style={{ "--tree-depth": depth } as React.CSSProperties}>
@@ -66,6 +92,9 @@ function TreeBranch({
       )}
       {branch.entries.map((entry) => {
         const nested = children.get(`${branch.sessionId}:${entry.entryId}`) ?? [];
+        const delegated = entry.finalAssistant
+          ? (delegations.get(`${branch.sessionId}:${entry.turnId}`) ?? [])
+          : [];
         return (
           <div className="product-tree-entry-wrap" key={`${branch.sessionId}:${entry.entryId}`}>
             <button
@@ -87,10 +116,32 @@ function TreeBranch({
                 activeTurnId={activeTurnId}
                 branch={child}
                 children={children}
+                currentSessionId={currentSessionId}
+                delegations={delegations}
                 depth={depth + 1}
                 key={child.sessionId}
                 navigate={navigate}
               />
+            ))}
+            {delegated.map((child) => (
+              <button
+                className={`product-tree-delegated ${child.contextMode}${
+                  currentSessionId === child.sessionId ? " current" : ""
+                }`}
+                key={child.executionId}
+                onClick={() => navigate(child.sessionId)}
+                title={`${child.agentName} · ${contextLabel(child.contextMode)} · ${workspaceLabel(child.workspaceMode)}`}
+                type="button"
+              >
+                <span aria-hidden="true">{child.contextMode === "fork" ? "↳" : "⋯"}</span>
+                <span>
+                  <strong>{child.agentName}</strong>
+                  <small>
+                    {contextLabel(child.contextMode)} · {workspaceLabel(child.workspaceMode)} ·{" "}
+                    {child.state}
+                  </small>
+                </span>
+              </button>
             ))}
           </div>
         );
@@ -112,7 +163,7 @@ export function ConversationTreeNavigator({
   loading: boolean;
   scrollerRef: RefObject<HTMLElement | null>;
   onViewChange: (view: ConversationTreeView) => void;
-  onNavigate: (sessionId: string, turnId: string) => void;
+  onNavigate: (sessionId: string, turnId?: string) => void;
 }) {
   const panel = useResizablePanel({
     storageKey: "pi-cloud:conversation-tree",
@@ -176,7 +227,11 @@ export function ConversationTreeNavigator({
     [],
   );
 
-  const navigate = (sessionId: string, turnId: string): void => {
+  const navigate = (sessionId: string, turnId?: string): void => {
+    if (turnId === undefined) {
+      onNavigate(sessionId);
+      return;
+    }
     const scroller = scrollerRef.current;
     const target = scroller === null ? undefined : turnElements(scroller).get(turnId);
     if (target === undefined) {
@@ -195,6 +250,7 @@ export function ConversationTreeNavigator({
 
   const root = tree?.branches.find((branch) => branch.parentSessionId === null) ?? null;
   const children = tree === null ? new Map() : branchChildren(tree);
+  const delegations = tree === null ? new Map() : delegatedChildren(tree);
   return (
     <aside
       className={`product-tree-panel product-resizable-panel${panel.collapsed ? " collapsed" : ""}`}
@@ -243,6 +299,8 @@ export function ConversationTreeNavigator({
               activeTurnId={activeTurnId}
               branch={root}
               children={children}
+              currentSessionId={tree!.currentSessionId}
+              delegations={delegations}
               depth={0}
               navigate={navigate}
             />

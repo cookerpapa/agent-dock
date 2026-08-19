@@ -423,8 +423,8 @@ body.product-panel-resizing {
   background: #2b2b2b;
 }
 
-.product-conversation-row.branch > button:first-child {
-  padding-left: 17px;
+.product-conversation-row > button:first-child {
+  padding-left: calc(9px + var(--conversation-depth, 0) * 12px);
 }
 
 .product-conversation-branch-mark {
@@ -438,10 +438,29 @@ body.product-panel-resizing {
   min-width: 0;
   gap: 3px;
   margin-bottom: 2px;
-  padding: 9px;
+  padding-top: 9px;
+  padding-right: 9px;
+  padding-bottom: 9px;
   border-radius: 8px;
   color: #d6d6d6;
   text-align: left;
+}
+
+.product-delegated-session {
+  margin-left: calc(var(--conversation-depth, 1) * 8px);
+  border-left: 1px solid #514575;
+}
+
+.product-delegated-session.fresh {
+  border-left-style: dashed;
+}
+
+.product-delegated-session > button:first-child {
+  padding-left: calc(9px + var(--conversation-depth, 1) * 6px);
+}
+
+.product-delegated-session strong {
+  color: #b8ace9;
 }
 
 .product-conversation-row .product-delete-conversation {
@@ -1805,6 +1824,69 @@ body.product-panel-resizing {
 .product-tree-entry-wrap > .product-tree-branch {
   margin-top: 2px;
   margin-bottom: 3px;
+}
+
+.product-tree-delegated {
+  display: grid;
+  width: calc(100% - 13px);
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 4px;
+  margin: 3px 0 5px 13px;
+  padding: 6px;
+  border: 0;
+  border-left: 1px solid #5f5190;
+  border-radius: 0 6px 6px 0;
+  background: #211e2b;
+  color: #a99cda;
+  text-align: left;
+}
+
+.product-tree-delegated.fresh {
+  border-left-style: dashed;
+}
+
+.product-tree-delegated:hover,
+.product-tree-delegated.current {
+  background: #302b46;
+  color: #e0dbf8;
+}
+
+.product-tree-delegated > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.product-tree-delegated strong,
+.product-tree-delegated small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-tree-delegated strong {
+  font-size: 9px;
+}
+
+.product-tree-delegated small {
+  color: #81799e;
+  font-size: 8px;
+}
+
+.product-delegated-title {
+  color: #a99cda !important;
+}
+
+.product-delegated-readonly {
+  max-width: 840px;
+  margin: 0 auto 7px;
+  padding: 7px 10px;
+  border: 1px solid #3b3454;
+  border-radius: 8px;
+  background: #211e2b;
+  color: #a99cda;
+  font-size: 10px;
+  text-align: center;
 }
 
 .workspace-directory-header {

@@ -114,10 +114,13 @@ security boundary.
 PiCloud pins the public `pi-subagents` package and preserves its model-visible
 Tool schema, deployment-owned profiles and workflow-script runtime. A narrow
 `PI_SUBAGENT_PI_BINARY` adapter replaces only local leaf execution. Every leaf
-becomes a hidden `session_kind=subagent` Pi Session, Run and RunAttempt in
-PostgreSQL and is claimed by the ordinary shared Worker pool. A child never
-inherits more Tools than the immutable parent Run snapshot, and subagent
-Sessions cannot recursively register the orchestration Tool.
+becomes a typed `session_kind=subagent` Pi Session, Run and RunAttempt in
+PostgreSQL and is claimed by the ordinary shared Worker pool. The product
+projects it beneath the causal parent Turn with explicit context and Workspace
+mode labels; its native transcript is inspectable but read-only. It never
+masquerades as a normal human conversation fork. A child never inherits more
+Tools than the immutable parent Run snapshot, and subagent Sessions cannot
+recursively register the orchestration Tool.
 
 Workspace modes are explicit:
 

@@ -50,6 +50,7 @@ if (parentPort === null) throw new Error("Pi subagent cloud Worker requires a pa
 const abort = new AbortController();
 const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
 const activeProviderJobs = new Set<string>();
+const completedCloudResults = new Map<string, { stepIndex: number; output: string }>();
 
 parentPort.on("message", (message: ProviderResponse | { type: "abort" }) => {
   if (message.type === "abort") {
@@ -139,6 +140,15 @@ function parseChildInvocation(value: unknown): ExternalJobStartInput {
   let prompt = taskArgument.startsWith("@")
     ? readFileSync(taskArgument.slice(1), "utf8")
     : taskArgument;
+  // pi-subagents normally asks a local child process to mirror its final
+  // answer into a host-side output file. A cloud child cannot and must not
+  // write outside /workspace; its native PostgreSQL Session result is already
+  // returned through the provider bridge. Remove only that local transport
+  // instruction while preserving the task and acceptance contract.
+  prompt = prompt.replace(
+    /\n---\n\*\*Output:\*\*\nWrite your findings to exactly this path:[^\n]*\nThis path is authoritative for this run\.\nIgnore any other output filename or output path mentioned elsewhere,[^\n]*\n?/u,
+    "\n",
+  );
   const isolationMarker = prompt.indexOf(ISOLATED_WORKSPACE_TASK_PREFIX);
   const isolatedWorkspace = isolationMarker >= 0;
   if (isolatedWorkspace) {
@@ -227,6 +237,20 @@ function cloudWorkflowScript(script: string, defaultIsolated: boolean): string {
   ].join("\n");
 }
 
+function structuredChildWorkflowScript(
+  argumentsValue: Record<string, unknown>,
+): string | undefined {
+  if (typeof argumentsValue.agent !== "string" || argumentsValue.agent.trim() === "") {
+    return undefined;
+  }
+  const child = Object.fromEntries(
+    ["agent", "task", "resume", "worktree", "model", "thinking", "tools", "context", "cwd"]
+      .filter((key) => argumentsValue[key] !== undefined)
+      .map((key) => [key, argumentsValue[key]]),
+  );
+  return `return runs.run("main", ${JSON.stringify(child)});`;
+}
+
 let directoriesForBridge: ReturnType<typeof prepareAgentDir> | undefined;
 
 async function waitForCloudResult(
@@ -255,10 +279,17 @@ async function waitForCloudResult(
     state = status.state;
   }
   try {
-    return (await request("result", { providerJobId: started.providerJobId })) as Record<
+    const result = (await request("result", { providerJobId: started.providerJobId })) as Record<
       string,
       unknown
     >;
+    if (typeof result.output === "string" && result.output.trim() !== "") {
+      completedCloudResults.set(started.providerJobId, {
+        stepIndex: startInput.stepIndex,
+        output: result.output.trim(),
+      });
+    }
+    return result;
   } finally {
     activeProviderJobs.delete(started.providerJobId);
   }
@@ -294,72 +325,6 @@ async function startShimBridge(socketPath: string): Promise<Server> {
     });
   });
   return server;
-}
-
-function completionArchiveText(details: unknown): string | undefined {
-  if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
-  const completions = (details as { completions?: unknown }).completions;
-  if (!Array.isArray(completions)) return undefined;
-  const archivePath = completions.find(
-    (completion): completion is { archivePath: string } =>
-      completion !== null &&
-      typeof completion === "object" &&
-      !Array.isArray(completion) &&
-      typeof (completion as { archivePath?: unknown }).archivePath === "string",
-  )?.archivePath;
-  if (archivePath === undefined) return undefined;
-  const archive = JSON.parse(readFileSync(archivePath, "utf8")) as {
-    entries?: Array<{ source?: string; path?: string; text?: string }>;
-  };
-  const outputs: string[] = [];
-  for (const entry of archive.entries ?? []) {
-    if (typeof entry.text === "string" && entry.text.trim()) {
-      outputs.push(entry.text.trim());
-      continue;
-    }
-    if (typeof entry.path !== "string") continue;
-    if (entry.source === "output-artifact") {
-      const output = readFileSync(entry.path, "utf8").trim();
-      if (output) outputs.push(output);
-      continue;
-    }
-    if (entry.source === "session") {
-      const messages = readFileSync(entry.path, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .flatMap((line) => {
-          try {
-            const parsed = JSON.parse(line) as {
-              type?: string;
-              message?: { role?: string; content?: unknown };
-            };
-            return parsed.type === "message" && parsed.message?.role === "assistant"
-              ? [parsed.message.content]
-              : [];
-          } catch {
-            return [];
-          }
-        });
-      const text = messages
-        .flatMap((content) =>
-          Array.isArray(content)
-            ? content
-                .filter(
-                  (part): part is { type: "text"; text: string } =>
-                    part !== null &&
-                    typeof part === "object" &&
-                    (part as { type?: unknown }).type === "text" &&
-                    typeof (part as { text?: unknown }).text === "string",
-                )
-                .map((part) => part.text)
-            : [],
-        )
-        .join("\n")
-        .trim();
-      if (text) outputs.push(text);
-    }
-  }
-  return outputs.length === 0 ? undefined : outputs.join("\n\n---\n\n");
 }
 
 async function main(): Promise<void> {
@@ -447,24 +412,38 @@ async function main(): Promise<void> {
       .getAllRegisteredTools()
       .find((tool) => tool.definition.name === "subagent");
     if (registered === undefined) throw new Error("pi-subagents Tool was unavailable");
+    const tool = wrapRegisteredTool(registered, session.extensionRunner);
+    if (input.arguments.action === "list") {
+      const listed = await tool.execute(input.toolCallId, { action: "list" }, abort.signal);
+      parentPort!.postMessage({ type: "result", result: listed });
+      return;
+    }
     if (typeof input.arguments.action === "string") {
-      throw new Error("Cloud subagents expose workflow execution, not local profile management");
+      throw new Error(
+        "Cloud subagent management actions are unavailable across Worker replacement; start a child or workflow instead",
+      );
     }
-    if (typeof input.arguments.workflowScript !== "string") {
-      throw new Error("Cloud subagents require a pi-subagents workflowScript");
+    const requestedScript =
+      typeof input.arguments.workflowScript === "string"
+        ? input.arguments.workflowScript
+        : structuredChildWorkflowScript(input.arguments);
+    if (requestedScript === undefined) {
+      throw new Error("Cloud subagents require { agent, task } or a pi-subagents workflowScript");
     }
+    const {
+      agent: _structuredAgent,
+      task: _structuredTask,
+      resume: _structuredResume,
+      ...workflowArguments
+    } = input.arguments;
     const argumentsForCloud = {
-      ...input.arguments,
-      workflowScript: cloudWorkflowScript(
-        input.arguments.workflowScript,
-        input.arguments.worktree === true,
-      ),
+      ...workflowArguments,
+      workflowScript: cloudWorkflowScript(requestedScript, input.arguments.worktree === true),
       async: true,
       mission: false,
       chatProgress: "off",
       worktree: false,
     };
-    const tool = wrapRegisteredTool(registered, session.extensionRunner);
     const launched = await tool.execute(
       input.toolCallId,
       argumentsForCloud,
@@ -488,29 +467,36 @@ async function main(): Promise<void> {
       .find((candidate) => candidate.definition.name === "subagent_wait");
     if (registeredWait === undefined) throw new Error("pi-subagents wait Tool was unavailable");
     const waitTool = wrapRegisteredTool(registeredWait, session.extensionRunner);
-    const waited = await waitTool.execute(
+    await waitTool.execute(
       `${input.toolCallId}:wait`,
       { id: asyncId, timeoutMs: 120_000 },
       abort.signal,
     );
-    const archivedOutput = completionArchiveText(waited.details);
-    const status = await tool.execute(
-      `${input.toolCallId}:status`,
-      { action: "status", id: asyncId },
-      abort.signal,
-    );
+    const cloudOutput = [...completedCloudResults.values()]
+      .sort((left, right) => left.stepIndex - right.stepIndex)
+      .map((result) => result.output)
+      .join("\n\n---\n\n")
+      .trim();
     parentPort!.postMessage({
       type: "result",
       result: {
         content: [
-          ...launched.content,
-          ...waited.content,
-          ...(archivedOutput === undefined
-            ? []
-            : [{ type: "text" as const, text: `Subagent results:\n\n${archivedOutput}` }]),
-          ...status.content,
+          {
+            type: "text" as const,
+            text:
+              cloudOutput === ""
+                ? "Subagent workflow completed without a text result."
+                : `Subagent workflow completed.\n\n${cloudOutput}`,
+          },
         ],
-        details: { launch: launched.details, wait: waited.details, status: status.details },
+        // The upstream launch/wait payload contains Worker-local paths,
+        // async registry IDs and follow-up instructions that are invalid after
+        // this cloud invocation is disposed. Keep only bounded terminal facts
+        // in the model-visible result.
+        details: {
+          state: "completed",
+          childCount: completedCloudResults.size,
+        },
       },
     });
   } finally {

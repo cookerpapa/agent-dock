@@ -168,6 +168,7 @@ describe("control-plane public API schemas", () => {
             lastActiveAt: createdAt,
           },
         ],
+        delegatedSessions: [],
         truncated: false,
       }),
     ).toMatchObject({ conversations: [{ title: "Repair checkout" }] });

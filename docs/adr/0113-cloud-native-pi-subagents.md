@@ -17,9 +17,9 @@ with a new PiCloud-specific model-visible protocol would lose upstream
 compatibility and create a second subagent design.
 
 Conversation forks and delegated execution also have different product
-semantics. A human conversation branch belongs in the visible Session tree; a
-subagent child is an execution relation and must not silently appear as a
-normal user conversation.
+semantics. Both are useful visible history, but a subagent child must appear as
+a typed execution branch rather than silently masquerading as a normal user
+conversation.
 
 ## Decision
 
@@ -31,7 +31,16 @@ normal user conversation.
 - PostgreSQL owns the parent/child execution relation, child Run state and all
   Pi Session entries. A local child process, local JSONL file or Worker cache is
   never authoritative.
-- Keep human conversation ancestry separate from `subagent_executions`.
+- Keep human conversation ancestry separate from `subagent_executions`, then
+  project both into the product tree with explicit node types.
+- List Child Sessions beneath their causal parent Session and anchor them to
+  the parent Turn that invoked the orchestration Tool. A `fork` context edge is
+  rendered as inherited context; a `fresh` edge is rendered as independent
+  context. Workspace mode is displayed separately because context inheritance
+  and file/process sharing are independent decisions.
+- Child transcripts are tenant-scoped, durable Pi Sessions that users may
+  inspect read-only. Human follow-up, delete and fork operations continue to
+  target ordinary conversation Sessions only.
 - Freeze the child's Tool set as an intersection with the parent Run
   capability snapshot. A child can never widen its parent's grant.
 - Support explicit Workspace modes:
