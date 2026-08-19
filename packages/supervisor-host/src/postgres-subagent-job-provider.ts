@@ -1248,11 +1248,6 @@ export class PostgresSubagentJobProvider {
             .onRef("target.tenant_id", "=", "run.tenant_id")
             .onRef("target.id", "=", "run.command_id"),
         )
-        .innerJoin("sessions as child", (join) =>
-          join
-            .onRef("child.tenant_id", "=", "execution.tenant_id")
-            .onRef("child.id", "=", "execution.child_session_id"),
-        )
         .select([
           "execution.state as executionState",
           "execution.child_session_id as sessionId",
@@ -1261,11 +1256,10 @@ export class PostgresSubagentJobProvider {
           "run.turn_id as turnId",
           "target.id as targetCommandId",
           "target.state as targetCommandState",
-          "child.next_mailbox_position as mailboxPosition",
         ])
         .where("execution.tenant_id", "=", tenantId)
         .where("execution.id", "=", executionId)
-        .forUpdate(["execution", "run", "target", "child"])
+        .forUpdate(["execution", "run", "target"])
         .executeTakeFirst();
       if (row === undefined) {
         throw new PostgresSubagentJobError("not_found", "Subagent execution was not found");
@@ -1330,7 +1324,7 @@ export class PostgresSubagentJobProvider {
           idempotency_key: `subagent-cancel:${executionId}`,
           kind: "turn.cancel",
           state: "pending",
-          mailbox_position: row.mailboxPosition,
+          mailbox_position: null,
           payload: {
             schemaVersion: 1,
             targetCommandId: row.targetCommandId,
@@ -1362,15 +1356,6 @@ export class PostgresSubagentJobProvider {
           published_at: null,
           last_error: null,
         })
-        .executeTakeFirstOrThrow();
-      await transaction
-        .updateTable("sessions")
-        .set({
-          next_mailbox_position: sql<string>`${sql.ref("next_mailbox_position")} + 1`,
-          updated_at: now,
-        })
-        .where("tenant_id", "=", tenantId)
-        .where("id", "=", row.sessionId)
         .executeTakeFirstOrThrow();
     });
     return this.status(tenantId, executionId);

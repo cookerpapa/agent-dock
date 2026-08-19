@@ -778,6 +778,17 @@ describe.sequential("PostgresSubagentJobProvider", () => {
         workspaceMode: "none",
       }),
     ).rejects.toMatchObject({ code: "subagent_tree_depth_exhausted" });
+    await provider.cancel(tenantId, child.executionId);
+    const recursiveCancellations = await database
+      .selectFrom("commands")
+      .select("session_id")
+      .where("tenant_id", "=", tenantId)
+      .where("session_id", "in", [child.childSessionId, grandchild.childSessionId])
+      .where("kind", "=", "turn.cancel")
+      .execute();
+    expect(new Set(recursiveCancellations.map((command) => command.session_id))).toEqual(
+      new Set([child.childSessionId, grandchild.childSessionId]),
+    );
   });
 
   it("rejects dispatch after the parent fencing authority changes", async () => {
