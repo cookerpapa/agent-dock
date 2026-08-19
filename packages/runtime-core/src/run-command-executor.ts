@@ -679,6 +679,21 @@ export class RunCommandExecutor {
         .where("command.kind", "=", "turn.execute")
         .where("command.id", "=", commandId)
         .where(
+          sql<boolean>`not exists (
+            select 1
+            from workspace_terminal_sessions as active_terminal
+            where active_terminal.tenant_id = ${sql.ref("command.tenant_id")}
+              and active_terminal.workspace_id = ${sql.ref("session_row.workspace_id")}
+              and active_terminal.state in (
+                'reserved',
+                'materializing',
+                'active',
+                'cleaning',
+                'unknown'
+              )
+          )`,
+        )
+        .where(
           sql<boolean>`(
             (
               ${sql.ref("command.state")} = 'pending'

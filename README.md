@@ -175,13 +175,17 @@ configure the model. Useful operations:
 npm run production:ps
 npm run production:logs
 npm run production:check
+npm run production:product-surface-check
 npm run production:subagents-check
 npm run production:long-context-check
 npm run production:backup
 ```
 
 `production:check` consumes real model tokens and exercises Cube KVM. The
-long-context gate additionally requires
+product-surface gate drives the same cookie-authenticated REST, SSE and
+WebSocket APIs used by the browser, including tree/fork/prune, source browsing,
+Terminal, Steer, Cancel, recovery and deletion. It also consumes real model
+tokens and Cube capacity. The long-context gate additionally requires
 `PI_CLOUD_LIVE_LONG_CONTEXT_CHECK=1`; it runs sustained coding Turns until Pi
 performs native compaction, then verifies post-compaction coding and
 cross-Worker recovery.

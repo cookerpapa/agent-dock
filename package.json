@@ -70,6 +70,7 @@
     "production:token": "node scripts/print-production-token.mjs",
     "production:tenant": "node scripts/production-compose.mjs run --rm --no-deps database-bootstrap /app/packages/control-plane/src/tenant-admin.ts",
     "production:check": "node scripts/run-live-cubesandbox-production-check.mjs",
+    "production:product-surface-check": "node scripts/run-live-product-surface-check.mjs",
     "production:subagents-check": "node scripts/run-live-subagent-production-check.mjs",
     "production:semantic-check": "node scripts/run-live-cubesandbox-production-check.mjs",
     "production:worker-pool-check": "node scripts/run-live-pi-worker-pool-check.mjs",
@@ -103,6 +104,7 @@
     "tsx": "4.23.1",
     "typescript": "5.9.3",
     "vitest": "3.2.7",
+    "ws": "8.21.1",
     "yaml": "2.9.0"
   }
 }

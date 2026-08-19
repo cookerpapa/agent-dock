@@ -11,12 +11,15 @@ retired and remain only in Git history or explicitly superseded ADRs.
 - [x] Make the maintained architecture documents explicitly distinguish
       ephemeral RunAttempt ownership from the removed Worker-affinity design,
       and label migrations/discussion logs as historical evidence.
-- [ ] Keep formatting, typecheck, unit/integration, build, Helm and security
+- [x] Keep formatting, typecheck, unit/integration, build, Helm and security
       gates green.
 - [ ] Run a clean self-hosted install after every deployment contract change.
-- [ ] Re-run real-model pure-chat and multi-round coding acceptance after Pi or
+- [x] Re-run real-model pure-chat and multi-round coding acceptance after Pi or
       provider changes.
-- [ ] Verify Cube destruction followed by attachment of the same persistent
+- [x] Exercise the cookie-authenticated browser API surface end to end,
+      including Workspace source reads under full Cube capacity, Terminal→Run
+      writer handoff, Steer, Cancel/recovery, tree operations and deletion.
+- [x] Verify Cube destruction followed by attachment of the same persistent
       Workspace Volume to a fresh KVM.
 
 ## Reliability
@@ -25,6 +28,8 @@ retired and remain only in Git history or explicitly superseded ADRs.
       prove one current Attempt/fence produces effects.
 - [ ] Prove lost `NOTIFY`, duplicate wakeup and Worker restart do not lose or
       duplicate a Run.
+- [x] Stop an unhealthy/disconnected Worker from claiming new PostgreSQL work,
+      and keep Runs queued while a human Terminal owns the Workspace writer.
 - [ ] Exercise PostgreSQL/PgBouncer failover while direct notification
       connections reconnect.
 - [x] Validate transaction-scoped SessionStorage authority through deterministic

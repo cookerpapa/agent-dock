@@ -81,13 +81,24 @@ export class PostgresRunExecutionAuthority implements ActiveExecutionAuthority {
       .where("attempt.claim_owner_id", "=", this.#claimOwnerId)
       .where("attempt.claim_expires_at", ">", this.#clock())
       .where("attempt.fencing_token", "=", this.#fencingToken)
-      .where("attempt.state", "in", ["provisioning", "restoring", "running", "checkpointing"])
+      // Cancellation revokes Tool authority first, then the active Pi runtime
+      // must persist its bounded interruption/unknown-effect facts before the
+      // Attempt becomes terminal. The same Attempt/Fence remains the only
+      // Session writer throughout cancel_requested.
+      .where("attempt.state", "in", [
+        "provisioning",
+        "restoring",
+        "running",
+        "checkpointing",
+        "cancel_requested",
+      ])
       .where("run.state", "in", [
         "claimed",
         "provisioning",
         "restoring",
         "running",
         "checkpointing",
+        "cancel_requested",
       ])
       .executeTakeFirst();
     if (row === undefined) {

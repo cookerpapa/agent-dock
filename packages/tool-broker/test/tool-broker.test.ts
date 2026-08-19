@@ -127,6 +127,20 @@ function providerFixture() {
     sourceRevision: "a".repeat(64),
     targetRevision: "b".repeat(64),
   }));
+  const materializeFile = vi.fn<NonNullable<SandboxProvider["materializeFile"]>>(
+    async (request) => ({
+      toolBrokerProtocolVersion: 1,
+      type: "workspace.file_materialized",
+      requestId: request.requestId,
+      tenantId: request.tenantId,
+      workspaceId: request.workspaceId,
+      path: request.path,
+      content: Buffer.from("source\n").toString("base64"),
+      sha256: createHash("sha256").update("source\n").digest("hex"),
+      executable: false,
+      sizeBytes: 7,
+    }),
+  );
   const provider: SandboxProvider = {
     providerId: "cubesandbox",
     async checkHealth() {},
@@ -167,6 +181,7 @@ function providerFixture() {
     },
     snapshot,
     forkWorkspace,
+    materializeFile,
     async stop() {
       stopped = true;
     },
@@ -215,6 +230,7 @@ function providerFixture() {
     rebind,
     snapshot,
     forkWorkspace,
+    materializeFile,
     terminalInput,
     terminalResize,
     get createSpec() {
@@ -458,6 +474,44 @@ describe("provider-backed Tool Tool Broker", () => {
     expect(fixture.createCount).toBe(2);
     await manager.stop(second.activationId, secondAssignment);
     expect(manager.admittedCount).toBe(0);
+  });
+
+  it("reads persistent Workspace files without consuming Cube admission capacity", async () => {
+    const fixture = providerFixture();
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+      maximumActiveSandboxes: 1,
+    });
+    const active = await manager.create(createRequest);
+    await manager.execute(active.capability, operation("20000000-0000-4000-8000-000000000050"));
+    expect(manager.admittedCount).toBe(1);
+    const snapshot = Buffer.from("persistent-volume-reference", "utf8");
+
+    await expect(
+      manager.materializeFile({
+        toolBrokerProtocolVersion: 1,
+        type: "workspace.materialize_file",
+        requestId: "20000000-0000-4000-8000-000000000051",
+        tenantId: assignment.tenantId,
+        workspaceId: assignment.workspaceId,
+        snapshot: {
+          encoding: "base64",
+          sha256: createHash("sha256").update(snapshot).digest("hex"),
+          sizeBytes: snapshot.byteLength,
+          data: snapshot.toString("base64"),
+        },
+        path: "surface_check.py",
+      }),
+    ).resolves.toMatchObject({
+      type: "workspace.file_materialized",
+      path: "surface_check.py",
+    });
+    expect(fixture.materializeFile).toHaveBeenCalledTimes(1);
+    expect(manager.admissionWaitingCount).toBe(0);
+    expect(manager.admittedCount).toBe(1);
+    await manager.stop(active.activationId, assignment);
   });
 
   it("removes an aborted Tool Sandbox admission waiter without consuming capacity", async () => {

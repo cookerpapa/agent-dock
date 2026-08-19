@@ -454,7 +454,11 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
             { operation: "reserve", outcome: "failed" },
             (performance.now() - createStartedAt) / 1_000,
           );
-          throw error;
+          throw safePiError(
+            error,
+            "tool_sandbox_reservation_failed",
+            "Tool Sandbox authority could not be reserved",
+          );
         }
       }
       signal.addEventListener("abort", abortSandbox, { once: true });

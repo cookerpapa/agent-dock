@@ -276,6 +276,21 @@ export class PostgresPiWorker {
       .where("command.state", "in", ["pending", "dispatched"])
       .where("run.state", "in", ["queued", "claimed"])
       .where("policy.enabled", "=", true)
+      .where(
+        sql<boolean>`not exists (
+          select 1
+          from workspace_terminal_sessions as active_terminal
+          where active_terminal.tenant_id = ${sql.ref("command.tenant_id")}
+            and active_terminal.workspace_id = ${sql.ref("session_row.workspace_id")}
+            and active_terminal.state in (
+              'reserved',
+              'materializing',
+              'active',
+              'cleaning',
+              'unknown'
+            )
+        )`,
+      )
       .orderBy(
         sql<number>`case when ${sql.ref("session_row.session_kind")} = 'subagent' then 0 else 1 end`,
         "asc",

@@ -1078,35 +1078,11 @@ export class ToolBroker {
         false,
       );
     }
-    const assignment: ToolSandboxAssignment = {
-      tenantId: request.tenantId,
-      projectId: request.workspaceId,
-      workspaceId: request.workspaceId,
-      supervisorId: "snapshot-materializer",
-      bootId: request.requestId,
-      sandboxId: request.requestId,
-      commandId: request.requestId,
-      sessionId: request.workspaceId,
-      turnId: request.requestId,
-      attemptId: request.requestId,
-      leaseId: request.requestId,
-      fencingToken: 1,
-    };
-    await this.#acquireAdmission(request.requestId, assignment, signal);
-    let releaseAdmission = true;
-    try {
-      return await this.#provider.materializeFile(request, signal);
-    } catch (error: unknown) {
-      if (
-        error instanceof ToolBrokerError &&
-        error.code === "snapshot_materializer_cleanup_failed"
-      ) {
-        releaseAdmission = false;
-      }
-      throw error;
-    } finally {
-      if (releaseAdmission) this.#releaseAdmission(request.requestId);
-    }
+    // Current Workspace snapshots are persistent-Volume references. Reading
+    // one file is a trusted Volume Gateway operation and must not wait for or
+    // consume a Cube KVM admission slot. The provider still validates tenant,
+    // Workspace, revision, path and content hash before returning bytes.
+    return this.#provider.materializeFile(request, signal);
   }
 
   async close(): Promise<void> {

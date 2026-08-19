@@ -2520,6 +2520,74 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(sandbox).toEqual({ state: "ready", active_sessions: 0 });
   });
 
+  it("keeps a Run queued until a Workspace terminal releases its writer reservation", async () => {
+    const accepted = await acceptTurn(
+      "workspace-terminal-writer-gate",
+      "wait for the human terminal writer before starting",
+    );
+    const workspace = await database
+      .selectFrom("workspaces")
+      .select("sandbox_domain_id")
+      .where("tenant_id", "=", IDS.tenant)
+      .where("id", "=", project.workspaceId)
+      .executeTakeFirstOrThrow();
+    const brokerId = "50000000-0000-4000-8000-000000000098";
+    const terminalId = "50000000-0000-4000-8000-000000000099";
+    const now = new Date();
+    await database
+      .insertInto("tool_broker_instances")
+      .values({
+        instance_id: brokerId,
+        sandbox_domain_id: workspace.sandbox_domain_id,
+        owner_base_url: "http://terminal-writer-gate.invalid",
+        state: "ready",
+        lease_expires_at: new Date(now.valueOf() + 60_000),
+        last_heartbeat_at: now,
+      })
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto("workspace_terminal_sessions")
+      .values({
+        terminal_id: terminalId,
+        sandbox_domain_id: workspace.sandbox_domain_id,
+        owner_instance_id: brokerId,
+        owner_base_url: "http://terminal-writer-gate.invalid",
+        tenant_id: IDS.tenant,
+        user_id: IDS.tenant,
+        project_id: project.projectId,
+        workspace_id: project.workspaceId,
+        session_id: session.sessionId,
+        state: "cleaning",
+        lease_expires_at: new Date(now.valueOf() + 60_000),
+        last_heartbeat_at: now,
+      })
+      .executeTakeFirstOrThrow();
+    const dispatcher = new RunCommandExecutor({
+      database,
+      backend: new DeterministicExecutionBackend([{ kind: "complete", stopReason: "stop" }]),
+    });
+
+    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toEqual({
+      status: "idle",
+    });
+    await expect(readTurnExecution(accepted)).resolves.toMatchObject({
+      commandState: "pending",
+      turnState: "queued",
+      sessionState: "idle",
+      attempts: 0,
+    });
+
+    await database
+      .updateTable("workspace_terminal_sessions")
+      .set({ state: "released", updated_at: new Date() })
+      .where("terminal_id", "=", terminalId)
+      .executeTakeFirstOrThrow();
+    await expect(dispatchClaimableWork(dispatcher)).resolves.toMatchObject({
+      status: "completed",
+      commandId: accepted.commandId,
+    });
+  });
+
   it("settles the original failure when terminal projection preparation also fails", async () => {
     const projectResponse = await http.inject({
       method: "POST",

@@ -194,7 +194,8 @@ bypass PiCloud's handoff authority and fencing boundary.
 Human terminal authority is deliberately separate from Agent Tool capability,
 Run lease and fence. PostgreSQL nevertheless enforces one shared Workspace
 writer invariant: an active Agent activation blocks a terminal, and an active
-terminal blocks Agent admission. A same-owner warm Agent Cube is retired before
+terminal keeps a newly accepted Run queued until terminal cleanup has released
+the writer reservation. A same-owner warm Agent Cube is retired before
 the terminal starts. Input, output and resize frames are bounded; the platform
 does not persist terminal transcripts. Disconnect kills the PTY and destroys
 that Cube, while the stable Workspace Volume remains available to later Runs.
@@ -215,6 +216,11 @@ Volume gateway. It does not copy Workspaces to Kopia or object storage. It:
 Stopping a Cube loses its processes and memory. A new Cube attaches the same
 persistent Volume, so files and dependencies remain. A Workspace revision is a
 reference to that authority, not a historical byte-for-byte backup.
+
+Source browsing materializes bounded files directly through the trusted Volume
+gateway. It neither creates a Cube nor consumes Cube admission capacity; the
+stored revision, path, size and SHA-256 are revalidated before bytes reach the
+browser.
 
 ### Event Gateway
 
@@ -265,6 +271,9 @@ claimed as durable.
 - stale Workers cannot mutate Pi SessionStorage, execute Tools, commit a
   terminal Run or advance a Workspace revision;
 - cancellation revokes authority before process termination;
+- during `cancel_requested`, Tool authority is revoked while the current
+  Attempt/Fence retains narrowly bounded Pi Session write authority to commit
+  interruption and unknown-effect facts; terminal cancellation then closes it;
 - visible live events are durable before SSE; successful terminal messages are
   Pi-native and canonical before completion;
 - interruption and Sandbox reset boundaries are minimal model-visible facts;
