@@ -45,6 +45,11 @@ queue. `FOR UPDATE`/transactional state transitions in `RunCommandExecutor`
 make competing scans and duplicate wakeups harmless. `LISTEN/NOTIFY` is a
 best-effort wakeup hint with periodic polling as the correctness fallback.
 
+A Worker with a disconnected ownership channel does not scan, and a Worker
+that finds candidate work checks Tool Broker readiness before claiming it. A
+short execution-plane outage therefore leaves the Run queued without creating
+an Attempt or starting a model call.
+
 The queue retains the existing domain protocol:
 
 ```text

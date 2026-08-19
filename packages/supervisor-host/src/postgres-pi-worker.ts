@@ -61,6 +61,8 @@ export type PostgresPiWorkerOptions = {
    * gated here: they settle through their existing Lease/Fence authority.
    */
   canClaimRuns?: () => boolean;
+  /** Checks external execution-plane readiness only when claimable work exists. */
+  admitRunClaims?: () => Promise<boolean>;
   onFailure?: (operation: "listen" | "scan" | "execute" | "cancel", error: unknown) => void;
 };
 
@@ -97,6 +99,7 @@ export class PostgresPiWorker {
   readonly #commandExecutor: RunCommandExecutor;
   readonly #cancellationExecutor: RunCancellationExecutor;
   readonly #canClaimRuns: () => boolean;
+  readonly #admitRunClaims: () => Promise<boolean>;
   readonly #onFailure:
     ((operation: "listen" | "scan" | "execute" | "cancel", error: unknown) => void) | undefined;
   readonly #activeCommands = new Map<
@@ -128,6 +131,7 @@ export class PostgresPiWorker {
     this.#commandExecutor = options.commandExecutor;
     this.#cancellationExecutor = options.cancellationExecutor;
     this.#canClaimRuns = options.canClaimRuns ?? (() => true);
+    this.#admitRunClaims = options.admitRunClaims ?? (() => Promise.resolve(true));
     this.#onFailure = options.onFailure;
   }
 
@@ -208,6 +212,7 @@ export class PostgresPiWorker {
       })),
       this.#maximumConcurrentRuns,
     );
+    if (selected.length === 0 || !(await this.#admitRunClaims())) return;
     for (const reference of selected) {
       const execution = this.#execute(reference).finally(() => {
         this.#activeCommands.delete(reference.commandId);

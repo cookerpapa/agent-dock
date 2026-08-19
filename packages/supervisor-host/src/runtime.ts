@@ -623,6 +623,14 @@ export class PiWorkerRuntime {
         identity: runWorkerIdentity,
         maximumConcurrentRuns: this.#config.maxConcurrentSessions,
         canClaimRuns: () => this.#state === "ready" && client?.state === "connected",
+        admitRunClaims: async () => {
+          try {
+            await this.#toolBroker.checkHealth();
+            return true;
+          } catch {
+            return false;
+          }
+        },
         commandExecutor: new RunCommandExecutor({
           database: this.#database,
           backend: runBackend,

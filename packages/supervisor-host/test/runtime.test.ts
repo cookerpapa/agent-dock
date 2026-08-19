@@ -180,6 +180,13 @@ describe("PiWorkerRuntime", () => {
       runWorkerOptions.push(options);
       return runWorker();
     };
+    let toolBrokerHealthy = true;
+    const runtimeToolBroker: SupervisorToolBroker = {
+      ...toolBroker(),
+      async checkHealth() {
+        if (!toolBrokerHealthy) throw new Error("Tool Broker unavailable");
+      },
+    };
     const baseConfig: SupervisorHostConfig = {
       supervisorId: SUPERVISOR_ID,
       controlPlaneBaseUrl: address,
@@ -223,7 +230,7 @@ describe("PiWorkerRuntime", () => {
           },
           database,
           objectStore: objectStore(),
-          toolBroker: toolBroker(),
+          toolBroker: runtimeToolBroker,
           runWorkerFactory,
         }),
     ).toThrow("Pi SDK Worker runtime capacity must be between 1 and 16");
@@ -234,7 +241,7 @@ describe("PiWorkerRuntime", () => {
         config: baseConfig,
         database,
         objectStore: objectStore(),
-        toolBroker: toolBroker(),
+        toolBroker: runtimeToolBroker,
         runWorkerFactory,
         provisioningClient: { provision: (request) => provisioner.provision(request) },
       });
@@ -249,7 +256,7 @@ describe("PiWorkerRuntime", () => {
         config: baseConfig,
         database,
         objectStore: objectStore(),
-        toolBroker: toolBroker(),
+        toolBroker: runtimeToolBroker,
         runWorkerFactory,
         provisioningClient: { provision: (request) => provisioner.provision(request) },
       });
@@ -275,6 +282,9 @@ describe("PiWorkerRuntime", () => {
       expect(runWorkerOptions).toHaveLength(2);
       expect(runWorkerOptions.map((options) => options.maximumConcurrentRuns)).toEqual([4, 4]);
       expect(runWorkerOptions.map((options) => options.canClaimRuns?.())).toEqual([false, true]);
+      await expect(runWorkerOptions[1]?.admitRunClaims?.()).resolves.toBe(true);
+      toolBrokerHealthy = false;
+      await expect(runWorkerOptions[1]?.admitRunClaims?.()).resolves.toBe(false);
 
       const ledger = JSON.parse(await readFile(join(root, "boot", "boot-ledger.json"), "utf8")) as {
         state: { history: Array<{ bootId: string; status: string }> };
