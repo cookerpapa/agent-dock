@@ -274,6 +274,7 @@ describe("PiWorkerRuntime", () => {
       expect(activeCredential.boot_id).toBe(secondIdentity.bootId);
       expect(runWorkerOptions).toHaveLength(2);
       expect(runWorkerOptions.map((options) => options.maximumConcurrentRuns)).toEqual([4, 4]);
+      expect(runWorkerOptions.map((options) => options.canClaimRuns?.())).toEqual([false, true]);
 
       const ledger = JSON.parse(await readFile(join(root, "boot", "boot-ledger.json"), "utf8")) as {
         state: { history: Array<{ bootId: string; status: string }> };

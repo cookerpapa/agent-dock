@@ -55,6 +55,12 @@ export type PostgresPiWorkerOptions = {
   pollIntervalMs?: number;
   commandExecutor: RunCommandExecutor;
   cancellationExecutor: RunCancellationExecutor;
+  /**
+   * A Worker may claim new Runs only while its control-channel ownership is
+   * current. Existing Runs and cancellation delivery are intentionally not
+   * gated here: they settle through their existing Lease/Fence authority.
+   */
+  canClaimRuns?: () => boolean;
   onFailure?: (operation: "listen" | "scan" | "execute" | "cancel", error: unknown) => void;
 };
 
@@ -90,6 +96,7 @@ export class PostgresPiWorker {
   readonly #pollIntervalMs: number;
   readonly #commandExecutor: RunCommandExecutor;
   readonly #cancellationExecutor: RunCancellationExecutor;
+  readonly #canClaimRuns: () => boolean;
   readonly #onFailure:
     ((operation: "listen" | "scan" | "execute" | "cancel", error: unknown) => void) | undefined;
   readonly #activeCommands = new Map<
@@ -120,6 +127,7 @@ export class PostgresPiWorker {
     );
     this.#commandExecutor = options.commandExecutor;
     this.#cancellationExecutor = options.cancellationExecutor;
+    this.#canClaimRuns = options.canClaimRuns ?? (() => true);
     this.#onFailure = options.onFailure;
   }
 
@@ -186,6 +194,7 @@ export class PostgresPiWorker {
   }
 
   async #fillCapacity(): Promise<void> {
+    if (!this.#canClaimRuns()) return;
     const available = this.#maximumConcurrentRuns - this.#activeCommands.size;
     if (available < 1) return;
     const references = await this.#executionReferences(

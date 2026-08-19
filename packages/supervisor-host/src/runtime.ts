@@ -622,6 +622,7 @@ export class PiWorkerRuntime {
         notificationConnectionString: this.#config.databaseNotificationUrl,
         identity: runWorkerIdentity,
         maximumConcurrentRuns: this.#config.maxConcurrentSessions,
+        canClaimRuns: () => this.#state === "ready" && client?.state === "connected",
         commandExecutor: new RunCommandExecutor({
           database: this.#database,
           backend: runBackend,
