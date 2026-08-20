@@ -1,0 +1,11 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-08-20T00:41:24.657Z",
+  "developmentEnvironmentId": "c2e2287b-1386-48bd-9a31-8cb35db1f528",
+  "workspaceId": "9a44d1c9-3062-4181-8e4a-0e920dd20ddf",
+  "cubeIdentityStableAcrossPause": true,
+  "processSurvivedTerminalReconnect": true,
+  "processSurvivedPauseResume": true,
+  "agentRunQueuedUntilRelease": true,
+  "workspaceVolumeSurvivedRelease": true
+}
