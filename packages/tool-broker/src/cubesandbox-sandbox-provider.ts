@@ -1000,23 +1000,25 @@ export class CubeSandboxProvider implements SandboxProvider {
     }
     if (activation.lifetime === "development_environment") {
       const connected = await this.#client.connect(activation.instance.sandboxId, -1);
-      if (
-        connected.sandboxId !== activation.instance.sandboxId ||
-        !metadataMatchesPhysicalBinding(
-          connected.metadata,
-          handle.activationId,
-          handle.assignment,
-          activation.bindingSha256,
-        ) ||
-        connected.trafficAccessToken === undefined
-      ) {
+      if (connected.sandboxId !== activation.instance.sandboxId) {
         throw new ToolBrokerError(
           "development_environment_connect_invalid",
           "CubeSandbox did not return the expected development environment connection",
           false,
         );
       }
-      activation.instance = connected;
+      // Cube intentionally omits trafficAccessToken and metadata from
+      // connect/resume responses. The create-time token remains the durable
+      // private-ingress authority; #owned() already revalidated physical
+      // metadata immediately before this refresh.
+      activation.instance = Object.freeze({
+        ...activation.instance,
+        ...connected,
+        metadata: activation.instance.metadata,
+        ...(activation.instance.trafficAccessToken === undefined
+          ? {}
+          : { trafficAccessToken: activation.instance.trafficAccessToken }),
+      });
     }
     const terminal = await this.#client.openTerminal(activation.instance, {
       rows: size.rows,
@@ -1070,7 +1072,14 @@ export class CubeSandboxProvider implements SandboxProvider {
         false,
       );
     }
-    activation.instance = instance;
+    activation.instance = Object.freeze({
+      ...activation.instance,
+      ...instance,
+      metadata: activation.instance.metadata,
+      ...(activation.instance.trafficAccessToken === undefined
+        ? {}
+        : { trafficAccessToken: activation.instance.trafficAccessToken }),
+    });
     activation.state = "running";
     return activation.handle;
   }
