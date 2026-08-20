@@ -197,6 +197,7 @@ npm run production:logs
 npm run production:check
 npm run production:product-surface-check
 npm run production:subagents-check
+npm run production:development-environment-check
 npm run production:long-context-check
 npm run production:backup
 ```
