@@ -72,6 +72,7 @@
     "production:check": "node scripts/run-live-cubesandbox-production-check.mjs",
     "production:product-surface-check": "node scripts/run-live-product-surface-check.mjs",
     "production:subagents-check": "node scripts/run-live-subagent-production-check.mjs",
+    "production:development-environment-check": "node scripts/run-live-development-environment-check.mjs",
     "production:semantic-check": "node scripts/run-live-cubesandbox-production-check.mjs",
     "production:worker-pool-check": "node scripts/run-live-pi-worker-pool-check.mjs",
     "production:control-plane-restart-check": "node scripts/run-live-control-plane-restart-check.mjs",

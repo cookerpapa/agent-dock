@@ -145,6 +145,7 @@ type CubeActivation = {
   authorityEpoch: number;
   state: "running" | "quiesced" | "idle" | "paused";
   volumeId: string;
+  lifetime: "agent_turn" | "development_environment";
 };
 
 export type CubeSandboxProviderOptions = Readonly<{
@@ -738,6 +739,7 @@ export class CubeSandboxProvider implements SandboxProvider {
         authorityEpoch: spec.assignment.fencingToken,
         state: "running",
         volumeId,
+        lifetime: spec.lifetime ?? "agent_turn",
       });
       return handle;
     } catch (error: unknown) {
@@ -995,6 +997,26 @@ export class CubeSandboxProvider implements SandboxProvider {
         "Workspace terminal runtime was not active",
         true,
       );
+    }
+    if (activation.lifetime === "development_environment") {
+      const connected = await this.#client.connect(activation.instance.sandboxId, -1);
+      if (
+        connected.sandboxId !== activation.instance.sandboxId ||
+        !metadataMatchesPhysicalBinding(
+          connected.metadata,
+          handle.activationId,
+          handle.assignment,
+          activation.bindingSha256,
+        ) ||
+        connected.trafficAccessToken === undefined
+      ) {
+        throw new ToolBrokerError(
+          "development_environment_connect_invalid",
+          "CubeSandbox did not return the expected development environment connection",
+          false,
+        );
+      }
+      activation.instance = connected;
     }
     const terminal = await this.#client.openTerminal(activation.instance, {
       rows: size.rows,
