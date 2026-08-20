@@ -21,6 +21,49 @@ const environment = {
 } as const;
 
 describe("tenant-aware browser API", () => {
+  it("manages user-owned development environments through same-origin APIs", async () => {
+    const createdAt = "2026-08-20T00:00:00.000Z";
+    const environmentId = "10000000-0000-4000-8000-000000000021";
+    const workspaceId = "10000000-0000-4000-8000-000000000022";
+    const fetchImplementation = vi.fn<typeof fetch>(async (input, init) => {
+      const path = String(input);
+      if (init?.method === "GET") {
+        expect(path).toBe("/v1/development-environments");
+        return new Response(JSON.stringify({ environments: [], truncated: false }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (path === "/v1/development-environments") expect(body).toEqual({ workspaceId });
+      else expect(body).toEqual({ action: "pause" });
+      return new Response(
+        JSON.stringify({
+          environmentId,
+          projectId: "10000000-0000-4000-8000-000000000023",
+          workspaceId,
+          workspaceName: "agent-runtime",
+          state: path.endsWith("/actions") ? "paused" : "running",
+          generation: 1,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const api = new PiCloudApi(fetchImplementation);
+    await expect(api.listDevelopmentEnvironments()).resolves.toEqual({
+      environments: [],
+      truncated: false,
+    });
+    await expect(
+      api.createDevelopmentEnvironment(workspaceId, "environment:create"),
+    ).resolves.toMatchObject({ state: "running" });
+    await expect(
+      api.developmentEnvironmentAction(environmentId, "pause", "environment:pause"),
+    ).resolves.toMatchObject({ state: "paused" });
+  });
+
   it("uses same-origin cookie sessions for product registration, login, and logout", async () => {
     const identity = {
       tenantId: "10000000-0000-4000-8000-000000000002",

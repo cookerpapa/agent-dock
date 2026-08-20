@@ -141,6 +141,8 @@ function providerFixture() {
       sizeBytes: 7,
     }),
   );
+  const pause = vi.fn<NonNullable<SandboxProvider["pause"]>>(async () => undefined);
+  const resume = vi.fn<NonNullable<SandboxProvider["resume"]>>(async (handle) => handle);
   const provider: SandboxProvider = {
     providerId: "cubesandbox",
     async checkHealth() {},
@@ -179,6 +181,8 @@ function providerFixture() {
         disconnect() {},
       };
     },
+    pause,
+    resume,
     snapshot,
     forkWorkspace,
     materializeFile,
@@ -233,6 +237,8 @@ function providerFixture() {
     materializeFile,
     terminalInput,
     terminalResize,
+    pause,
+    resume,
     get createSpec() {
       return createSpec;
     },
@@ -269,6 +275,76 @@ function operation(
 }
 
 describe("provider-backed Tool Tool Broker", () => {
+  it("keeps a user-owned development KVM across PTY disconnect and supports pause/resume", async () => {
+    const fixture = providerFixture();
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    await expect(
+      manager.provisionDevelopmentEnvironment({
+        developmentEnvironmentProtocolVersion: 1,
+        type: "development_environment.provision",
+        requestId: "11111111-1111-4111-8111-111111111111",
+        environmentId: ACTIVATION_ID,
+        tenantId: assignment.tenantId,
+        userId: "77777777-7777-4777-8777-777777777777",
+        projectId: assignment.projectId,
+        workspaceId: assignment.workspaceId,
+        generation: 1,
+        environment,
+        workspaceSeed: { kind: "sample_java" },
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    await expect(manager.create(createRequest)).rejects.toMatchObject({
+      code: "tool_sandbox_workspace_busy",
+    });
+    const terminal = await manager.openDevelopmentEnvironmentTerminal({
+      developmentEnvironmentProtocolVersion: 1,
+      type: "development_environment_terminal.open",
+      requestId: "22222222-2222-4222-8222-222222222222",
+      environmentId: ACTIVATION_ID,
+      tenantId: assignment.tenantId,
+      userId: "77777777-7777-4777-8777-777777777777",
+      rows: 24,
+      cols: 100,
+    });
+    await terminal.close();
+    expect(fixture.destroyed).toBe(false);
+    await manager.developmentEnvironmentLifecycle({
+      developmentEnvironmentProtocolVersion: 1,
+      type: "development_environment.lifecycle",
+      requestId: "33333333-3333-4333-8333-333333333333",
+      environmentId: ACTIVATION_ID,
+      tenantId: assignment.tenantId,
+      userId: "77777777-7777-4777-8777-777777777777",
+      action: "pause",
+    });
+    expect(fixture.pause).toHaveBeenCalledOnce();
+    await manager.developmentEnvironmentLifecycle({
+      developmentEnvironmentProtocolVersion: 1,
+      type: "development_environment.lifecycle",
+      requestId: "44444444-4444-4444-8444-444444444444",
+      environmentId: ACTIVATION_ID,
+      tenantId: assignment.tenantId,
+      userId: "77777777-7777-4777-8777-777777777777",
+      action: "resume",
+    });
+    expect(fixture.resume).toHaveBeenCalledOnce();
+    await manager.developmentEnvironmentLifecycle({
+      developmentEnvironmentProtocolVersion: 1,
+      type: "development_environment.lifecycle",
+      requestId: "55555555-5555-4555-8555-555555555555",
+      environmentId: ACTIVATION_ID,
+      tenantId: assignment.tenantId,
+      userId: "77777777-7777-4777-8777-777777777777",
+      action: "release",
+    });
+    expect(fixture.destroyed).toBe(true);
+    await manager.close();
+  });
+
   it("opens a separate human terminal authority and excludes Agent writers", async () => {
     const fixture = providerFixture();
     const manager = new ToolBroker({

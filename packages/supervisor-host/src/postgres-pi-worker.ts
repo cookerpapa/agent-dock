@@ -332,6 +332,22 @@ export class PostgresPiWorker {
             )
         )`,
       )
+      .where(
+        sql<boolean>`not exists (
+          select 1
+          from development_environments as exclusive_environment
+          where exclusive_environment.tenant_id = ${sql.ref("command.tenant_id")}
+            and exclusive_environment.workspace_id = ${sql.ref("session_row.workspace_id")}
+            and exclusive_environment.state in (
+              'requested',
+              'provisioning',
+              'running',
+              'paused',
+              'releasing',
+              'unknown'
+            )
+        )`,
+      )
       .orderBy(
         sql<number>`case when ${sql.ref("session_row.session_kind")} = 'subagent' then 0 else 1 end`,
         "asc",

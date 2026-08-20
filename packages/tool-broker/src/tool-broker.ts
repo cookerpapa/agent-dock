@@ -1,5 +1,9 @@
 import type {
   AgentWorkspaceSeed,
+  DevelopmentEnvironmentBrokerResponse,
+  DevelopmentEnvironmentLifecycleRequest,
+  DevelopmentEnvironmentProvisionRequest,
+  DevelopmentEnvironmentTerminalOpenRequest,
   EnvironmentRuntimeSnapshot,
   GitHubRepositorySource,
   SupervisorRuntimeAssignment,
@@ -38,6 +42,7 @@ import {
   InMemorySandboxActivationStateRepository,
   type SandboxActivationReservation,
   type SandboxActivationStateRepository,
+  type DevelopmentEnvironmentReservation,
 } from "./activation-state-repository.ts";
 
 export type ToolBrokerOptions = {
@@ -123,6 +128,13 @@ type ManagedWorkspaceTerminal = {
   handle: SandboxHandle;
   session: SandboxTerminalSession;
   closing?: Promise<void>;
+};
+
+type ManagedDevelopmentEnvironment = {
+  reservation: DevelopmentEnvironmentReservation;
+  assignment: ToolSandboxAssignment;
+  handle: SandboxHandle;
+  terminal?: SandboxTerminalSession;
 };
 
 type AdmissionWaiter = {
@@ -290,6 +302,28 @@ function terminalAssignment(
   };
 }
 
+function developmentEnvironmentAssignment(
+  input: Pick<
+    DevelopmentEnvironmentProvisionRequest,
+    "environmentId" | "tenantId" | "projectId" | "workspaceId" | "generation"
+  >,
+): ToolSandboxAssignment {
+  return {
+    tenantId: input.tenantId,
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+    supervisorId: "development-environment",
+    bootId: input.environmentId,
+    sandboxId: input.environmentId,
+    commandId: input.environmentId,
+    sessionId: input.environmentId,
+    turnId: input.environmentId,
+    attemptId: input.environmentId,
+    leaseId: input.environmentId,
+    fencingToken: input.generation,
+  };
+}
+
 export class ToolBroker {
   readonly #provider: SandboxProvider;
   readonly #ownerBaseUrl: string;
@@ -305,6 +339,7 @@ export class ToolBroker {
   readonly #warm = new Map<string, WarmActivation>();
   readonly #suspended = new Map<string, SuspendedActivation>();
   readonly #terminals = new Map<string, ManagedWorkspaceTerminal>();
+  readonly #developmentEnvironments = new Map<string, ManagedDevelopmentEnvironment>();
   readonly #admitted = new Map<string, ToolSandboxAssignment>();
   readonly #admissionWaiters: AdmissionWaiter[] = [];
   readonly #reaper: NodeJS.Timeout;
@@ -348,6 +383,7 @@ export class ToolBroker {
           this.#reapOrphanedActivations(),
           this.#reapTerminalRunActivations(),
           this.#reapOrphanedTerminals(),
+          this.#reapOrphanedDevelopmentEnvironments(),
         ]).catch(() => undefined),
       30_000,
     );
@@ -362,7 +398,9 @@ export class ToolBroker {
     const activeHandles = [...this.#activations.values()].filter(
       (activation) => activation.handle !== undefined || activation.materializing !== undefined,
     ).length;
-    return activeHandles + this.#warm.size + this.#terminals.size;
+    return (
+      activeHandles + this.#warm.size + this.#terminals.size + this.#developmentEnvironments.size
+    );
   }
 
   get admittedCount(): number {
@@ -391,6 +429,313 @@ export class ToolBroker {
 
   async checkHealth(): Promise<void> {
     await Promise.all([this.#provider.checkHealth(), this.#stateRepository.checkHealth()]);
+  }
+
+  async provisionDevelopmentEnvironment(
+    request: DevelopmentEnvironmentProvisionRequest,
+  ): Promise<DevelopmentEnvironmentBrokerResponse> {
+    if (
+      this.#provider.openTerminal === undefined ||
+      this.#provider.pause === undefined ||
+      this.#provider.resume === undefined
+    ) {
+      throw new ToolBrokerError(
+        "development_environment_unsupported",
+        "The configured Sandbox Provider does not support development environments",
+        false,
+      );
+    }
+    const existing = this.#developmentEnvironments.get(request.environmentId);
+    if (existing !== undefined) {
+      if (
+        existing.reservation.tenantId !== request.tenantId ||
+        existing.reservation.userId !== request.userId ||
+        existing.reservation.workspaceId !== request.workspaceId ||
+        existing.reservation.generation !== request.generation
+      ) {
+        throw new ToolBrokerError(
+          "development_environment_identity_conflict",
+          "Development environment identity was reused with different ownership",
+          false,
+        );
+      }
+      return {
+        developmentEnvironmentProtocolVersion: 1,
+        type: "development_environment.state",
+        requestId: request.requestId,
+        environmentId: request.environmentId,
+        state: "running",
+      };
+    }
+    const reservation: DevelopmentEnvironmentReservation = {
+      environmentId: request.environmentId,
+      tenantId: request.tenantId,
+      userId: request.userId,
+      projectId: request.projectId,
+      workspaceId: request.workspaceId,
+      environmentVersionId: request.environment.environmentVersionId,
+      generation: request.generation,
+    };
+    const reserved = await this.#stateRepository.reserveDevelopmentEnvironment(reservation);
+    if (reserved.status === "redirect") {
+      throw new ToolBrokerOwnerRedirectError(reserved.ownerBaseUrl);
+    }
+    if (reserved.status === "busy") {
+      throw new ToolBrokerError(
+        "development_environment_workspace_busy",
+        "Workspace is already owned by another execution environment",
+        true,
+      );
+    }
+    if (reserved.status === "capacity") {
+      throw new ToolBrokerError(
+        "sandbox_domain_capacity_exhausted",
+        "Sandbox Domain has reached its active Sandbox limit",
+        true,
+      );
+    }
+    if (reserved.status === "tenant_capacity") {
+      throw new ToolBrokerError(
+        "tenant_sandbox_capacity_exhausted",
+        "Tenant has reached its active Sandbox limit",
+        true,
+      );
+    }
+    const assignment = developmentEnvironmentAssignment(request);
+    let handle: SandboxHandle | undefined;
+    let admitted = false;
+    try {
+      await this.#acquireAdmission(request.environmentId, assignment);
+      admitted = true;
+      handle = await this.#provider.create({
+        activationId: request.environmentId,
+        assignment,
+        environment: request.environment,
+        workspaceSeed: request.workspaceSeed,
+        policy: this.#provider.defaultPolicy ?? DEFAULT_TOOL_SANDBOX_POLICY,
+        lifetime: "development_environment",
+      });
+      if (
+        !handleMatches(
+          handle,
+          this.#provider,
+          request.environmentId,
+          assignment,
+          request.environment,
+        )
+      ) {
+        throw new ToolBrokerError(
+          "sandbox_provider_protocol_error",
+          "Sandbox Provider returned a mismatched development environment handle",
+          false,
+        );
+      }
+      this.#developmentEnvironments.set(request.environmentId, {
+        reservation,
+        assignment,
+        handle,
+      });
+      await this.#stateRepository.setDevelopmentEnvironmentState(request.environmentId, "running", {
+        handle,
+      });
+      return {
+        developmentEnvironmentProtocolVersion: 1,
+        type: "development_environment.state",
+        requestId: request.requestId,
+        environmentId: request.environmentId,
+        state: "running",
+      };
+    } catch (error: unknown) {
+      if (handle !== undefined) await this.#provider.destroy(handle).catch(() => undefined);
+      if (admitted) this.#releaseAdmission(request.environmentId);
+      await this.#stateRepository
+        .setDevelopmentEnvironmentState(request.environmentId, "failed", {
+          failureCode: operationFailureCode(error),
+        })
+        .catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async developmentEnvironmentLifecycle(
+    request: DevelopmentEnvironmentLifecycleRequest,
+  ): Promise<DevelopmentEnvironmentBrokerResponse> {
+    const ownership = await this.#stateRepository.developmentEnvironmentOwner(
+      request.tenantId,
+      request.userId,
+      request.environmentId,
+    );
+    if (ownership.status === "redirect") {
+      throw new ToolBrokerOwnerRedirectError(ownership.ownerBaseUrl);
+    }
+    const environment = this.#developmentEnvironments.get(request.environmentId);
+    if (ownership.status !== "owned" || environment === undefined) {
+      throw new ToolBrokerError(
+        "development_environment_unavailable",
+        "Development environment is unavailable on its owning Tool Broker",
+        true,
+      );
+    }
+    if (
+      environment.reservation.tenantId !== request.tenantId ||
+      environment.reservation.userId !== request.userId
+    ) {
+      throw new ToolBrokerError(
+        "development_environment_unauthorized",
+        "Development environment ownership did not match",
+        false,
+      );
+    }
+    if (request.action === "pause") {
+      if (ownership.state !== "running" || environment.terminal !== undefined) {
+        throw new ToolBrokerError(
+          "development_environment_pause_conflict",
+          "Close the active terminal before pausing the development environment",
+          true,
+        );
+      }
+      try {
+        await this.#provider.pause!(environment.handle);
+      } catch (error: unknown) {
+        await this.#stateRepository
+          .setDevelopmentEnvironmentState(request.environmentId, "unknown", {
+            failureCode: operationFailureCode(error),
+          })
+          .catch(() => undefined);
+        throw error;
+      }
+      await this.#stateRepository.setDevelopmentEnvironmentState(request.environmentId, "paused", {
+        handle: environment.handle,
+      });
+      return {
+        developmentEnvironmentProtocolVersion: 1,
+        type: "development_environment.state",
+        requestId: request.requestId,
+        environmentId: request.environmentId,
+        state: "paused",
+      };
+    }
+    if (request.action === "resume") {
+      if (ownership.state !== "paused") {
+        throw new ToolBrokerError(
+          "development_environment_resume_conflict",
+          "Development environment is not paused",
+          false,
+        );
+      }
+      try {
+        environment.handle = await this.#provider.resume!(environment.handle);
+      } catch (error: unknown) {
+        await this.#stateRepository
+          .setDevelopmentEnvironmentState(request.environmentId, "unknown", {
+            failureCode: operationFailureCode(error),
+          })
+          .catch(() => undefined);
+        throw error;
+      }
+      await this.#stateRepository.setDevelopmentEnvironmentState(request.environmentId, "running", {
+        handle: environment.handle,
+      });
+      return {
+        developmentEnvironmentProtocolVersion: 1,
+        type: "development_environment.state",
+        requestId: request.requestId,
+        environmentId: request.environmentId,
+        state: "running",
+      };
+    }
+    await this.#stateRepository.setDevelopmentEnvironmentState(request.environmentId, "releasing");
+    environment.terminal?.disconnect();
+    await environment.terminal?.kill().catch(() => undefined);
+    try {
+      await this.#provider.destroy(environment.handle);
+    } catch (error: unknown) {
+      await this.#stateRepository
+        .setDevelopmentEnvironmentState(request.environmentId, "unknown", {
+          failureCode: operationFailureCode(error),
+        })
+        .catch(() => undefined);
+      throw error;
+    }
+    this.#developmentEnvironments.delete(request.environmentId);
+    this.#releaseAdmission(request.environmentId);
+    await this.#stateRepository.setDevelopmentEnvironmentState(request.environmentId, "released");
+    return {
+      developmentEnvironmentProtocolVersion: 1,
+      type: "development_environment.state",
+      requestId: request.requestId,
+      environmentId: request.environmentId,
+      state: "released",
+    };
+  }
+
+  async openDevelopmentEnvironmentTerminal(
+    input: DevelopmentEnvironmentTerminalOpenRequest,
+  ): Promise<WorkspaceTerminalConnection> {
+    if (this.#provider.openTerminal === undefined) {
+      throw new ToolBrokerError(
+        "development_environment_terminal_unsupported",
+        "The configured Sandbox Provider does not support interactive terminals",
+        false,
+      );
+    }
+    const ownership = await this.#stateRepository.developmentEnvironmentOwner(
+      input.tenantId,
+      input.userId,
+      input.environmentId,
+    );
+    if (ownership.status === "redirect") {
+      throw new ToolBrokerOwnerRedirectError(ownership.ownerBaseUrl);
+    }
+    const environment = this.#developmentEnvironments.get(input.environmentId);
+    if (
+      ownership.status !== "owned" ||
+      ownership.state !== "running" ||
+      environment === undefined
+    ) {
+      throw new ToolBrokerError(
+        "development_environment_terminal_unavailable",
+        "Development environment must be running before opening a terminal",
+        true,
+      );
+    }
+    if (
+      environment.reservation.tenantId !== input.tenantId ||
+      environment.reservation.userId !== input.userId
+    ) {
+      throw new ToolBrokerError(
+        "development_environment_unauthorized",
+        "Development environment ownership did not match",
+        false,
+      );
+    }
+    if (environment.terminal !== undefined) {
+      throw new ToolBrokerError(
+        "development_environment_terminal_busy",
+        "Development environment already has an active terminal",
+        true,
+      );
+    }
+    const terminal = await this.#provider.openTerminal(environment.handle, {
+      rows: input.rows,
+      cols: input.cols,
+    });
+    environment.terminal = terminal;
+    let closed = false;
+    return Object.freeze({
+      terminalId: input.environmentId,
+      pid: terminal.pid,
+      output: terminal.output,
+      sendInput: (data: Uint8Array) => terminal.sendInput(data),
+      resize: (size: SandboxTerminalSize) => terminal.resize(size),
+      close: async () => {
+        if (closed) return;
+        closed = true;
+        terminal.disconnect();
+        await terminal.kill().catch(() => undefined);
+        if (environment.terminal === terminal) delete environment.terminal;
+      },
+    });
   }
 
   async openTerminal(input: WorkspaceTerminalOpenInput): Promise<WorkspaceTerminalConnection> {
@@ -1099,6 +1444,18 @@ export class ToolBroker {
         this.#closeTerminal(terminalId, terminal).catch(() => undefined),
       ),
     );
+    for (const [environmentId, environment] of this.#developmentEnvironments) {
+      environment.terminal?.disconnect();
+      await environment.terminal?.kill().catch(() => undefined);
+      await this.#provider.destroy(environment.handle).catch(() => undefined);
+      this.#releaseAdmission(environmentId);
+      await this.#stateRepository
+        .setDevelopmentEnvironmentState(environmentId, "failed", {
+          failureCode: "tool_broker_stopped",
+        })
+        .catch(() => undefined);
+    }
+    this.#developmentEnvironments.clear();
     const ownedActivationIds = new Set([
       ...this.#activations.keys(),
       ...[...this.#warm.values()].map((warm) => warm.handle.activationId),
@@ -1372,6 +1729,38 @@ export class ToolBroker {
       } catch (error: unknown) {
         await this.#stateRepository
           .setTerminalState(terminal.terminalId, "unknown", {
+            failureCode: operationFailureCode(error),
+          })
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  async #reapOrphanedDevelopmentEnvironments(): Promise<void> {
+    const orphaned = await this.#stateRepository.claimOrphanedDevelopmentEnvironments(16);
+    for (const environment of orphaned) {
+      const local = this.#developmentEnvironments.get(environment.environmentId);
+      local?.terminal?.disconnect();
+      if (local?.terminal !== undefined) await local.terminal.kill().catch(() => undefined);
+      this.#developmentEnvironments.delete(environment.environmentId);
+      const assignment = developmentEnvironmentAssignment({
+        environmentId: environment.environmentId,
+        tenantId: environment.tenantId,
+        projectId: environment.projectId,
+        workspaceId: environment.workspaceId,
+        generation: environment.generation,
+      });
+      try {
+        await this.#provider.destroyActivation(environment.environmentId, assignment);
+        this.#releaseAdmission(environment.environmentId);
+        await this.#stateRepository.setDevelopmentEnvironmentState(
+          environment.environmentId,
+          "failed",
+          { failureCode: "tool_broker_owner_lost" },
+        );
+      } catch (error: unknown) {
+        await this.#stateRepository
+          .setDevelopmentEnvironmentState(environment.environmentId, "unknown", {
             failureCode: operationFailureCode(error),
           })
           .catch(() => undefined);

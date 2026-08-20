@@ -1125,6 +1125,28 @@ export class ControlPlaneStore {
             );
           }
 
+          const liveDevelopmentEnvironment = await transaction
+            .selectFrom("development_environments")
+            .select("id")
+            .where("tenant_id", "=", this.#tenantId)
+            .where("workspace_id", "=", workspaceId)
+            .where("state", "in", [
+              "requested",
+              "provisioning",
+              "running",
+              "paused",
+              "releasing",
+              "unknown",
+            ])
+            .limit(1)
+            .executeTakeFirst();
+          if (liveDevelopmentEnvironment !== undefined) {
+            throw new ControlPlaneStoreError(
+              "conflict",
+              "Release the exclusive development environment before deleting the Workspace",
+            );
+          }
+
           const activeSubagent = await transaction
             .selectFrom("subagent_executions as execution")
             .innerJoin("sessions as root", (join) =>

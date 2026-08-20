@@ -18,6 +18,7 @@ import type {
 } from "./workspace-version-service.ts";
 import type { WebAuthenticationService } from "./web-authentication.ts";
 import type { WorkspaceTerminalGateway } from "./workspace-terminal-gateway.ts";
+import type { DevelopmentEnvironmentService } from "./development-environment-service.ts";
 
 export type ControlPlaneApplicationOptions = Omit<
   ControlPlaneStoreOptions,
@@ -41,6 +42,7 @@ export type ControlPlaneApplicationOptions = Omit<
   platformModelSourceTenantId?: string;
   cubeEgressConfigToken?: string;
   workspaceTerminalGateway?: WorkspaceTerminalGateway;
+  developmentEnvironmentService?: DevelopmentEnvironmentService;
 };
 
 export async function createControlPlaneApplication(

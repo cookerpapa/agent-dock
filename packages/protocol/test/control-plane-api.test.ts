@@ -16,6 +16,9 @@ import {
   parseCreateProjectRequest,
   parseCreateSessionRequest,
   parseCreateTenantRegistrationRequest,
+  parseCreateDevelopmentEnvironmentRequest,
+  parseDevelopmentEnvironmentActionRequest,
+  parseDevelopmentEnvironmentListResource,
   parseCreateTurnCancellationRequest,
   parseIdempotencyKey,
   parseLastEventIdHeader,
@@ -44,6 +47,34 @@ const ENVIRONMENT_SNAPSHOT = {
 } as const;
 
 describe("control-plane public API schemas", () => {
+  it("validates user-owned development environment resources and actions", () => {
+    const createdAt = "2026-08-20T00:00:00.000Z";
+    expect(parseCreateDevelopmentEnvironmentRequest({ workspaceId: UUID })).toEqual({
+      workspaceId: UUID,
+    });
+    expect(parseDevelopmentEnvironmentActionRequest({ action: "pause" })).toEqual({
+      action: "pause",
+    });
+    expect(
+      parseDevelopmentEnvironmentListResource({
+        environments: [
+          {
+            environmentId: UUID,
+            projectId: "22222222-2222-4222-8222-222222222222",
+            workspaceId: "33333333-3333-4333-8333-333333333333",
+            workspaceName: "agent-runtime",
+            state: "running",
+            generation: 1,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ],
+        truncated: false,
+      }),
+    ).toMatchObject({ environments: [{ state: "running" }] });
+    expect(() => parseDevelopmentEnvironmentActionRequest({ action: "reimage" })).toThrow();
+  });
+
   it("validates an active Turn catch-up snapshot", () => {
     expect(
       parseLiveTurnSnapshotResource({

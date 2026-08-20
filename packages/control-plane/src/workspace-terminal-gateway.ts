@@ -1,12 +1,14 @@
 import type { Database } from "@pi-cloud/database";
 import {
   MAX_WORKSPACE_TERMINAL_FRAME_BYTES,
+  TOOL_BROKER_DEVELOPMENT_ENVIRONMENT_TERMINAL_PATH,
   TOOL_BROKER_TERMINAL_PATH,
   parseEnvironmentRuntimeSnapshot,
   parseUuidPathParameter,
   parseWorkspaceTerminalClientFrame,
   parseWorkspaceTerminalServerFrame,
   type WorkspaceTerminalOpenRequest,
+  type DevelopmentEnvironmentTerminalOpenRequest,
 } from "@pi-cloud/protocol";
 import { createWorkspaceSnapshot, encodeWorkspaceSnapshotBlob } from "@pi-cloud/workspace-runtime";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -16,6 +18,8 @@ import WebSocket, { type RawData } from "ws";
 import { tenantRequestIdentity } from "./tenant-identity.ts";
 
 export const WORKSPACE_TERMINAL_PATH = "/v1/conversations/:sessionId/terminal";
+export const DEVELOPMENT_ENVIRONMENT_TERMINAL_PATH =
+  "/v1/development-environments/:environmentId/terminal";
 const MAXIMUM_BUFFERED_BYTES = 1 * 1_024 * 1_024;
 const MAXIMUM_REDIRECTS = 3;
 
@@ -28,13 +32,14 @@ export type WorkspaceTerminalGatewayOptions = Readonly<{
 type TerminalDescriptor = Readonly<{
   domainId: string;
   toolBrokerBaseUrl: string;
-  open: WorkspaceTerminalOpenRequest;
+  internalPath: string;
+  open: WorkspaceTerminalOpenRequest | DevelopmentEnvironmentTerminalOpenRequest;
 }>;
 
-function internalWebSocketUrl(baseUrl: string): string {
+function internalWebSocketUrl(baseUrl: string, path: string): string {
   const parsed = new URL(baseUrl);
   parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
-  parsed.pathname = TOOL_BROKER_TERMINAL_PATH;
+  parsed.pathname = path;
   parsed.search = "";
   parsed.hash = "";
   return parsed.toString();
@@ -99,9 +104,33 @@ export class WorkspaceTerminalGateway {
           return;
         }
         void this.#proxy(socket, request, {
+          kind: "conversation",
           tenantId: identity.tenantId,
           userId: identity.userId,
           sessionId,
+        });
+      });
+      scope.get(DEVELOPMENT_ENVIRONMENT_TERMINAL_PATH, { websocket: true }, (socket, request) => {
+        const identity = tenantRequestIdentity(request);
+        if (identity === undefined || identity.role === "viewer") {
+          socket.close(1_008, "development environment terminal is not authorized");
+          return;
+        }
+        let environmentId: string;
+        try {
+          environmentId = parseUuidPathParameter(
+            (request.params as { environmentId?: unknown }).environmentId,
+            "environmentId",
+          );
+        } catch {
+          socket.close(1_008, "development environment identity is invalid");
+          return;
+        }
+        void this.#proxy(socket, request, {
+          kind: "development_environment",
+          tenantId: identity.tenantId,
+          userId: identity.userId,
+          environmentId,
         });
       });
     });
@@ -110,7 +139,15 @@ export class WorkspaceTerminalGateway {
   async #proxy(
     browser: WebSocket,
     request: FastifyRequest,
-    identity: Readonly<{ tenantId: string; userId: string; sessionId: string }>,
+    identity: Readonly<
+      | { kind: "conversation"; tenantId: string; userId: string; sessionId: string }
+      | {
+          kind: "development_environment";
+          tenantId: string;
+          userId: string;
+          environmentId: string;
+        }
+    >,
   ): Promise<void> {
     let upstream: WebSocket | undefined;
     let closed = false;
@@ -139,7 +176,9 @@ export class WorkspaceTerminalGateway {
         {
           err: error,
           tenantId: identity.tenantId,
-          sessionId: identity.sessionId,
+          ...(identity.kind === "conversation"
+            ? { sessionId: identity.sessionId }
+            : { environmentId: identity.environmentId }),
         },
         "Workspace terminal descriptor resolution failed",
       );
@@ -147,8 +186,14 @@ export class WorkspaceTerminalGateway {
       await send(browser, {
         workspaceTerminalProtocolVersion: 1,
         type: "workspace_terminal.error",
-        code: "workspace_terminal_unavailable",
-        message: "Workspace terminal could not resolve the current Session",
+        code:
+          identity.kind === "conversation"
+            ? "workspace_terminal_unavailable"
+            : "development_environment_terminal_unavailable",
+        message:
+          identity.kind === "conversation"
+            ? "Workspace terminal could not resolve the current Session"
+            : "Development environment is not running or is not owned by this user",
         retryable: true,
       });
       browser.close(1_011, "workspace terminal unavailable");
@@ -173,11 +218,14 @@ export class WorkspaceTerminalGateway {
       if (target.protocol === "http:" && !this.#allowInsecureInternalHttp) {
         throw new Error("insecure Tool Broker redirect rejected");
       }
-      const connected = new WebSocket(internalWebSocketUrl(target.toString()), {
-        headers: { authorization: `Bearer ${this.#terminalToken}` },
-        maxPayload: MAX_WORKSPACE_TERMINAL_FRAME_BYTES * 2,
-        perMessageDeflate: false,
-      });
+      const connected = new WebSocket(
+        internalWebSocketUrl(target.toString(), descriptor.internalPath),
+        {
+          headers: { authorization: `Bearer ${this.#terminalToken}` },
+          maxPayload: MAX_WORKSPACE_TERMINAL_FRAME_BYTES * 2,
+          perMessageDeflate: false,
+        },
+      );
       upstream = connected;
       await new Promise<void>((resolve, reject) => {
         connected.once("open", resolve);
@@ -239,11 +287,51 @@ export class WorkspaceTerminalGateway {
     }
   }
 
-  async #descriptor(identity: {
-    tenantId: string;
-    userId: string;
-    sessionId: string;
-  }): Promise<TerminalDescriptor> {
+  async #descriptor(
+    identity:
+      | { kind: "conversation"; tenantId: string; userId: string; sessionId: string }
+      | {
+          kind: "development_environment";
+          tenantId: string;
+          userId: string;
+          environmentId: string;
+        },
+  ): Promise<TerminalDescriptor> {
+    if (identity.kind === "development_environment") {
+      const environment = await this.#database
+        .selectFrom("development_environments as development")
+        .innerJoin("sandbox_domains as domain", "domain.id", "development.sandbox_domain_id")
+        .select([
+          "development.id",
+          "development.state",
+          "development.sandbox_domain_id as domainId",
+          "domain.tool_broker_base_url as toolBrokerBaseUrl",
+        ])
+        .where("development.tenant_id", "=", identity.tenantId)
+        .where("development.owner_user_id", "=", identity.userId)
+        .where("development.id", "=", identity.environmentId)
+        .where("development.state", "=", "running")
+        .where("domain.state", "=", "active")
+        .executeTakeFirst();
+      if (environment === undefined) {
+        throw new Error("Development environment is not running");
+      }
+      return {
+        domainId: environment.domainId,
+        toolBrokerBaseUrl: environment.toolBrokerBaseUrl,
+        internalPath: TOOL_BROKER_DEVELOPMENT_ENVIRONMENT_TERMINAL_PATH,
+        open: {
+          developmentEnvironmentProtocolVersion: 1,
+          type: "development_environment_terminal.open",
+          requestId: randomUUID(),
+          environmentId: environment.id,
+          tenantId: identity.tenantId,
+          userId: identity.userId,
+          rows: 24,
+          cols: 100,
+        },
+      };
+    }
     const row = await this.#database
       .selectFrom("sessions as session_row")
       .innerJoin("workspaces as workspace", (join) =>
@@ -295,6 +383,7 @@ export class WorkspaceTerminalGateway {
     return {
       domainId: row.domainId,
       toolBrokerBaseUrl: row.toolBrokerBaseUrl,
+      internalPath: TOOL_BROKER_TERMINAL_PATH,
       open: {
         workspaceTerminalProtocolVersion: 1,
         type: "workspace_terminal.open",

@@ -88,6 +88,27 @@ beforeAll(async () => {
         );
         return;
       }
+      if (request.method === "POST" && request.url === "/sandboxes/cube-runtime-1/pause") {
+        runtimeState = "paused";
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+      if (request.method === "POST" && request.url === "/sandboxes/cube-runtime-1/connect") {
+        runtimeState = "running";
+        response.writeHead(201, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            sandboxID: "cube-runtime-1",
+            templateID: "pi-cloud-tool-v1",
+            state: runtimeState,
+            domain: "cube.test",
+            metadata: { "picloud.managed": "true" },
+            trafficAccessToken: "private-traffic-token-resumed",
+          }),
+        );
+        return;
+      }
       if (request.method === "GET" && request.url === "/sandboxes/cube-runtime-1") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
@@ -247,6 +268,16 @@ describe("official CubeSandbox HTTP compatibility client", () => {
       metadata: { "picloud.managed": "true" },
     });
     await expect(client.list()).resolves.toHaveLength(1);
+    await client.pause(instance.sandboxId);
+    await expect(client.read(instance.sandboxId)).resolves.toMatchObject({ state: "paused" });
+    await expect(client.connect(instance.sandboxId, -1)).resolves.toMatchObject({
+      sandboxId: instance.sandboxId,
+      state: "running",
+      trafficAccessToken: "private-traffic-token-resumed",
+    });
+    expect(observed.find((request) => request.path.endsWith("/connect"))).toMatchObject({
+      body: { timeout: -1 },
+    });
     await client.destroy(instance.sandboxId);
     await client.close();
   });

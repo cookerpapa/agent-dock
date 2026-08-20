@@ -29,6 +29,7 @@ import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.
 import { TurnSteeringService } from "./turn-steering-service.ts";
 import type { TurnSteerBackend } from "./turn-steer.ts";
 import { ConversationTreeService } from "./conversation-tree-service.ts";
+import { DevelopmentEnvironmentService } from "./development-environment-service.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -48,6 +49,7 @@ export type ControlPlaneModuleOptions = Omit<
   cubeEgressConfigToken?: string;
   supervisorWebSocketGateway?: SupervisorWebSocketGateway;
   turnSteerBackendFactory?: (sandboxId: string) => Promise<TurnSteerBackend>;
+  developmentEnvironmentService?: DevelopmentEnvironmentService;
 };
 
 export type ControlPlaneEventRuntime = {
@@ -184,6 +186,17 @@ export class ControlPlaneModule {
             database: options.database,
             ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
           }),
+        },
+        {
+          provide: DevelopmentEnvironmentService,
+          useValue:
+            options.developmentEnvironmentService ??
+            new DevelopmentEnvironmentService({
+              database: options.database,
+              terminalToken: "development-environment-disabled-token-000000000000000000000000",
+              allowInsecureInternalHttp: false,
+              ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+            }),
         },
         {
           provide: WorkspaceVersionService,

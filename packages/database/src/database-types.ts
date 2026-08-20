@@ -99,6 +99,16 @@ export type ToolBrokerActivationState =
 export type ToolBrokerOperationState = "running" | "succeeded" | "failed" | "cancelled" | "unknown";
 export type WorkspaceTerminalState =
   "reserved" | "materializing" | "active" | "cleaning" | "released" | "unknown";
+export type DevelopmentEnvironmentState =
+  | "requested"
+  | "provisioning"
+  | "running"
+  | "paused"
+  | "releasing"
+  | "released"
+  | "failed"
+  | "unknown";
+export type DevelopmentEnvironmentAction = "start" | "pause" | "resume" | "release";
 
 export interface ToolBrokerInstanceTable {
   instance_id: string;
@@ -170,6 +180,40 @@ export interface WorkspaceTerminalSessionTable {
   failure_code: string | null;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
+}
+
+export interface DevelopmentEnvironmentTable {
+  id: string;
+  tenant_id: string;
+  owner_user_id: string;
+  project_id: string;
+  workspace_id: string;
+  sandbox_domain_id: string;
+  environment_version_id: string | null;
+  owner_instance_id: string | null;
+  owner_base_url: string | null;
+  generation: GeneratedInt8;
+  runtime_id: string | null;
+  runtime_name: string | null;
+  state: DevelopmentEnvironmentState;
+  failure_code: string | null;
+  idempotency_key: string;
+  request_sha256: string;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+  released_at: NullableTimestamp;
+}
+
+export interface DevelopmentEnvironmentOperationTable {
+  id: string;
+  tenant_id: string;
+  environment_id: string;
+  actor_user_id: string;
+  idempotency_key: string;
+  action: DevelopmentEnvironmentAction;
+  request_sha256: string;
+  result_state: DevelopmentEnvironmentState;
+  created_at: GeneratedTimestamp;
 }
 
 export interface TenantTable {
@@ -1161,6 +1205,8 @@ export interface Database {
   tool_broker_activations: ToolBrokerActivationTable;
   tool_broker_operations: ToolBrokerOperationTable;
   workspace_terminal_sessions: WorkspaceTerminalSessionTable;
+  development_environments: DevelopmentEnvironmentTable;
+  development_environment_operations: DevelopmentEnvironmentOperationTable;
   tenants: TenantTable;
   users: UserTable;
   tenant_runtime_policies: TenantRuntimePolicyTable;

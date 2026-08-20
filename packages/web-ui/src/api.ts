@@ -22,6 +22,8 @@ import {
   parseTenantRegistrationResource,
   parseWorkspaceFileListResource,
   parseWorkspaceDeletionResource,
+  parseDevelopmentEnvironmentListResource,
+  parseDevelopmentEnvironmentResource,
   parseWorkspaceListResource,
   parseWorkspaceOperationResource,
   parseWorkspaceVersionListResource,
@@ -51,6 +53,9 @@ import {
   type TurnThinkingLevel,
   type WorkspaceFileListResource,
   type WorkspaceDeletionResource,
+  type DevelopmentEnvironmentAction,
+  type DevelopmentEnvironmentListResource,
+  type DevelopmentEnvironmentResource,
   type WorkspaceListResource,
   type WorkspaceOperationResource,
   type WorkspaceSourceRequest,
@@ -311,6 +316,46 @@ export class PiCloudApi {
     );
   }
 
+  async listDevelopmentEnvironments(): Promise<DevelopmentEnvironmentListResource> {
+    return parseDevelopmentEnvironmentListResource(
+      await request(
+        this.#fetch,
+        "/v1/development-environments",
+        { method: "GET" },
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async createDevelopmentEnvironment(
+    workspaceId: string,
+    idempotencyKey: string,
+  ): Promise<DevelopmentEnvironmentResource> {
+    return parseDevelopmentEnvironmentResource(
+      await request(
+        this.#fetch,
+        "/v1/development-environments",
+        jsonRequest({ workspaceId }, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
+  async developmentEnvironmentAction(
+    environmentId: string,
+    action: DevelopmentEnvironmentAction,
+    idempotencyKey: string,
+  ): Promise<DevelopmentEnvironmentResource> {
+    return parseDevelopmentEnvironmentResource(
+      await request(
+        this.#fetch,
+        `/v1/development-environments/${encodeURIComponent(environmentId)}/actions`,
+        jsonRequest({ action }, idempotencyKey),
+        this.#authorizationToken,
+      ),
+    );
+  }
+
   async deleteConversation(
     sessionId: string,
     idempotencyKey: string,
@@ -566,7 +611,8 @@ export class PiCloudApi {
 }
 
 export function newIdempotencyKey(
-  prefix: "turn" | "cancel" | "steer" | "archive" | "delete" | "retry" | "fork" | "prune",
+  prefix:
+    "turn" | "cancel" | "steer" | "archive" | "delete" | "retry" | "fork" | "prune" | "environment",
 ): string {
   return `${prefix}:${globalThis.crypto.randomUUID()}`;
 }

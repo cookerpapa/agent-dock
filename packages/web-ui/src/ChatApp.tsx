@@ -20,6 +20,7 @@ import { PiCloudApi, PiCloudApiError, newIdempotencyKey } from "./api.ts";
 import { AdminPage } from "./AdminPage.tsx";
 import { AuthScreen } from "./AuthScreen.tsx";
 import { ConversationTreeNavigator } from "./ConversationTreeNavigator.tsx";
+import { DevelopmentEnvironmentsPage } from "./DevelopmentEnvironmentsPage.tsx";
 import { ConversationTurn, Markdown } from "./ConversationTurn.tsx";
 import { activeTurn, createInitialSessionView, sessionViewReducer } from "./session-view.ts";
 import { streamSessionEvents } from "./sse.ts";
@@ -94,6 +95,7 @@ export default function ChatApp() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRefreshSignal, setInspectorRefreshSignal] = useState(0);
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
+  const [developmentEnvironmentsOpen, setDevelopmentEnvironmentsOpen] = useState(false);
   const [newConversationTitle, setNewConversationTitle] = useState("");
   const [workspaceChoice, setWorkspaceChoice] = useState<"existing" | "new">("new");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
@@ -834,6 +836,16 @@ export default function ChatApp() {
   if (identity.platformAdministrator) {
     return <AdminPage api={api} identity={identity} onLogout={() => void logout()} />;
   }
+  if (developmentEnvironmentsOpen) {
+    return (
+      <DevelopmentEnvironmentsPage
+        api={api}
+        canMutate={canMutate}
+        onClose={() => setDevelopmentEnvironmentsOpen(false)}
+        workspaces={workspaces}
+      />
+    );
+  }
 
   return (
     <div className="product-shell">
@@ -871,6 +883,13 @@ export default function ChatApp() {
               type="button"
             >
               <span>＋</span> 新对话
+            </button>
+            <button
+              className="product-development-environments"
+              onClick={() => setDevelopmentEnvironmentsOpen(true)}
+              type="button"
+            >
+              <span>▣</span> 开发环境
             </button>
           </div>
           <nav className="product-conversation-list" aria-label="对话列表">

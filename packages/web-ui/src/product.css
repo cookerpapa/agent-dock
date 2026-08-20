@@ -395,6 +395,171 @@ body.product-panel-resizing {
   line-height: 0;
 }
 
+.product-development-environments {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 9px;
+  color: #bdbdbd;
+  font-size: 13px;
+  text-align: left;
+}
+
+.product-development-environments span {
+  margin-right: 7px;
+  color: #9287db;
+}
+
+.development-environment-page {
+  min-height: 100vh;
+  padding: 36px clamp(20px, 5vw, 72px) 64px;
+  background: #171717;
+  color: #e8e8e8;
+}
+
+.development-environment-header,
+.development-environment-create,
+.development-environment-card header,
+.development-environment-actions {
+  display: flex;
+  align-items: center;
+}
+
+.development-environment-header {
+  justify-content: space-between;
+  gap: 24px;
+  max-width: 1080px;
+  margin: 0 auto 28px;
+}
+
+.development-environment-header h1 {
+  margin: 5px 0 8px;
+  color: #f4f4f4;
+  font-size: clamp(27px, 4vw, 40px);
+}
+
+.development-environment-header p,
+.development-environment-create small,
+.development-environment-card header span {
+  color: #929292;
+}
+
+.development-environment-header button,
+.development-environment-actions button {
+  border-color: #3a3a3a;
+  background: #222;
+  color: #d8d8d8;
+}
+
+.development-environment-create {
+  flex-wrap: wrap;
+  gap: 12px;
+  max-width: 1080px;
+  margin: 0 auto 22px;
+  padding: 18px;
+  border: 1px solid #303030;
+  border-radius: 14px;
+  background: #1d1d1d;
+}
+
+.development-environment-create label {
+  display: grid;
+  min-width: min(420px, 100%);
+  gap: 6px;
+}
+
+.development-environment-create select {
+  min-width: min(420px, 100%);
+  border-color: #3b3b3b;
+  background: #202020;
+  color: #ededed;
+}
+
+.development-environment-notice,
+.development-environment-empty {
+  max-width: 1080px;
+  margin: 0 auto 18px;
+  padding: 14px 16px;
+  border: 1px solid #4a3838;
+  border-radius: 10px;
+  background: #261f1f;
+  color: #e4bcbc;
+}
+
+.development-environment-list {
+  display: grid;
+  max-width: 1080px;
+  margin: 0 auto;
+  gap: 16px;
+}
+
+.development-environment-card {
+  overflow: hidden;
+  padding: 20px;
+  border: 1px solid #303030;
+  border-radius: 14px;
+  background: #1d1d1d;
+}
+
+.development-environment-card.running {
+  border-color: #3f594b;
+}
+
+.development-environment-card.paused {
+  border-color: #514b66;
+}
+
+.development-environment-card header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.development-environment-card h2 {
+  margin: 0 0 5px;
+  font-size: 18px;
+}
+
+.development-environment-state {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #282828;
+  font-size: 12px;
+}
+
+.development-environment-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.development-environment-failure {
+  color: #d59d9d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.development-environment-card .workspace-terminal-panel {
+  height: min(520px, 58vh);
+  margin-top: 18px;
+  border: 1px solid #333;
+  border-radius: 11px;
+}
+
+@media (max-width: 680px) {
+  .development-environment-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .development-environment-create {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .development-environment-create select {
+    width: 100%;
+  }
+}
+
 .product-conversation-list {
   min-height: 0;
   overflow: auto;

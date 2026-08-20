@@ -541,6 +541,58 @@ export const WorkspaceDeletionResourceSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const DevelopmentEnvironmentStateSchema = Type.Union([
+  Type.Literal("requested"),
+  Type.Literal("provisioning"),
+  Type.Literal("running"),
+  Type.Literal("paused"),
+  Type.Literal("releasing"),
+  Type.Literal("released"),
+  Type.Literal("failed"),
+  Type.Literal("unknown"),
+]);
+
+export const DevelopmentEnvironmentActionSchema = Type.Union([
+  Type.Literal("start"),
+  Type.Literal("pause"),
+  Type.Literal("resume"),
+  Type.Literal("release"),
+]);
+
+export const CreateDevelopmentEnvironmentRequestSchema = Type.Object(
+  { workspaceId: UuidSchema },
+  { additionalProperties: false },
+);
+
+export const DevelopmentEnvironmentActionRequestSchema = Type.Object(
+  { action: DevelopmentEnvironmentActionSchema },
+  { additionalProperties: false },
+);
+
+export const DevelopmentEnvironmentResourceSchema = Type.Object(
+  {
+    environmentId: UuidSchema,
+    projectId: UuidSchema,
+    workspaceId: UuidSchema,
+    workspaceName: Type.String({ minLength: 1, maxLength: 256 }),
+    state: DevelopmentEnvironmentStateSchema,
+    generation: PositiveSafeIntegerSchema,
+    failureCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    createdAt: UtcTimestampSchema,
+    updatedAt: UtcTimestampSchema,
+    releasedAt: Type.Optional(UtcTimestampSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const DevelopmentEnvironmentListResourceSchema = Type.Object(
+  {
+    environments: Type.Array(DevelopmentEnvironmentResourceSchema, { maxItems: 100 }),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
 export const ConversationTranscriptItemResourceSchema = Type.Union([
   Type.Object(
     {
@@ -1072,6 +1124,18 @@ export type SessionResource = Static<typeof SessionResourceSchema>;
 export type WorkspaceSummaryResource = Static<typeof WorkspaceSummaryResourceSchema>;
 export type WorkspaceListResource = Static<typeof WorkspaceListResourceSchema>;
 export type WorkspaceDeletionResource = Static<typeof WorkspaceDeletionResourceSchema>;
+export type DevelopmentEnvironmentState = Static<typeof DevelopmentEnvironmentStateSchema>;
+export type DevelopmentEnvironmentAction = Static<typeof DevelopmentEnvironmentActionSchema>;
+export type CreateDevelopmentEnvironmentRequest = Static<
+  typeof CreateDevelopmentEnvironmentRequestSchema
+>;
+export type DevelopmentEnvironmentActionRequest = Static<
+  typeof DevelopmentEnvironmentActionRequestSchema
+>;
+export type DevelopmentEnvironmentResource = Static<typeof DevelopmentEnvironmentResourceSchema>;
+export type DevelopmentEnvironmentListResource = Static<
+  typeof DevelopmentEnvironmentListResourceSchema
+>;
 export type ConversationTurnState = Static<typeof ConversationTurnStateSchema>;
 export type ConversationSummaryResource = Static<typeof ConversationSummaryResourceSchema>;
 export type DelegatedSessionContextMode = Static<typeof DelegatedSessionContextModeSchema>;
@@ -1472,6 +1536,46 @@ export function parseWorkspaceListResource(value: unknown): WorkspaceListResourc
 
 export function parseWorkspaceDeletionResource(value: unknown): WorkspaceDeletionResource {
   return parseSchema(WorkspaceDeletionResourceSchema, value, "workspace deletion resource");
+}
+
+export function parseCreateDevelopmentEnvironmentRequest(
+  value: unknown,
+): CreateDevelopmentEnvironmentRequest {
+  return parseSchema(
+    CreateDevelopmentEnvironmentRequestSchema,
+    value,
+    "create development environment request",
+  );
+}
+
+export function parseDevelopmentEnvironmentActionRequest(
+  value: unknown,
+): DevelopmentEnvironmentActionRequest {
+  return parseSchema(
+    DevelopmentEnvironmentActionRequestSchema,
+    value,
+    "development environment action request",
+  );
+}
+
+export function parseDevelopmentEnvironmentResource(
+  value: unknown,
+): DevelopmentEnvironmentResource {
+  return parseSchema(
+    DevelopmentEnvironmentResourceSchema,
+    value,
+    "development environment resource",
+  );
+}
+
+export function parseDevelopmentEnvironmentListResource(
+  value: unknown,
+): DevelopmentEnvironmentListResource {
+  return parseSchema(
+    DevelopmentEnvironmentListResourceSchema,
+    value,
+    "development environment list resource",
+  );
 }
 
 export function parseConversationListResource(value: unknown): ConversationListResource {

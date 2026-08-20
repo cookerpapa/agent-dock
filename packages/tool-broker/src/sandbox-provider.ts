@@ -93,6 +93,7 @@ export type SandboxCreateSpec = Readonly<{
   workspaceSeed: AgentWorkspaceSeed;
   workspaceRestore?: SandboxCheckpointBlob;
   policy: SandboxPolicy;
+  lifetime?: "development_environment";
 }>;
 
 export type SandboxHandle = Readonly<{
@@ -218,6 +219,10 @@ export interface SandboxProvider {
   ): Promise<void>;
   /** Open a human-operated PTY without granting Agent Tool authority. */
   openTerminal?(handle: SandboxHandle, size: SandboxTerminalSize): Promise<SandboxTerminalSession>;
+  /** Pause a long-lived user environment while preserving Cube VM state. */
+  pause?(handle: SandboxHandle): Promise<void>;
+  /** Resume the same paused Cube identity and return its refreshed handle. */
+  resume?(handle: SandboxHandle): Promise<SandboxHandle>;
   snapshot(handle: SandboxHandle, requestId: string): Promise<ToolSandboxCaptureResponse>;
   forkWorkspace?(
     handle: SandboxHandle,

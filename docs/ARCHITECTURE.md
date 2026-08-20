@@ -37,7 +37,7 @@ The current Worker invariant is deliberately precise:
 The Web product provides authentication, resizable conversation/tree panels,
 focused or whole-tree navigation, conversation forks, recursive subtree
 deletion, settled-message tail pruning, named Workspaces, resumable output,
-file browsing and administrator settings. The Control Plane
+file browsing, user-owned development environments and administrator settings. The Control Plane
 commits each idempotent message and its Run command in one PostgreSQL
 transaction. It enforces tenant quota and same-Session serialization.
 
@@ -250,6 +250,26 @@ the terminal starts. Input, output and resize frames are bounded; the platform
 does not persist terminal transcripts. Disconnect kills the PTY and destroys
 that Cube, while the stable Workspace Volume remains available to later Runs.
 
+### User-owned development environments
+
+`DevelopmentEnvironment` is a PostgreSQL product allocation keyed by tenant,
+owner user and Workspace. Public REST and WebSocket handlers always derive the
+owner from authenticated request identity; responses contain no Cube runtime
+ID, traffic token or Broker credential. Tool Broker is the only CubeAPI client.
+
+Provisioning eagerly creates one Cube KVM with the deployment-owned template,
+resource policy, network boundary and stable Workspace Volume. The Cube timeout
+is disabled for this explicit allocation. A terminal opens inside the existing
+KVM, and disconnect kills only the PTY. Pause snapshots VM memory/filesystem;
+resume reconnects the same Cube identity; release destroys it without deleting
+Workspace bytes.
+
+The allocation participates in tenant/Domain Sandbox quotas and the global
+Workspace single-writer rule. PostgreSQL Worker scans exclude Runs whose
+Workspace has a requested, provisioning, running, paused, releasing or unknown
+environment. A lost Broker owner causes fail-closed orphan cleanup and a fresh
+start; only the persistent Volume is guaranteed across that failure.
+
 ### Persistent Workspace Volume gateway
 
 The service historically named Workspace Volume Gateway is now a narrow trusted
@@ -300,6 +320,8 @@ not an authority.
 | Workspace revision/reference and Git baseline | PostgreSQL + trusted Volume envelope |
 | live process tree | one Cube KVM only |
 | active in-memory `messages[]` | Pi SDK for one active Run |
+| development-environment ownership/lifecycle | PostgreSQL |
+| development-environment process/memory state | one Cube KVM |
 
 ## First and later messages
 

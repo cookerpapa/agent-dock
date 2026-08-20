@@ -40,7 +40,9 @@ rebuildable. There is no competing workflow or checkpoint head.
 | Cube reads platform secrets | no secret mounts/service account/platform route |
 | cross-tenant Workspace access | stable tenant/Workspace Volume identity and broker checks |
 | browser forges terminal identity | Control Plane derives tenant/Workspace/Session; browser frames carry only input/resize/control |
+| user enumerates another user's development environment | every list, lifecycle and Terminal lookup binds tenant plus authenticated owner user; no Cube ID is public |
 | terminal races an Agent writer | PostgreSQL-backed human-terminal lease and shared Workspace writer exclusion |
+| exclusive environment races an Agent writer | PostgreSQL Worker admission excludes every live development-environment state for that Workspace |
 | stale Worker mutation | transaction-scoped authority and monotonically increasing fence |
 | duplicate queue delivery | idempotent command plus transactional RunAttempt claim |
 | ambiguous shell result | `UNKNOWN`; no automatic replay |

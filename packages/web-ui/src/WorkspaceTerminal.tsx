@@ -9,11 +9,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type TerminalState = "disconnected" | "connecting" | "ready" | "failed";
 
-function socketUrl(sessionId: string): string {
-  const value = new URL(
-    `/v1/conversations/${encodeURIComponent(sessionId)}/terminal`,
-    window.location.href,
-  );
+function socketUrl(target: { sessionId?: string | null; environmentId?: string | null }): string {
+  const path =
+    target.environmentId === undefined || target.environmentId === null
+      ? `/v1/conversations/${encodeURIComponent(target.sessionId!)}/terminal`
+      : `/v1/development-environments/${encodeURIComponent(target.environmentId)}/terminal`;
+  const value = new URL(path, window.location.href);
   value.protocol = value.protocol === "https:" ? "wss:" : "ws:";
   return value.toString();
 }
@@ -37,9 +38,11 @@ function bytes(value: string): Uint8Array {
 
 export function WorkspaceTerminal({
   sessionId,
+  environmentId,
   onError,
 }: {
-  sessionId: string | null;
+  sessionId?: string | null;
+  environmentId?: string | null;
   onError: (message: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -82,7 +85,13 @@ export function WorkspaceTerminal({
   }, [setState]);
 
   const connect = useCallback((): void => {
-    if (sessionId === null || stateRef.current === "connecting" || stateRef.current === "ready") {
+    if (
+      (sessionId === null || sessionId === undefined) &&
+      (environmentId === null || environmentId === undefined)
+    ) {
+      return;
+    }
+    if (stateRef.current === "connecting" || stateRef.current === "ready") {
       return;
     }
     const terminal = terminalRef.current;
@@ -90,7 +99,12 @@ export function WorkspaceTerminal({
     terminal.reset();
     terminal.writeln("\x1b[38;5;245m正在启动隔离的 Workspace 终端…\x1b[0m");
     setState("connecting");
-    const socket = new WebSocket(socketUrl(sessionId));
+    const socket = new WebSocket(
+      socketUrl({
+        ...(sessionId === undefined ? {} : { sessionId }),
+        ...(environmentId === undefined ? {} : { environmentId }),
+      }),
+    );
     socketRef.current = socket;
     socket.addEventListener("message", (event) => {
       try {
@@ -132,7 +146,7 @@ export function WorkspaceTerminal({
       terminal.writeln("\r\n\x1b[31m无法连接 Workspace 终端。\x1b[0m");
       setState("failed");
     });
-  }, [sessionId, setState, transmit]);
+  }, [environmentId, sessionId, setState, transmit]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -210,7 +224,7 @@ export function WorkspaceTerminal({
     };
   }, [disconnect, transmit]);
 
-  useEffect(() => disconnect, [disconnect, sessionId]);
+  useEffect(() => disconnect, [disconnect, environmentId, sessionId]);
 
   return (
     <section className="workspace-terminal-panel" aria-label="Workspace 终端">
@@ -230,15 +244,22 @@ export function WorkspaceTerminal({
             断开
           </button>
         ) : (
-          <button disabled={sessionId === null} onClick={connect} type="button">
+          <button
+            disabled={
+              (sessionId === null || sessionId === undefined) &&
+              (environmentId === null || environmentId === undefined)
+            }
+            onClick={connect}
+            type="button"
+          >
             {state === "failed" ? "重新连接" : "连接终端"}
           </button>
         )}
       </div>
       <p className="workspace-terminal-notice">
-        连接期间 Agent 不会同时修改此
-        Workspace；断开后文件仍会保留，但进程和终端状态不会恢复，文件视图会在下一次 Agent
-        提交后刷新。
+        {environmentId === null || environmentId === undefined
+          ? "连接期间 Agent 不会同时修改此 Workspace；断开后文件仍会保留，但这个临时终端的进程不会保留。"
+          : "断开只关闭当前 PTY；独占 Cube、后台进程与 Workspace 会继续运行，直到暂停或释放环境。"}
       </p>
       <div className="workspace-terminal-host" ref={hostRef} />
     </section>

@@ -4,6 +4,7 @@ import { AdminPage } from "../src/AdminPage.tsx";
 import { AuthScreen } from "../src/AuthScreen.tsx";
 import ChatApp from "../src/ChatApp.tsx";
 import { ConversationTreeNavigator } from "../src/ConversationTreeNavigator.tsx";
+import { DevelopmentEnvironmentsPage } from "../src/DevelopmentEnvironmentsPage.tsx";
 import { ConversationTurn, ToolActivity } from "../src/ConversationTurn.tsx";
 import { PiCloudApi } from "../src/api.ts";
 import type { TurnView } from "../src/session-view.ts";
@@ -29,6 +30,30 @@ function turn(turnId: string, prompt: string): TurnView {
 }
 
 describe("product chat experience", () => {
+  it("renders the user-owned development environment management surface", () => {
+    const markup = renderToStaticMarkup(
+      <DevelopmentEnvironmentsPage
+        api={new PiCloudApi(async () => new Response(null, { status: 500 }))}
+        canMutate={true}
+        onClose={() => undefined}
+        workspaces={[
+          {
+            workspaceId: "10000000-0000-4000-8000-000000000001",
+            projectId: "10000000-0000-4000-8000-000000000002",
+            name: "agent-runtime",
+            sessionCount: 0,
+            createdAt: "2026-08-20T00:00:00.000Z",
+            lastActiveAt: "2026-08-20T00:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+    expect(markup).toContain("开发环境");
+    expect(markup).toContain("申请独占环境");
+    expect(markup).toContain("agent-runtime");
+    expect(markup).toContain("仅你可见");
+  });
+
   it("restores a durable login without rendering the old operator console", () => {
     const markup = renderToStaticMarkup(<ChatApp />);
     expect(markup).toContain("PiCloud");

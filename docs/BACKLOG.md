@@ -48,6 +48,8 @@ retired and remain only in Git history or explicitly superseded ADRs.
       keep formal validation evidence bound to a fenced Agent Run/Attempt.
 - [x] Add recursive conversation-subtree deletion and settled-message tail
       pruning without rewriting Pi's immutable entry history.
+- [x] Add user-owned exclusive Cube development environments without exposing
+      the cluster WebUI or Cube credentials to tenants.
 - [ ] Add branch rename controls to the tree UI.
 - [ ] Expand orphan reconciliation for Cube activations and persistent Volumes.
 - [ ] Publish sustained Kafka/Valkey projection and SSE reconnect evidence.
@@ -74,7 +76,7 @@ retired and remain only in Git history or explicitly superseded ADRs.
 ## Multi-agent execution
 
 - [x] Map the maintained `pi-subagents` contract to Child Sessions/Runs rather
-      than local Pi subprocesses; forbid nested children in the first release.
+      than local Pi subprocesses, with one deployment-bounded recursive tree.
 - [x] Support Tool-free, `shared_serialized` and isolated Workspace modes
       without equating conversation forks with file forks.
 - [x] Implement a trusted persistent-Volume branch for parallel isolated
@@ -82,6 +84,15 @@ retired and remain only in Git history or explicitly superseded ADRs.
 - [x] Project fresh and fork-context Child Sessions as typed, read-only nodes in
       the conversation list and tree while preserving their distinct execution
       relation.
+
+## Development environments
+
+- [x] Bind each exclusive environment to one tenant user and Workspace.
+- [x] Keep Cube credentials and cluster inventory behind Tool Broker.
+- [x] Support create, persistent PTY, pause, resume and release while preserving
+      Workspace Volume bytes.
+- [ ] Define an explicit fenced Agent handoff into a live development
+      environment; until then Agent Runs remain queued behind its writer lock.
 
 ## Product expansion rule
 

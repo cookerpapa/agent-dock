@@ -25,6 +25,8 @@ import {
   parseCreateTurnSteerRequest,
   parseCreateConversationForkRequest,
   parseCreateConversationPruneRequest,
+  parseCreateDevelopmentEnvironmentRequest,
+  parseDevelopmentEnvironmentActionRequest,
   parseConversationTreeView,
   parseIdempotencyKey,
   parseLastEventIdHeader,
@@ -57,6 +59,8 @@ import {
   type WorkspaceVersionResource,
   type WorkspaceListResource,
   type WorkspaceDeletionResource,
+  type DevelopmentEnvironmentListResource,
+  type DevelopmentEnvironmentResource,
 } from "@pi-cloud/protocol";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
@@ -69,6 +73,7 @@ import { readWebSessionCookie, WebAuthenticationService } from "./web-authentica
 import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
 import { TurnSteeringService } from "./turn-steering-service.ts";
 import { ConversationTreeService } from "./conversation-tree-service.ts";
+import { DevelopmentEnvironmentService } from "./development-environment-service.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -90,6 +95,8 @@ export class ControlPlaneController {
     private readonly turnSteering: TurnSteeringService,
     @Inject(ConversationTreeService)
     private readonly conversationTrees: ConversationTreeService,
+    @Inject(DevelopmentEnvironmentService)
+    private readonly developmentEnvironments: DevelopmentEnvironmentService,
   ) {}
 
   @Post("auth/register")
@@ -203,6 +210,42 @@ export class ControlPlaneController {
   async listWorkspaces(@Req() request: FastifyRequest): Promise<WorkspaceListResource> {
     const identity = this.tenantRequestContext.resolve(request);
     return this.controlPlaneStores.forIdentity(identity).listWorkspaces();
+  }
+
+  @Get("development-environments")
+  async listDevelopmentEnvironments(
+    @Req() request: FastifyRequest,
+  ): Promise<DevelopmentEnvironmentListResource> {
+    return this.developmentEnvironments.list(this.tenantRequestContext.resolve(request));
+  }
+
+  @Post("development-environments")
+  async createDevelopmentEnvironment(
+    @Req() request: FastifyRequest,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<DevelopmentEnvironmentResource> {
+    return this.developmentEnvironments.create(
+      this.tenantRequestContext.requireMutation(request),
+      parseIdempotencyKey(idempotencyKeyValue),
+      parseCreateDevelopmentEnvironmentRequest(body),
+    );
+  }
+
+  @Post("development-environments/:environmentId/actions")
+  @HttpCode(200)
+  async developmentEnvironmentAction(
+    @Req() request: FastifyRequest,
+    @Param("environmentId") environmentIdValue: unknown,
+    @Headers("idempotency-key") idempotencyKeyValue: unknown,
+    @Body() body: unknown,
+  ): Promise<DevelopmentEnvironmentResource> {
+    return this.developmentEnvironments.action(
+      this.tenantRequestContext.requireMutation(request),
+      parseUuidPathParameter(environmentIdValue, "environmentId"),
+      parseIdempotencyKey(idempotencyKeyValue),
+      parseDevelopmentEnvironmentActionRequest(body),
+    );
   }
 
   @Delete("workspaces/:workspaceId")

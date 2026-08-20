@@ -143,7 +143,7 @@ type CubeActivation = {
   bindingSha256: string;
   handoffSecret: string;
   authorityEpoch: number;
-  state: "running" | "quiesced" | "idle";
+  state: "running" | "quiesced" | "idle" | "paused";
   volumeId: string;
 };
 
@@ -641,7 +641,10 @@ export class CubeSandboxProvider implements SandboxProvider {
     });
     const instance = await this.#client.create({
       templateId: this.#templateId,
-      timeoutSeconds: Math.ceil(spec.policy.resources.turnWallClockTimeoutMs / 1_000),
+      timeoutSeconds:
+        spec.lifetime === "development_environment"
+          ? -1
+          : Math.ceil(spec.policy.resources.turnWallClockTimeoutMs / 1_000),
       metadata: assignmentMetadata(
         spec.activationId,
         spec.assignment,
@@ -651,6 +654,9 @@ export class CubeSandboxProvider implements SandboxProvider {
       allowInternetAccess: true,
       allowPublicTraffic: false,
       volumeMounts: [{ name: volumeId, path: "/workspace" }],
+      ...(spec.lifetime === "development_environment"
+        ? { lifecycle: { onTimeout: "pause" as const, autoResume: true } }
+        : {}),
     });
     try {
       const evidence = await this.#waitForEvidence(instance);
@@ -1005,6 +1011,46 @@ export class CubeSandboxProvider implements SandboxProvider {
       },
       disconnect: () => terminal.disconnect(),
     });
+  }
+
+  async pause(handle: SandboxHandle): Promise<void> {
+    const activation = await this.#owned(handle);
+    if (activation.state !== "running" && activation.state !== "idle") {
+      throw new ToolBrokerError(
+        "development_environment_pause_invalid",
+        "CubeSandbox development environment cannot be paused from its current state",
+        false,
+      );
+    }
+    await this.#client.pause(activation.instance.sandboxId);
+    activation.state = "paused";
+  }
+
+  async resume(handle: SandboxHandle): Promise<SandboxHandle> {
+    this.#assertHandle(handle);
+    const activation = this.#activations.get(handle.activationId);
+    if (
+      activation === undefined ||
+      activation.handle.runtimeId !== handle.runtimeId ||
+      activation.state !== "paused"
+    ) {
+      throw new ToolBrokerError(
+        "development_environment_resume_invalid",
+        "CubeSandbox development environment cannot be resumed from its current state",
+        false,
+      );
+    }
+    const instance = await this.#client.connect(activation.instance.sandboxId, -1);
+    if (instance.sandboxId !== activation.instance.sandboxId) {
+      throw new ToolBrokerError(
+        "development_environment_identity_changed",
+        "CubeSandbox changed the development environment identity during resume",
+        false,
+      );
+    }
+    activation.instance = instance;
+    activation.state = "running";
+    return activation.handle;
   }
 
   async snapshot(handle: SandboxHandle, requestId: string): Promise<ToolSandboxCaptureResponse> {

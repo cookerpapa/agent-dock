@@ -13,6 +13,8 @@ export {
   type EnvironmentValidationStatus,
   type EnvironmentOperationKind,
   type EnvironmentVersionState,
+  type DevelopmentEnvironmentAction,
+  type DevelopmentEnvironmentState,
   type SandboxDomainState,
   type Database,
   type RunAttemptTable,
@@ -126,6 +128,8 @@ export {
   downConversationTailPruning,
   upRecursiveSubagentTrees,
   downRecursiveSubagentTrees,
+  upUserOwnedDevelopmentEnvironments,
+  downUserOwnedDevelopmentEnvironments,
 } from "./migrations/index.ts";
 
 export {

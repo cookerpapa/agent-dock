@@ -238,6 +238,9 @@ export async function createControlPlaneRuntime(
       ...(options.workspaceTerminalGateway === undefined
         ? {}
         : { workspaceTerminalGateway: options.workspaceTerminalGateway }),
+      ...(options.developmentEnvironmentService === undefined
+        ? {}
+        : { developmentEnvironmentService: options.developmentEnvironmentService }),
       eventRuntime: { eventHub, eventStore },
       ...(options.sessionEventNotifications === undefined
         ? {}

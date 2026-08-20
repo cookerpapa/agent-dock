@@ -43,6 +43,8 @@ schema or maintained deployment. The current sources of truth are this README,
 - pure chat without Sandbox activation;
 - lazy Cube activation, warm reuse and optional persistent Sandbox retention;
 - a Workspace directory/source browser, isolated Web Terminal, and safe deletion;
+- user-owned exclusive Cube development environments with reconnectable
+  terminals and explicit pause/resume/release;
 - administrator-only hot model credentials and Cube proxy configuration.
 
 ## One user message
@@ -133,6 +135,16 @@ through the Tool Broker to a fenced PTY inside Cube. A human terminal and an Age
 cannot write the same Workspace concurrently. Closing the terminal destroys its
 Cube while retaining the persistent Workspace Volume; no public SSH port or
 platform credential is exposed.
+
+Ordinary users may also request an exclusive development environment for one
+Workspace. PostgreSQL binds the allocation to the authenticated user while Tool
+Broker creates one never-timeout Cube KVM. Reconnecting a terminal opens a new
+PTY in the same VM; disconnecting does not stop background processes. Pause and
+resume use Cube's native memory/filesystem lifecycle, while release destroys
+the VM and preserves the persistent Workspace Volume. The allocation is a
+Workspace writer, so ordinary Agent Runs remain queued until it is released.
+Cube's cluster WebUI remains an operator console and is never the tenant
+authorization boundary.
 
 ## Recovery and correctness
 

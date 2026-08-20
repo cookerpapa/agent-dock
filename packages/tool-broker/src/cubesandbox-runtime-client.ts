@@ -50,6 +50,7 @@ export type CubeSandboxCreateInput = Readonly<{
   allowInternetAccess: true;
   allowPublicTraffic: false;
   volumeMounts?: readonly Readonly<{ name: string; path: "/workspace" }>[];
+  lifecycle?: Readonly<{ onTimeout: "kill" | "pause"; autoResume: boolean }>;
 }>;
 
 export type CubeSandboxDataRequest = Readonly<{
@@ -73,6 +74,8 @@ export interface CubeSandboxRuntimeClient {
   ensureVolume(volumeId: string, driver: string): Promise<CubeSandboxVolume>;
   create(input: CubeSandboxCreateInput): Promise<CubeSandboxInstance>;
   read(sandboxId: string): Promise<CubeSandboxInstance | undefined>;
+  pause(sandboxId: string): Promise<void>;
+  connect(sandboxId: string, timeoutSeconds: number): Promise<CubeSandboxInstance>;
   list(): Promise<readonly CubeSandboxInstance[]>;
   destroy(sandboxId: string): Promise<void>;
   request(instance: CubeSandboxInstance, input: CubeSandboxDataRequest): Promise<unknown>;
@@ -455,7 +458,10 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
         // Cube's timeout is only the fail-safe orphan reaper. A timed-out VM
         // must not become an untracked paused guest because this provider no
         // longer reconnects physical runtimes across manager loss.
-        lifecycle: { on_timeout: "kill", auto_resume: false },
+        lifecycle: {
+          on_timeout: input.lifecycle?.onTimeout ?? "kill",
+          auto_resume: input.lifecycle?.autoResume ?? false,
+        },
       }),
     });
     const instance = parseInstance(
@@ -480,6 +486,25 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
     }
     return parseInstance(
       parseJson(await readBoundedResponse(response, 256 * 1_024), "CubeSandbox inspect"),
+      this.#sandboxDomain,
+    );
+  }
+
+  async pause(sandboxId: string): Promise<void> {
+    const id = encodeURIComponent(bounded(sandboxId, "CubeSandbox ID", 256));
+    const response = await this.#control(`/sandboxes/${id}/pause`, { method: "POST" });
+    await response.body?.cancel().catch(() => undefined);
+  }
+
+  async connect(sandboxId: string, timeoutSeconds: number): Promise<CubeSandboxInstance> {
+    const id = encodeURIComponent(bounded(sandboxId, "CubeSandbox ID", 256));
+    const timeout = timeoutSeconds === -1 ? -1 : positiveInteger(timeoutSeconds, 900, 1, 86_400);
+    const response = await this.#control(`/sandboxes/${id}/connect`, {
+      method: "POST",
+      body: JSON.stringify({ timeout }),
+    });
+    return parseInstance(
+      parseJson(await readBoundedResponse(response, 256 * 1_024), "CubeSandbox connect"),
       this.#sandboxDomain,
     );
   }

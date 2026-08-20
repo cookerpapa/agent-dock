@@ -16,6 +16,8 @@
 - human Pi Session tree navigation and transactional conversation forks.
 - Run-scoped built-in Tool capability snapshots enforced independently by the
   Agent Host and Tool Broker.
+- user-owned exclusive Cube development environments with pause/resume and
+  persistent Workspace terminals.
 
 ## Current release gate
 

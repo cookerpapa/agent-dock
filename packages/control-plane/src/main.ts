@@ -29,6 +29,7 @@ import { createControlPlaneRuntime, type ControlPlaneRuntime } from "./control-p
 import { ReplicatedToolBrokerClient } from "@pi-cloud/tool-broker/client";
 import { encodeWorkspaceSnapshotBlob } from "@pi-cloud/workspace-runtime";
 import { WorkspaceTerminalGateway } from "./workspace-terminal-gateway.ts";
+import { DevelopmentEnvironmentService } from "./development-environment-service.ts";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
   const profile = await database
@@ -160,6 +161,11 @@ export async function startControlPlane(): Promise<void> {
       terminalToken: config.workspaceTerminalToken,
       allowInsecureInternalHttp: config.allowInsecureInternalHttp,
     });
+    const developmentEnvironmentService = new DevelopmentEnvironmentService({
+      database,
+      terminalToken: config.workspaceTerminalToken,
+      allowInsecureInternalHttp: config.allowInsecureInternalHttp,
+    });
     const workerEventIngestor = config.externalWorkerEventLog
       ? new HttpDurableEventIngestor({
           baseUrl: config.workerEventIngestBaseUrl!,
@@ -179,6 +185,7 @@ export async function startControlPlane(): Promise<void> {
       ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
       controlPlaneInstanceId: randomUUID(),
       sessionEventNotifications: notifications,
+      developmentEnvironmentService,
       supervisorAuthorizer: new PostgresSupervisorCredentialAuthorizer({ database }),
       supervisorOwnerBoundary: new RoutedHttpSupervisorOwnerBoundary(resolveManagementClient),
       assignmentInventoryFactory: (identity) =>

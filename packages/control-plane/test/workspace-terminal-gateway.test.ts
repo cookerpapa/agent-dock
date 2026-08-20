@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import WebSocket, { WebSocketServer, type RawData } from "ws";
 import { ProductionHttpGateway } from "../src/production-http-gateway.ts";
 import {
+  DEVELOPMENT_ENVIRONMENT_TERMINAL_PATH,
   WORKSPACE_TERMINAL_PATH,
   WorkspaceTerminalGateway,
 } from "../src/workspace-terminal-gateway.ts";
@@ -31,6 +32,8 @@ const IDS = {
   environment: "10000000-0000-4000-8000-000000000107",
   session: "10000000-0000-4000-8000-000000000108",
   terminal: "10000000-0000-4000-8000-000000000109",
+  development: "10000000-0000-4000-8000-000000000110",
+  broker: "10000000-0000-4000-8000-000000000111",
 } as const;
 
 const closeTasks: Array<() => Promise<void>> = [];
@@ -145,6 +148,7 @@ describe("WorkspaceTerminalGateway", () => {
   it("admits a pending first-use environment, derives identity, and rejects failed environments", async () => {
     let observedOpen: Record<string, unknown> | undefined;
     let observedInput: Record<string, unknown> | undefined;
+    let observedDevelopmentOpen: Record<string, unknown> | undefined;
     const upstream = new WebSocketServer({ host: "127.0.0.1", port: 0 });
     await new Promise<void>((resolve) => upstream.once("listening", resolve));
     closeTasks.push(
@@ -154,12 +158,18 @@ describe("WorkspaceTerminalGateway", () => {
         ),
     );
     upstream.on("connection", (socket, request) => {
-      expect(request.url).toBe("/internal/v1/workspace-terminal");
+      expect(request.url).toMatch(
+        /^\/internal\/v1\/(?:workspace-terminal|development-environment-terminal)$/,
+      );
       expect(request.headers.authorization).toBe(`Bearer ${TERMINAL_TOKEN}`);
       socket.on("message", (data: RawData) => {
         const frame = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
-        if (frame.type === "workspace_terminal.open") {
-          observedOpen = frame;
+        if (
+          frame.type === "workspace_terminal.open" ||
+          frame.type === "development_environment_terminal.open"
+        ) {
+          if (frame.type === "workspace_terminal.open") observedOpen = frame;
+          else observedDevelopmentOpen = frame;
           socket.send(
             JSON.stringify({
               workspaceTerminalProtocolVersion: 1,
@@ -263,6 +273,65 @@ describe("WorkspaceTerminalGateway", () => {
     expect(observedInput).toEqual({
       workspaceTerminalProtocolVersion: 1,
       type: "workspace_terminal.ping",
+    });
+
+    await database
+      .insertInto("tool_broker_instances")
+      .values({
+        instance_id: IDS.broker,
+        sandbox_domain_id: "sandbox-domain-0001",
+        owner_base_url: `http://127.0.0.1:${String(upstreamAddress.port)}`,
+        state: "ready",
+        lease_expires_at: new Date(Date.now() + 60_000),
+        last_heartbeat_at: new Date(),
+      })
+      .executeTakeFirstOrThrow();
+    await database
+      .insertInto("development_environments")
+      .values({
+        id: IDS.development,
+        tenant_id: IDS.tenant,
+        owner_user_id: IDS.user,
+        project_id: IDS.project,
+        workspace_id: IDS.workspace,
+        sandbox_domain_id: "sandbox-domain-0001",
+        environment_version_id: IDS.environment,
+        owner_instance_id: IDS.broker,
+        owner_base_url: `http://127.0.0.1:${String(upstreamAddress.port)}`,
+        generation: 1,
+        runtime_id: IDS.development,
+        runtime_name: "development-test",
+        state: "running",
+        failure_code: null,
+        idempotency_key: "development-terminal",
+        request_sha256: "a".repeat(64),
+        released_at: null,
+      })
+      .executeTakeFirstOrThrow();
+    const developmentUrl = new URL(
+      DEVELOPMENT_ENVIRONMENT_TERMINAL_PATH.replace(":environmentId", IDS.development),
+      address,
+    );
+    developmentUrl.protocol = "ws:";
+    const developmentBrowser = new WebSocket(developmentUrl, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    closeTasks.push(async () => {
+      if (developmentBrowser.readyState === WebSocket.OPEN) developmentBrowser.close();
+    });
+    const nextDevelopmentFrame = queuedFrames(developmentBrowser);
+    await new Promise<void>((resolve, reject) => {
+      developmentBrowser.once("open", resolve);
+      developmentBrowser.once("error", reject);
+    });
+    await expect(nextDevelopmentFrame()).resolves.toMatchObject({
+      type: "workspace_terminal.ready",
+    });
+    expect(observedDevelopmentOpen).toMatchObject({
+      type: "development_environment_terminal.open",
+      environmentId: IDS.development,
+      tenantId: IDS.tenant,
+      userId: IDS.user,
     });
 
     await database

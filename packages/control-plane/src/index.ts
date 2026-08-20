@@ -15,6 +15,10 @@ export {
 export { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
 export { ConversationTreeService } from "./conversation-tree-service.ts";
 export {
+  DevelopmentEnvironmentService,
+  type DevelopmentEnvironmentServiceOptions,
+} from "./development-environment-service.ts";
+export {
   PublicTenantRegistrationError,
   PublicTenantRegistrationService,
   type PublicTenantRegistrationConfiguration,
@@ -322,6 +326,7 @@ export {
   type WorkspaceVersionServiceOptions,
 } from "./workspace-version-service.ts";
 export {
+  DEVELOPMENT_ENVIRONMENT_TERMINAL_PATH,
   WORKSPACE_TERMINAL_PATH,
   WorkspaceTerminalGateway,
   type WorkspaceTerminalGatewayOptions,

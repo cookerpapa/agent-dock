@@ -157,6 +157,19 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
     return this.instances.get(sandboxId);
   }
 
+  async pause(sandboxId: string): Promise<void> {
+    const instance = this.instances.get(sandboxId);
+    if (instance !== undefined) this.instances.set(sandboxId, { ...instance, state: "paused" });
+  }
+
+  async connect(sandboxId: string): Promise<CubeSandboxInstance> {
+    const instance = this.instances.get(sandboxId);
+    if (instance === undefined) throw new Error("sandbox unavailable");
+    const resumed = { ...instance, state: "running" };
+    this.instances.set(sandboxId, resumed);
+    return resumed;
+  }
+
   async list(): Promise<readonly CubeSandboxInstance[]> {
     return [...this.instances.values()];
   }
@@ -360,6 +373,36 @@ describe("CubeSandbox Provider contract", () => {
       retryable: false,
     });
     expect(runtime.creates).toHaveLength(0);
+    await provider.close();
+  });
+
+  it("uses Cube never-timeout lifecycle and preserves identity across development pause/resume", async () => {
+    const runtime = new FakeCubeRuntimeClient();
+    const provider = new CubeSandboxProvider({
+      templateId: "pi-cloud-tool-v1",
+      imageRevision: "development",
+      webProxy: WEB_PROXY,
+      runtimeClient: runtime,
+      workspaceVolumeGateway: fakeWorkspaceVolumeGateway(),
+    });
+    const handle = await provider.create({
+      activationId: ACTIVATION_ID,
+      assignment,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      policy: provider.defaultPolicy,
+      lifetime: "development_environment",
+    });
+    expect(runtime.creates[0]).toMatchObject({
+      timeoutSeconds: -1,
+      lifecycle: { onTimeout: "pause", autoResume: true },
+    });
+    await provider.pause(handle);
+    await expect(provider.resume(handle)).resolves.toMatchObject({
+      activationId: ACTIVATION_ID,
+      runtimeId: handle.runtimeId,
+    });
+    await provider.destroy(handle);
     await provider.close();
   });
 

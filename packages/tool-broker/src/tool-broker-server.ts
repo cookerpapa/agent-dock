@@ -1,8 +1,12 @@
 import {
+  TOOL_BROKER_DEVELOPMENT_ENVIRONMENT_PATH,
+  TOOL_BROKER_DEVELOPMENT_ENVIRONMENT_TERMINAL_PATH,
   MAX_WORKSPACE_TERMINAL_FRAME_BYTES,
   TOOL_BROKER_TERMINAL_PATH,
   parseWorkspaceTerminalClientFrame,
   parseWorkspaceTerminalOpenRequest,
+  parseDevelopmentEnvironmentBrokerRequest,
+  parseDevelopmentEnvironmentTerminalOpenRequest,
   parseToolBrokerRequest,
   parseToolBrokerMaterializeFileRequest,
   parseSupervisorManagementRequest,
@@ -63,7 +67,15 @@ export type ToolBrokerBackend = Pick<
   | "cleanPrewarmCount"
   | "providerId"
 > &
-  Partial<Pick<ToolBroker, "openTerminal">>;
+  Partial<
+    Pick<
+      ToolBroker,
+      | "openTerminal"
+      | "provisionDevelopmentEnvironment"
+      | "developmentEnvironmentLifecycle"
+      | "openDevelopmentEnvironmentTerminal"
+    >
+  >;
 
 function digest(value: string): Buffer {
   return createHash("sha256").update(value, "utf8").digest();
@@ -347,6 +359,50 @@ export class ToolBrokerServer {
       });
     }
 
+    if (
+      this.#terminalDigest !== undefined &&
+      this.#broker.provisionDevelopmentEnvironment !== undefined &&
+      this.#broker.developmentEnvironmentLifecycle !== undefined &&
+      this.#broker.openDevelopmentEnvironmentTerminal !== undefined
+    ) {
+      this.#server.register(async (scope) => {
+        scope.addHook("preValidation", async (request, reply) => {
+          if (!this.#terminalAuthorized(request.headers.authorization)) {
+            await reply.code(401).send();
+          }
+        });
+        scope.post(TOOL_BROKER_DEVELOPMENT_ENVIRONMENT_PATH, async (request, reply) => {
+          try {
+            const message = parseDevelopmentEnvironmentBrokerRequest(request.body);
+            await reply
+              .code(200)
+              .send(
+                message.type === "development_environment.provision"
+                  ? await this.#broker.provisionDevelopmentEnvironment!(message)
+                  : await this.#broker.developmentEnvironmentLifecycle!(message),
+              );
+          } catch (error: unknown) {
+            if (error instanceof ToolBrokerOwnerRedirectError) {
+              const message = parseDevelopmentEnvironmentBrokerRequest(request.body);
+              await reply.code(200).send({
+                developmentEnvironmentProtocolVersion: 1,
+                type: "development_environment.owner_redirect",
+                requestId: message.requestId,
+                ownerBaseUrl: error.ownerBaseUrl,
+              });
+              return;
+            }
+            await this.#failure(reply, error);
+          }
+        });
+        scope.get(
+          TOOL_BROKER_DEVELOPMENT_ENVIRONMENT_TERMINAL_PATH,
+          { websocket: true },
+          (socket) => this.#acceptTerminalSocket(socket, true),
+        );
+      });
+    }
+
     this.#server.post(TOOL_BROKER_SERVICE_PATH, async (request, reply) => {
       if (!this.#authorized(request.headers.authorization)) {
         await reply.code(401).send({
@@ -598,7 +654,7 @@ export class ToolBrokerServer {
     });
   }
 
-  #acceptTerminalSocket(socket: WebSocket): void {
+  #acceptTerminalSocket(socket: WebSocket, developmentEnvironment = false): void {
     let connection: Awaited<ReturnType<NonNullable<ToolBrokerBackend["openTerminal"]>>> | undefined;
     let closed = false;
     let initialized = false;
@@ -657,25 +713,39 @@ export class ToolBrokerServer {
           const parsed = JSON.parse(raw) as unknown;
           if (!initialized) {
             initialized = true;
-            const open = parseWorkspaceTerminalOpenRequest(parsed);
-            const openTerminal = this.#broker.openTerminal;
-            if (openTerminal === undefined) {
-              throw new ToolBrokerError(
-                "workspace_terminal_unsupported",
-                "Workspace terminal is unavailable",
-                false,
-              );
+            let opened: Awaited<ReturnType<NonNullable<ToolBrokerBackend["openTerminal"]>>>;
+            if (developmentEnvironment) {
+              const open = parseDevelopmentEnvironmentTerminalOpenRequest(parsed);
+              const openTerminal = this.#broker.openDevelopmentEnvironmentTerminal;
+              if (openTerminal === undefined) {
+                throw new ToolBrokerError(
+                  "development_environment_terminal_unsupported",
+                  "Development environment terminal is unavailable",
+                  false,
+                );
+              }
+              opened = await openTerminal.call(this.#broker, open);
+            } else {
+              const open = parseWorkspaceTerminalOpenRequest(parsed);
+              const openTerminal = this.#broker.openTerminal;
+              if (openTerminal === undefined) {
+                throw new ToolBrokerError(
+                  "workspace_terminal_unsupported",
+                  "Workspace terminal is unavailable",
+                  false,
+                );
+              }
+              opened = await openTerminal.call(this.#broker, {
+                tenantId: open.tenantId,
+                userId: open.userId,
+                projectId: open.projectId,
+                workspaceId: open.workspaceId,
+                sessionId: open.sessionId,
+                environment: open.environment,
+                workspaceSeed: open.workspaceSeed,
+                size: { rows: open.rows, cols: open.cols },
+              });
             }
-            const opened = await openTerminal.call(this.#broker, {
-              tenantId: open.tenantId,
-              userId: open.userId,
-              projectId: open.projectId,
-              workspaceId: open.workspaceId,
-              sessionId: open.sessionId,
-              environment: open.environment,
-              workspaceSeed: open.workspaceSeed,
-              size: { rows: open.rows, cols: open.cols },
-            });
             if (closed) {
               await opened.close().catch(() => undefined);
               return;
