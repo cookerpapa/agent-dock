@@ -125,6 +125,25 @@ function lastEvent(publication: EventPublishMessage | EventPublishBatchMessage) 
     : publication.payload.events.at(-1)!;
 }
 
+async function boundedParallelMap<Input, Output>(
+  values: readonly Input[],
+  concurrency: number,
+  operation: (value: Input) => Promise<Output>,
+): Promise<Output[]> {
+  const output = new Array<Output>(values.length);
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+      while (true) {
+        const index = cursor++;
+        if (index >= values.length) return;
+        output[index] = await operation(values[index]!);
+      }
+    }),
+  );
+  return output;
+}
+
 export function parseKafkaAgentEventEnvelope(
   value: Buffer | string | null,
 ): KafkaAgentEventEnvelope {
@@ -837,11 +856,15 @@ export class KafkaAgentEventAuthorityProjector {
       groupId: options.groupId,
       onEnvelopeGroup: async (values) => {
         const accepted = (
-          await Promise.all(values.map(({ envelope }) => options.authority.validate(envelope)))
+          await boundedParallelMap(values, 32, ({ envelope }) =>
+            options.authority.validate(envelope),
+          )
         ).filter((envelope): envelope is KafkaAcceptedAgentEventEnvelope => envelope !== undefined);
         if (accepted.length === 0) return;
         await options.accepted.appendGroup(accepted);
-        await Promise.all(accepted.map((envelope) => options.authority.confirmAccepted(envelope)));
+        await boundedParallelMap(accepted, 32, (envelope) =>
+          options.authority.confirmAccepted(envelope),
+        );
       },
     });
   }

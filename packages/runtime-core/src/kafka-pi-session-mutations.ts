@@ -5,7 +5,13 @@ import {
   type PiSessionMutationOperation,
   type PiSessionMutationPublisher,
 } from "@pi-cloud/pi-session-postgres";
-import { SessionError, type Entry, type LaneRecord } from "@earendil-works/pi-agent-core";
+import {
+  SessionError,
+  type Entry,
+  type LaneRecord,
+  type NewRecord,
+  type ProvisionedEntry,
+} from "@earendil-works/pi-agent-core";
 import { KafkaJS } from "@confluentinc/kafka-javascript";
 import type { Kysely } from "kysely";
 
@@ -100,17 +106,14 @@ function parseOperation(value: unknown): PiSessionMutationOperation {
     case "append_entry":
       return {
         kind: "append_entry",
-        entry: structuredClone(object(candidate.entry, "Pi entry")) as PiSessionMutationOperation &
-          never,
+        entry: structuredClone(object(candidate.entry, "Pi entry")) as ProvisionedEntry<Entry>,
         lane: string(candidate.lane, "Pi entry lane", 256),
-      } as PiSessionMutationOperation;
+      };
     case "append_record":
       return {
         kind: "append_record",
-        record: structuredClone(
-          object(candidate.record, "Pi record"),
-        ) as PiSessionMutationOperation & never,
-      } as PiSessionMutationOperation;
+        record: structuredClone(object(candidate.record, "Pi record")) as NewRecord<LaneRecord>,
+      };
     case "set_name":
       return { kind: "set_name", name: string(candidate.name, "Pi Session name", 1_024) };
     case "set_label":
