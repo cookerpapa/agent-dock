@@ -22,11 +22,6 @@
 		reverse_proxy github-gateway:4400
 	}
 
-	@session_events path_regexp session_events ^/v1/sessions/[0-9a-fA-F-]+/(events|live-turn-snapshot)$
-	handle @session_events {
-		reverse_proxy event-gateway:4600
-	}
-
 	handle /v1/* {
 		reverse_proxy control-plane:3000
 	}

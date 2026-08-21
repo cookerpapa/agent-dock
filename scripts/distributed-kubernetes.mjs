@@ -121,12 +121,7 @@ function preflight(namespace, values) {
     "workspace-terminal-token",
     "supervisor-enrollment-token",
     "supervisor-management-token",
-    "worker-event-ingest-token",
-    "live-event-store-url",
     "workspace-volume-gateway-token",
-    "kafka-ca.crt",
-    "kafka-username",
-    "kafka-password",
   ];
   for (const key of requiredSecretKeys) {
     if (typeof secret.data?.[key] !== "string") fail(`Secret ${secretName} is missing key ${key}`);

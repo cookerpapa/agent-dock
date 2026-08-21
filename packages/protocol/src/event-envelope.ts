@@ -162,25 +162,6 @@ const ModelSamplingRetryScheduledEventSchema = Type.Object(
   { additionalProperties: false },
 );
 
-const ToolInputDeltaEventSchema = Type.Object(
-  {
-    ...TurnEnvelopeProperties,
-    type: Type.Literal("tool.input.delta"),
-    payload: Type.Object(
-      {
-        toolCallId: OpaqueIdSchema,
-        toolName: OpaqueIdSchema,
-        delta: Type.String(),
-        stepSequence: Type.Optional(PositiveSafeIntegerSchema),
-        stepSha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
-        samplingAttempt: Type.Optional(PositiveSafeIntegerSchema),
-      },
-      { additionalProperties: false },
-    ),
-  },
-  { additionalProperties: false },
-);
-
 const ToolStartedEventSchema = Type.Object(
   {
     ...TurnEnvelopeProperties,
@@ -427,7 +408,6 @@ export const PiCloudEventSchema = Type.Union([
   ModelSamplingCompletedEventSchema,
   ModelSamplingRetryScheduledEventSchema,
   AssistantTextDeltaEventSchema,
-  ToolInputDeltaEventSchema,
   ToolStartedEventSchema,
   ToolCompletedEventSchema,
   ContextCompactionStartedEventSchema,
@@ -447,7 +427,6 @@ export type PiCloudEvent =
   | Static<typeof ModelSamplingCompletedEventSchema>
   | Static<typeof ModelSamplingRetryScheduledEventSchema>
   | Static<typeof AssistantTextDeltaEventSchema>
-  | Static<typeof ToolInputDeltaEventSchema>
   | Static<typeof ToolStartedEventSchema>
   | Static<typeof ToolCompletedEventSchema>
   | Static<typeof ContextCompactionStartedEventSchema>

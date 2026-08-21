@@ -11,11 +11,8 @@
     "./canonical-pi-conversation": "./src/canonical-pi-conversation.ts",
     "./conversation-turn-projection": "./src/conversation-turn-projection.ts",
     "./durable-event-store": "./src/durable-event-store.ts",
-    "./event-projection-barrier": "./src/event-projection-barrier.ts",
     "./grouped-durable-event-ingestor": "./src/grouped-durable-event-ingestor.ts",
-    "./http-durable-event-ingestor": "./src/http-durable-event-ingestor.ts",
     "./agent-run-execution-backend": "./src/agent-run-execution-backend.ts",
-    "./live-session-event-store": "./src/live-session-event-store.ts",
     "./live-turn-snapshot": "./src/live-turn-snapshot.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",
     "./postgres-session-event-notifications": "./src/postgres-session-event-notifications.ts",
@@ -31,9 +28,7 @@
     "./session-lease-coordinator": "./src/session-lease-coordinator.ts",
     "./structured-test-command": "./src/structured-test-command.ts",
     "./terminal-turn-event": "./src/terminal-turn-event.ts",
-    "./terminal-turn-projection": "./src/terminal-turn-projection.ts",
-    "./worker-event-envelope": "./src/worker-event-envelope.ts",
-    "./worker-event-log": "./src/worker-event-log.ts"
+    "./terminal-turn-projection": "./src/terminal-turn-projection.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -46,8 +41,6 @@
     "@pi-cloud/protocol": "0.1.0",
     "@pi-cloud/sandbox-supervisor": "0.1.0",
     "@pi-cloud/workspace-runtime": "0.1.0",
-    "@confluentinc/kafka-javascript": "1.10.0",
-    "iovalkey": "0.4.0",
     "kysely": "0.29.4",
     "pg": "8.22.0"
   },

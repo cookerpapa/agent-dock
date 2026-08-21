@@ -1,6 +1,6 @@
 # Distributed Kubernetes deployment
 
-The chart deploys replaceable Web, Control Plane, Event Gateway, Pi Worker,
+The chart deploys replaceable Web, Control Plane, Pi Worker,
 Tool Broker and persistent Volume gateway replicas. It does not install the
 external durable authorities.
 
@@ -8,7 +8,6 @@ external durable authorities.
 
 - PostgreSQL HA plus optional PgBouncer;
 - one direct PostgreSQL connection for migrations, `LISTEN/NOTIFY` and KEDA;
-- Kafka and Valkey;
 - ReadWriteMany persistent Workspace storage visible to Cube Volume Plugin and
   trusted Volume gateway replicas;
 - Cube control/compute plane;
@@ -17,7 +16,7 @@ external durable authorities.
 ## Topology
 
 ```text
-Ingress -> Web / Control Plane / Event Gateway
+Ingress -> Web / Control Plane
                          │
              PostgreSQL ready Run queue
                          │
@@ -31,7 +30,7 @@ Ingress -> Web / Control Plane / Event Gateway
                          │
               persistent Workspace storage
 
-Worker events -> Kafka -> Event projector -> Valkey -> SSE
+Worker events -> PostgreSQL group commit -> LISTEN/NOTIFY -> SSE
 ```
 
 There are no execution Cells or Worker-affinity queues. A Workspace binds to a
@@ -56,13 +55,12 @@ npm run kubernetes:distributed:deploy -- --values values.yaml
 ```
 
 The platform Secret must contain database URLs, API/bootstrap credentials,
-Cube/Tool credentials, Kafka credentials, Valkey URL and event/metrics tokens.
+Cube/Tool credentials and metrics tokens.
 No S3 or Temporal credential is required.
 
 ## Scaling
 
 - Control Plane/Web scale by CPU;
-- Event Gateway scales by Kafka lag and CPU;
 - Pi Workers scale by PostgreSQL ready Run backlog;
 - Tool Broker and Volume gateway scale independently;
 - Cube compute and underlying nodes scale from active Sandbox demand.
@@ -81,7 +79,7 @@ Before claiming high availability, test on the actual storage/network stack:
 
 - Worker and node loss during model and Tool calls;
 - PostgreSQL/PgBouncer failover and notification reconnect;
-- Kafka partition movement and Valkey rebuild;
+- PostgreSQL hot-event retention and SSE reconnect;
 - Tool Broker/Volume gateway owner loss;
 - Cube compute-node drain and persistent Volume reattachment;
 - KEDA and node-autoscaler scale-up/down under real backlog.

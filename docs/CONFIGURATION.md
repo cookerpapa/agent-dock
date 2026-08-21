@@ -32,7 +32,7 @@ Important operator values include:
 - Cube warm/persistent retention and capacity;
 - Workspace Volume gateway concurrency;
 - Workspace deletion reaper interval and batch size;
-- Kafka/Valkey event retention and projection settings;
+- PostgreSQL hot-event retention interval and batch size;
 - optional GitHub and observability profiles.
 
 The Worker requires both:
@@ -55,7 +55,6 @@ The platform and Pi Worker charts are JSON-schema validated. Required external
 authorities are:
 
 - PostgreSQL/PgBouncer and direct PostgreSQL notification URL;
-- Kafka and Valkey;
 - an existing ReadWriteMany Workspace PVC/CSI backend;
 - Cube API/proxy/Volume Plugin endpoints;
 - provider egress proxy.
@@ -74,7 +73,7 @@ model upstream timeout <= Pi model timeout <= Pi Turn timeout
 model capability TTL >= Pi Turn timeout + expiry margin
 repository import lease <= repository import wait
 Worker termination grace > Turn + Tool settlement window
-Kafka retention > Valkey live replay window
+hot-event retention >= maximum supported browser reconnect window
 tenant maximum concurrent Runs >= desired active Subagents + one waiting root Run
 ```
 
@@ -90,5 +89,5 @@ npm run helm:check
 
 Never place credentials in committed Helm values or environment files. Use
 private files/Kubernetes Secrets for database URLs, model encryption key,
-Worker enrollment/management tokens, Tool Broker token, Cube API key, event
-ingest token and metrics token. Cube receives none of them.
+Worker enrollment/management tokens, Tool Broker token, Cube API key and
+metrics token. Cube receives none of them.

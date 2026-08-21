@@ -46,11 +46,9 @@ durable side effects.
 
 ## State
 
-PostgreSQL is authoritative for business state, complete terminal conversation
-projections and event cursors. Kafka is the durable live-event log and Valkey
-is its bounded, rebuildable SSE read model. PostgreSQL also stores immutable
-Pi checkpoint objects and Run history; persistent Cube Volumes own Workspace
-bytes.
+PostgreSQL is authoritative for business state, complete Pi messages, the
+bounded live-event tail and event cursors. It also stores immutable Pi Session
+records and Run history; persistent Cube Volumes own Workspace bytes.
 
 Conversation titles are independent from Workspace names. A Workspace may be
 shared by multiple conversations. Archived conversations are excluded from

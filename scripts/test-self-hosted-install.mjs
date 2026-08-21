@@ -47,16 +47,7 @@ const productionCompose = await readFile(
   fileURLToPath(new URL("../deploy/production/compose.yaml", import.meta.url)),
   "utf8",
 );
-assert.match(
-  productionCompose,
-  /KAFKA_LOG_DIRS:\s*\/var\/lib\/kafka\/data/u,
-  "the one-host Kafka broker must write into its persistent Volume",
-);
-assert.match(
-  productionCompose,
-  /kafka-data:\/var\/lib\/kafka\/data/u,
-  "the one-host Kafka data path must be mounted from a named Volume",
-);
+assert.doesNotMatch(productionCompose, /event-gateway|kafka|valkey/u);
 
 await assert.rejects(
   execute("bash", [installer, "--print-plan", "--pi-workers", "invalid"], {

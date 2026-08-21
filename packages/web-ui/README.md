@@ -2,7 +2,7 @@
 
 This package is the browser product for PiCloud. It talks only to the public
 REST, resumable SSE and brokered Terminal endpoints; it never opens Pi,
-PostgreSQL, Kafka, Cube or provider credentials directly.
+PostgreSQL, Cube or provider credentials directly.
 
 ## Current behavior
 

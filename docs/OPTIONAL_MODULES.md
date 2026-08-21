@@ -5,7 +5,7 @@ the conversation product:
 
 ```text
 Web → Control Plane → PostgreSQL queue → Pi Worker → Tool Broker → Cube
-                    ↘ PostgreSQL / Kafka / Valkey
+                    ↘ PostgreSQL Session/event storage
 ```
 
 The Control Plane exposes authentication, model/proxy settings, projects,

@@ -5,7 +5,7 @@ single-node k3d cluster while leaving the rest of the one-host topology in
 Compose.
 
 ```text
-k3d Pi Workers -> bridged Control Plane/PostgreSQL/Event Gateway/Tool Broker
+k3d Pi Workers -> bridged Control Plane/PostgreSQL/Tool Broker
 ```
 
 Workers consume the same PostgreSQL Run queue as Compose Workers. The cutover
@@ -22,8 +22,8 @@ npm run kubernetes:pi-workers:down
 
 Each Worker receives a pooled database URL plus a direct notification URL.
 Conversation correctness remains in PostgreSQL; local Worker PVCs contain only
-boot identity and unacknowledged event WAL.
+boot identity.
 
 This profile validates packaging and horizontal Worker behavior, not
 multi-node availability. Use the distributed chart for external PostgreSQL,
-Kafka, Valkey, Workspace storage and Cube failure testing.
+Workspace storage and Cube failure testing.

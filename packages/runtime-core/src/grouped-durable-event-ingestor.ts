@@ -54,9 +54,9 @@ function retryable(error: unknown): boolean {
 
 /**
  * Groups independent Session event batches behind one durable-store call while
- * retaining a stable shard per Session. This becomes one PostgreSQL commit in
- * local mode or one authenticated HTTP/Kafka append group in enterprise mode.
- * Acknowledgements are emitted only after the selected durable boundary, so
+ * retaining a stable shard per Session. Independent Sessions share one
+ * PostgreSQL commit without sharing sequence or fencing state.
+ * Acknowledgements are emitted only after that durable boundary, so
  * browser-visible events keep their "durable before visible" contract.
  */
 export class GroupedDurableEventIngestor implements DurableEventIngestor {

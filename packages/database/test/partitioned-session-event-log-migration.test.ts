@@ -40,21 +40,21 @@ describe("partitioned Session event log migration", () => {
     expect(children.rows).toEqual([{ count: "32" }]);
   });
 
-  it("retains a global event-ID registry and registration trigger", async () => {
+  it("uses the Session sequence key without a second global event-ID registry", async () => {
     const registry = await pglite.query<{ table_name: string }>(`
       select table_name
         from information_schema.tables
        where table_schema = 'public'
          and table_name = 'session_event_ids'
     `);
-    expect(registry.rows).toEqual([{ table_name: "session_event_ids" }]);
+    expect(registry.rows).toEqual([]);
     const trigger = await pglite.query<{ tgname: string }>(`
       select tgname
         from pg_trigger
        where tgrelid = 'session_events'::regclass
          and not tgisinternal
     `);
-    expect(trigger.rows).toEqual([{ tgname: "session_events_register_event_id" }]);
+    expect(trigger.rows).toEqual([]);
   });
 
   it("adds a replay floor, removes obsolete raw archives, and eagerly vacuums local partitions", async () => {

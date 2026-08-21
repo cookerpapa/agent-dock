@@ -12,7 +12,6 @@
     "bootstrap",
     "controlPlane",
     "eventRetention",
-    "eventGateway",
     "web",
     "external",
     "networkPolicy",
@@ -63,10 +62,9 @@
     "images": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["controlPlane", "eventGateway", "web", "toolBroker"],
+      "required": ["controlPlane", "web", "toolBroker"],
       "properties": {
         "controlPlane": { "$ref": "#/$defs/image" },
-        "eventGateway": { "$ref": "#/$defs/image" },
         "web": { "$ref": "#/$defs/image" },
         "toolBroker": { "$ref": "#/$defs/image" }
       }
@@ -118,7 +116,6 @@
         "resources": { "$ref": "#/$defs/resources" }
       }
     },
-    "eventGateway": { "$ref": "#/$defs/httpWorkload" },
     "web": {
       "allOf": [
         { "$ref": "#/$defs/httpWorkload" },
@@ -144,24 +141,8 @@
     "external": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "eventIngest",
-        "database",
-        "kafka",
-        "liveEventStore",
-        "providerProxyUrl",
-        "otlpTracesEndpoint"
-      ],
+      "required": ["database", "providerProxyUrl", "otlpTracesEndpoint"],
       "properties": {
-        "eventIngest": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["serviceUrl", "tokenSecretKey"],
-          "properties": {
-            "serviceUrl": { "$ref": "#/$defs/httpUrl" },
-            "tokenSecretKey": { "$ref": "#/$defs/secretKey" }
-          }
-        },
         "database": {
           "type": "object",
           "additionalProperties": false,
@@ -171,39 +152,6 @@
             "notificationSecretKey": { "$ref": "#/$defs/secretKey" },
             "apiTokenSecretKey": { "$ref": "#/$defs/secretKey" }
           }
-        },
-        "kafka": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["brokers", "topic", "projectorGroupId", "security"],
-          "properties": {
-            "brokers": {
-              "type": "array",
-              "minItems": 1,
-              "maxItems": 256,
-              "uniqueItems": true,
-              "items": { "$ref": "#/$defs/boundedText" }
-            },
-            "topic": { "$ref": "#/$defs/boundedText" },
-            "projectorGroupId": { "$ref": "#/$defs/boundedText" },
-            "security": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["enabled", "caSecretKey", "usernameSecretKey", "passwordSecretKey"],
-              "properties": {
-                "enabled": { "type": "boolean" },
-                "caSecretKey": { "$ref": "#/$defs/secretKey" },
-                "usernameSecretKey": { "$ref": "#/$defs/secretKey" },
-                "passwordSecretKey": { "$ref": "#/$defs/secretKey" }
-              }
-            }
-          }
-        },
-        "liveEventStore": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["urlSecretKey"],
-          "properties": { "urlSecretKey": { "$ref": "#/$defs/secretKey" } }
         },
         "providerProxyUrl": { "$ref": "#/$defs/httpUrl" },
         "otlpTracesEndpoint": { "$ref": "#/$defs/optionalHttpUrl" }
@@ -457,8 +405,7 @@
         "maxReplicas": { "type": "integer", "minimum": 2, "maximum": 256 },
         "targetCpuUtilization": { "type": "integer", "minimum": 10, "maximum": 95 },
         "pollingIntervalSeconds": { "type": "integer", "minimum": 1, "maximum": 300 },
-        "cooldownSeconds": { "type": "integer", "minimum": 30, "maximum": 3600 },
-        "kafkaLagThreshold": { "type": "string", "pattern": "^[1-9][0-9]{0,8}$" }
+        "cooldownSeconds": { "type": "integer", "minimum": 30, "maximum": 3600 }
       }
     },
     "httpWorkload": {

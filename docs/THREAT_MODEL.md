@@ -28,9 +28,9 @@ new Attempt takes ownership.
 
 ### Durable authorities
 
-PostgreSQL owns Runs and Pi Sessions, Kafka owns retained live events, and the
-persistent Cube Volume owns Workspace bytes. Valkey and Worker caches are
-rebuildable. There is no competing workflow or checkpoint head.
+PostgreSQL owns Runs, Pi Sessions and the bounded live-event tail; the
+persistent Cube Volume owns Workspace bytes. Worker caches are rebuildable.
+There is no competing workflow or checkpoint head.
 
 ## Key threats and controls
 
@@ -49,8 +49,7 @@ rebuildable. There is no competing workflow or checkpoint head.
 | SSRF/data exfiltration to internal network | governed egress proxy and deny network policy |
 | path/symlink escape | rooted/O_NOFOLLOW trusted Volume operations |
 | infinite output/process/resource use | byte, timeout, PID, CPU, memory and disk limits |
-| browser observes non-durable output | Kafka ACK and projected watermark before SSE |
-| Valkey loss | rebuild from retained Kafka |
+| browser observes non-durable output | PostgreSQL commit before SSE notification |
 | Cube loss | process world reset marker plus same persistent Workspace Volume |
 | secret leakage in events | bounded schemas and redaction; credentials never enter model context |
 
@@ -72,5 +71,5 @@ persistence and platform audit metadata remain authoritative.
 - process/memory/socket survival after Cube destruction;
 - historical Workspace rollback without a storage-backend snapshot policy;
 - safety from a Cube/KVM/hypervisor escape vulnerability;
-- multi-node disaster recovery unless PostgreSQL, Kafka and Workspace storage
+- multi-node disaster recovery unless PostgreSQL and Workspace storage
   are deployed and tested for it.

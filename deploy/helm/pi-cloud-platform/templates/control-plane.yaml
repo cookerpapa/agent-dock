@@ -64,9 +64,6 @@ spec:
             - { name: PORT, value: "3000" }
             - { name: DATABASE_URL_FILE, value: /run/pi-cloud-secrets/database-url }
             - { name: PI_CLOUD_DATABASE_NOTIFICATION_URL_FILE, value: /run/pi-cloud-secrets/database-notification-url }
-            - { name: PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG, value: "true" }
-            - { name: PI_CLOUD_WORKER_EVENT_INGEST_URL, value: {{ .Values.external.eventIngest.serviceUrl | quote }} }
-            - { name: PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE, value: /run/pi-cloud-secrets/worker-event-ingest-token }
             - { name: PI_CLOUD_SUPERVISOR_ENROLLMENT_TOKEN_FILE, value: /run/pi-cloud-secrets/supervisor-enrollment-token }
             - { name: PI_CLOUD_SUPERVISOR_MANAGEMENT_TOKEN_FILE, value: /run/pi-cloud-secrets/supervisor-management-token }
             - { name: PI_CLOUD_MODEL_CREDENTIAL_MASTER_KEY_FILE, value: /run/pi-cloud-secrets/model-credential-master-key }

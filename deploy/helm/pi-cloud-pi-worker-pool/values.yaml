@@ -35,7 +35,6 @@ image:
 
 services:
   controlPlaneUrl: http://control-plane.pi-cloud-system.svc.cluster.local:3000
-  eventGatewayUrl: http://event-gateway.pi-cloud-system.svc.cluster.local:4600
   toolBrokerUrls:
     - http://tool-broker.pi-cloud-system.svc.cluster.local:4300
   githubGateway:
@@ -56,11 +55,9 @@ credentials:
   modelCredentialMasterKeyKey: model-credential-master-key
   githubGatewayTokenKey: github-gateway-token
   metricsTokenKey: metrics-token
-  workerEventIngestTokenKey: worker-event-ingest-token
 
 runtime:
   allowInsecureInternalHttp: true
-  externalWorkerEventLog: true
   subagents:
     maximumDepth: 4
     maximumNodes: 32
@@ -97,7 +94,7 @@ networkPolicy:
   trustedNamespaceLabel:
     key: pi-cloud.io/trusted-plane
     value: "true"
-  trustedTcpPorts: [443, 3000, 3129, 4300, 4400, 4318, 4600, 5432]
+  trustedTcpPorts: [443, 3000, 3129, 4300, 4400, 4318, 5432]
   externalEgressCidrs: []
 
 disruptionBudget:

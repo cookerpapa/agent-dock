@@ -24,8 +24,8 @@ manual Cube credential to configure.
 
 ## Services
 
-The default topology includes PostgreSQL, Kafka, Valkey, Event Gateway,
-Control Plane, two trusted Pi Workers, Tool Broker, persistent Workspace Volume
+The default topology includes PostgreSQL, Control Plane, two trusted Pi
+Workers, Tool Broker, persistent Workspace Volume
 gateway, Cube integration, provider proxy and Web. Observability and GitHub
 experiments are optional profiles.
 
@@ -42,10 +42,8 @@ npm run production:backup
 npm run production:restore
 ```
 
-Offline backups contain PostgreSQL, retained Kafka events, the Valkey hot view,
-the generated runtime configuration, Worker boot ledgers and the local
-persistent Workspace Volume directory. Kafka remains the recovery source for
-the rebuildable Valkey view. On distributed
+Offline backups contain PostgreSQL, the generated runtime configuration,
+Worker boot ledgers and the local persistent Workspace Volume directory. On distributed
 storage, use the storage backend's snapshot/backup mechanism in addition to the
 PostgreSQL backup.
 

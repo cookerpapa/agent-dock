@@ -1526,8 +1526,7 @@ export class ControlPlaneStore {
     if (unprojectedTurnIds.length > 0) {
       // An active Turn is not yet represented by canonical Pi entries. Start
       // SSE after the latest settled projection so the browser replays its
-      // already-durable Kafka/Valkey events. This deliberately does not query
-      // PostgreSQL's local-only raw-event adapter.
+      // already-durable PostgreSQL events from the retained hot tail.
       replayAfterSequence = Math.max(
         nonNegativeSafeInteger(conversation.replayFloorSequence, "Conversation replay floor"),
         ...currentTerminalTranscripts.map((transcript) => transcript.throughSequence),

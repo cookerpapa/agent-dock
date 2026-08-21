@@ -36,7 +36,7 @@
       "file": "test/control-plane-api.test.ts",
       "test": "settles a completed backend execution without consulting the live projection",
       "setupTests": ["creates a project and workspace atomically, then creates a cold session"],
-      "invariant": "A successful Run terminal commit does not read or wait for Kafka/Valkey projection state."
+      "invariant": "A successful Run terminal commit does not reconstruct a complete message from the short-lived delta tail."
     },
     {
       "id": "control-plane-process-sigkill",

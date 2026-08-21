@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted on 2026-08-16. This ADR consolidates and supersedes every architecture
+Accepted on 2026-08-21. This ADR consolidates and supersedes every architecture
 decision older than ADR-0104. Those development-stage ADRs remain recoverable
 from Git history, not from the current documentation tree.
 
@@ -21,12 +21,10 @@ execution path and failure semantics.
 
 ### Durable authorities
 
-- PostgreSQL is the sole product, Run queue and Pi Session authority. It owns
+- PostgreSQL is the sole product, Run queue, Pi Session and live-event
+  authority. It owns
   tenants, Sessions, Attempts, leases, fences, canonical completed Turns and
   Pi's native SessionStorage records.
-- Kafka is the retained durability boundary for high-frequency live Worker
-  events. Valkey is a bounded, rebuildable SSE projection; PostgreSQL stores
-  projection watermarks rather than token-delta rows.
 - One persistent Cube Volume is the byte authority for a Workspace. PostgreSQL
   stores bounded revision, file-index and trusted Git-baseline metadata.
 - A live process tree exists only inside one Cube KVM. Process memory, sockets,
@@ -74,22 +72,20 @@ execution path and failure semantics.
 ### Event and recovery semantics
 
 - Adjacent text fragments are coalesced once; one bounded Host-level queue
-  groups independent Sessions for authenticated transport. There is no Worker
-  disk WAL. A Worker crash may discard only a suffix that Kafka never
-  acknowledged and the browser therefore never observed.
+  groups independent Sessions into PostgreSQL commits. Provider Tool-call JSON,
+  thinking deltas and partial Tool output are not public events. There is no
+  Worker disk WAL.
 - Pi SessionStorage and the browser stream are independent projections.
-  `message_end` appends a complete Pi message without waiting for Kafka or
-  Valkey; Kafka acknowledgement controls only whether a delta may become
-  browser-visible. Pi's ordered log stores stable identifiers and hydrates the
+  `message_end` appends a complete Pi message independently of its short-lived
+  delta rows. Pi's ordered log stores stable identifiers and hydrates the
   canonical entries/records on read.
-- The browser sees only the contiguous prefix acknowledged by Kafka and
-  projected into Valkey. Failed or cancelled visible text is settled into a
+- The browser sees only the contiguous prefix committed to PostgreSQL. Failed
+  or cancelled visible text is settled into a
   bounded hidden Pi entry, so Worker replacement preserves both UI history and
   subsequent model context.
-- Settlement stores the terminal event and metadata in PostgreSQL without
-  waiting for Valkey or reading a transcript back from it. A lagging projector
-  later promotes that terminal sequence after it projects the preceding Kafka
-  range. Live deltas age out; no second complete transcript is materialized.
+- Settlement stores the terminal event and metadata in PostgreSQL. Live events
+  age out after the reconnect window; no second complete transcript is
+  materialized.
 - Queue delivery and event batches are at least once with idempotent/fenced
   commits. Arbitrary shell starts are not exactly once. An ambiguous Tool result
   becomes `UNKNOWN` and is never blindly replayed.
@@ -100,9 +96,9 @@ execution path and failure semantics.
 
 ### Scaling and deployment
 
-- Control Plane, Event Gateway, Pi Workers and Tool Brokers are independent
+- Control Plane, Pi Workers and Tool Brokers are independent
   replica sets. Worker replicas add Agent Loop slots; Cube compute adds Tool
-  capacity. PostgreSQL/PgBouncer, Kafka, Valkey, persistent Workspace storage
+  capacity. PostgreSQL/PgBouncer, persistent Workspace storage
   and Cube are external authorities in distributed deployment.
 - KEDA may scale Workers from PostgreSQL ready-queue depth, but does not own
   delivery or retry semantics.
@@ -114,13 +110,14 @@ execution path and failure semantics.
   source tree.
 - A lost Worker or Cube can preserve committed conversation and Workspace files,
   but not an in-memory process world.
-- Streaming durability does not impose per-token PostgreSQL rows.
+- Streaming durability uses coalesced short-lived PostgreSQL rows, never one
+  row per provider token.
 - Removing the local WAL deliberately weakens "model generated" durability,
   but not "user observed" durability: unacknowledged bytes are invisible.
 - Normal message persistence never sends a control signal to the live-stream
   projection. Stream inspection is reserved for exceptional hard-interruption
   reconciliation when no Pi `message_end` exists.
 - Removing a scheduler, cache or warm runtime cannot change correctness as long
-  as the three durable authorities and fencing rules remain intact.
+  as the two durable authorities and fencing rules remain intact.
 - New architecture components require measured need, a named authority boundary
   and an update to this ADR rather than an unindexed parallel design.

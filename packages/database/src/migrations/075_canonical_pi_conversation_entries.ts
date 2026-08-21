@@ -3,8 +3,8 @@ import { sql, type Kysely } from "kysely";
 /**
  * Make Pi SessionStorage the only long-lived owner of complete conversation
  * messages. The product Turn is attached to each newly appended Pi entry;
- * Kafka/Valkey remain the high-frequency live stream and no second transcript
- * body is retained in PostgreSQL.
+ * The bounded PostgreSQL hot tail remains independent and no second complete
+ * transcript body is retained.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema.alterTable("pi_session_entries").addColumn("turn_id", "uuid").execute();

@@ -12,11 +12,9 @@ import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 
 const BACKUP_MAGIC = Buffer.from("PICLOUD-BACKUP-V1\0", "utf8");
-export const BACKUP_FORMAT_VERSION = 4;
+export const BACKUP_FORMAT_VERSION = 5;
 export const BACKUP_VOLUMES = [
   "postgres-data",
-  "kafka-data",
-  "valkey-data",
   "supervisor-boot",
   "supervisor-1-boot",
   "prometheus-data",

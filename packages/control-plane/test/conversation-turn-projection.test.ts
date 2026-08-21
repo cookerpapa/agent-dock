@@ -39,10 +39,6 @@ describe("conversation turn projection", () => {
         },
         { type: "assistant.text.delta", payload: { text: "the tests." } },
         {
-          type: "tool.input.delta",
-          payload: { toolCallId: "call-1", toolName: "bash", delta: '{"command":' },
-        },
-        {
           type: "tool.started",
           payload: { toolCallId: "call-1", toolName: "bash", input: { command: "npm test" } },
         },
@@ -87,9 +83,9 @@ describe("conversation turn projection", () => {
 
     expect(projected).toMatchObject({
       schemaVersion: 1,
-      throughSequence: 13,
+      throughSequence: 12,
       startedSequence: 1,
-      terminalSequence: 13,
+      terminalSequence: 12,
       stopReason: "stop",
       failure: null,
       cancellation: null,
@@ -107,19 +103,18 @@ describe("conversation turn projection", () => {
         toolCallId: "call-1",
         toolName: "bash",
         input: { command: "npm test" },
-        inputJson: '{"command":',
         output: "all green",
         status: "completed",
         firstSequence: 6,
-        lastSequence: 8,
+        lastSequence: 7,
         startedAt: CREATED_AT,
         completedAt: CREATED_AT,
       },
       {
         kind: "text",
         text: "Done.",
-        firstSequence: 9,
-        lastSequence: 9,
+        firstSequence: 8,
+        lastSequence: 8,
       },
       {
         kind: "approval",
@@ -130,14 +125,14 @@ describe("conversation turn projection", () => {
           message: "Create the artifact",
         },
         outcome: "approved",
-        firstSequence: 10,
-        lastSequence: 11,
+        firstSequence: 9,
+        lastSequence: 10,
       },
       {
         kind: "notification",
         level: "info",
         message: "Artifact ready",
-        sequence: 12,
+        sequence: 11,
       },
     ]);
   });

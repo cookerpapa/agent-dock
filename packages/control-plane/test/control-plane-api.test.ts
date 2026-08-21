@@ -4,7 +4,6 @@ import { createDatabase, runMigrations, type Database } from "@pi-cloud/database
 import type {
   AcceptedTurnResource,
   AcceptedTurnCancellationResource,
-  ConversationDetailResource,
   ControlPlaneApiError,
   EventPublishBatchMessage,
   EventPublishMessage,
@@ -42,9 +41,6 @@ import {
   createControlPlaneApplication,
 } from "../src/index.ts";
 import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
-import type { WorkerEventLogBatch } from "@pi-cloud/runtime-core/worker-event-log";
-import { commitTerminalTurnEvent } from "@pi-cloud/runtime-core/terminal-turn-event";
-import { MemoryLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
 
 const IDS = {
   tenant: "00000000-0000-4000-8000-000000000001",
@@ -599,10 +595,10 @@ describe.sequential("single-user durable turn intake API", () => {
 
     const cursor = await database
       .selectFrom("session_event_cursors")
-      .select(["last_persisted_seq", "acknowledged_through_seq"])
+      .select(["last_persisted_seq"])
       .where("session_id", "=", session.sessionId)
       .executeTakeFirstOrThrow();
-    expect(cursor).toEqual({ last_persisted_seq: "0", acknowledged_through_seq: "0" });
+    expect(cursor).toEqual({ last_persisted_seq: "0" });
   });
 
   it("persists a public GitHub exact commit as pending source metadata", async () => {
@@ -2058,230 +2054,10 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(
       await database
         .selectFrom("session_event_cursors")
-        .select(["last_persisted_seq", "acknowledged_through_seq"])
+        .select(["last_persisted_seq"])
         .where("session_id", "=", assigned.assignedSession.sessionId)
         .executeTakeFirstOrThrow(),
-    ).toEqual({ last_persisted_seq: "48", acknowledged_through_seq: "48" });
-  });
-
-  it("ACKs an external Worker event batch after Kafka and exposes it only after projection", async () => {
-    const assigned = await createAssignedTurn({
-      sandboxId: IDS.externalEventSandbox,
-      sandboxBootId: IDS.externalEventSandboxBoot,
-      supervisorId: "external-event-supervisor",
-      phase: "acknowledged",
-      expired: false,
-    });
-    const occurredAt = new Date().toISOString();
-    const events = ["hello ", "from Kafka"].map((text, index) => ({
-      schemaVersion: 1 as const,
-      eventId: globalThis.crypto.randomUUID(),
-      sessionId: assigned.assignedSession.sessionId,
-      turnId: assigned.accepted.turnId,
-      agentId: "root",
-      seq: index + 1,
-      occurredAt,
-      type: "assistant.text.delta" as const,
-      payload: { text },
-    }));
-    const batch: EventPublishBatchMessage = {
-      protocolVersion: 1,
-      messageId: globalThis.crypto.randomUUID(),
-      sentAt: occurredAt,
-      type: "event.publish_batch",
-      payload: {
-        commandId: assigned.accepted.commandId,
-        leaseId: assigned.runtime.leaseId,
-        fencingToken: assigned.runtime.fencingToken,
-        events,
-      },
-    };
-    const appended: WorkerEventLogBatch[] = [];
-    const liveEventStore = new MemoryLiveSessionEventStore();
-    const externalStore = new DurableEventStore({
-      database,
-      liveEventStore,
-      workerEventLog: {
-        append: (batches) => {
-          appended.push(...batches);
-          return Promise.resolve();
-        },
-      },
-    });
-    await expect(externalStore.ingest(batch)).resolves.toMatchObject({
-      payload: { acknowledgedThroughSeq: 2 },
-    });
-    expect(
-      await database
-        .selectFrom("session_events")
-        .select(({ fn }) => fn.countAll<string>().as("count"))
-        .where("session_id", "=", assigned.assignedSession.sessionId)
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ count: "0" });
-    expect(
-      await externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 0),
-    ).toEqual({ events: [], highWaterMark: 0 });
-    expect(appended).toHaveLength(1);
-    const envelope = {
-      schemaVersion: 1 as const,
-      tenantId: appended[0]!.tenantId,
-      messages: appended[0]!.messages,
-    };
-    await externalStore.project(envelope, {
-      consumerGroup: "test-projector",
-      topic: "test-events",
-      partition: 0,
-      offset: "0",
-    });
-    await externalStore.project(envelope, {
-      consumerGroup: "test-projector",
-      topic: "test-events",
-      partition: 0,
-      offset: "0",
-    });
-
-    const replay = await externalStore.openReplayWindow(
-      IDS.tenant,
-      assigned.assignedSession.sessionId,
-      0,
-    );
-    expect(replay.highWaterMark).toBe(2);
-    expect(
-      replay.events.map((event) =>
-        event.type === "assistant.text.delta" ? event.payload.text : undefined,
-      ),
-    ).toEqual(["hello ", "from Kafka"]);
-    const liveConversation = await http.inject({
-      method: "GET",
-      url: `/v1/conversations/${assigned.assignedSession.sessionId}`,
-    });
-    expect(liveConversation.statusCode).toBe(200);
-    expect(liveConversation.json<ConversationDetailResource>().replayAfterSequence).toBe(0);
-    expect(
-      await database
-        .selectFrom("session_event_cursors")
-        .select(["last_persisted_seq", "last_projected_seq", "acknowledged_through_seq"])
-        .where("session_id", "=", assigned.assignedSession.sessionId)
-        .executeTakeFirstOrThrow(),
-    ).toEqual({
-      last_persisted_seq: "2",
-      last_projected_seq: "2",
-      acknowledged_through_seq: "2",
-    });
-
-    const retryEvent: EventPublishMessage = {
-      protocolVersion: 1,
-      messageId: globalThis.crypto.randomUUID(),
-      sentAt: occurredAt,
-      type: "event.publish",
-      payload: {
-        commandId: assigned.accepted.commandId,
-        leaseId: assigned.runtime.leaseId,
-        fencingToken: assigned.runtime.fencingToken,
-        event: {
-          ...events[0]!,
-          eventId: globalThis.crypto.randomUUID(),
-          seq: 3,
-          payload: { text: "after retry" },
-        },
-      },
-    };
-    const failingStore = new DurableEventStore({
-      database,
-      liveEventStore,
-      workerEventLog: {
-        append: () => Promise.reject(new Error("injected Kafka outage")),
-      },
-    });
-    await expect(failingStore.ingest(retryEvent)).rejects.toThrow("injected Kafka outage");
-    await expect(
-      database
-        .selectFrom("session_event_cursors")
-        .select(["last_persisted_seq", "last_projected_seq"])
-        .where("session_id", "=", assigned.assignedSession.sessionId)
-        .executeTakeFirstOrThrow(),
-    ).resolves.toEqual({
-      last_persisted_seq: "2",
-      last_projected_seq: "2",
-    });
-    const retried: WorkerEventLogBatch[] = [];
-    const retryStore = new DurableEventStore({
-      database,
-      liveEventStore,
-      workerEventLog: {
-        append: (batches) => {
-          retried.push(...batches);
-          return Promise.resolve();
-        },
-      },
-    });
-    await expect(retryStore.ingest(retryEvent)).resolves.toMatchObject({
-      payload: { acknowledgedThroughSeq: 3 },
-    });
-    expect(retried).toHaveLength(1);
-    await expect(
-      externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 2),
-    ).resolves.toEqual({ highWaterMark: 2, events: [] });
-    const terminalEventId = globalThis.crypto.randomUUID();
-    const terminalNow = new Date();
-    const terminalBody = {
-      type: "turn.completed" as const,
-      payload: { stopReason: "external_event_test_complete" },
-    };
-    await database.transaction().execute((transaction) =>
-      commitTerminalTurnEvent(transaction, {
-        tenantId: IDS.tenant,
-        sessionId: assigned.assignedSession.sessionId,
-        turnId: assigned.accepted.turnId,
-        commandId: assigned.accepted.commandId,
-        agentId: "root",
-        leaseId: assigned.runtime.leaseId,
-        fencingToken: assigned.runtime.fencingToken,
-        body: terminalBody,
-        now: terminalNow,
-        eventId: terminalEventId,
-      }),
-    );
-    await expect(
-      database
-        .selectFrom("session_event_cursors")
-        .select(["last_persisted_seq", "last_projected_seq"])
-        .where("session_id", "=", assigned.assignedSession.sessionId)
-        .executeTakeFirstOrThrow(),
-    ).resolves.toEqual({ last_persisted_seq: "4", last_projected_seq: "2" });
-    await retryStore.project(
-      {
-        schemaVersion: 1,
-        tenantId: retried[0]!.tenantId,
-        messages: retried[0]!.messages,
-      },
-      {
-        consumerGroup: "test-projector",
-        topic: "test-events",
-        partition: 0,
-        offset: "1",
-      },
-    );
-    await expect(
-      externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 2),
-    ).resolves.toMatchObject({
-      highWaterMark: 4,
-      events: [
-        { seq: 3, type: "assistant.text.delta", payload: { text: "after retry" } },
-        { seq: 4, type: "turn.completed" },
-      ],
-    });
-    expect(
-      await database
-        .selectFrom("session_events")
-        .select(({ fn }) => fn.countAll<string>().as("count"))
-        .where("session_id", "=", assigned.assignedSession.sessionId)
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ count: "0" });
-    await liveEventStore.trimThrough(IDS.tenant, assigned.assignedSession.sessionId, 3);
-    await expect(
-      externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 0),
-    ).rejects.toMatchObject({ code: "event_store_invariant", retryable: true });
+    ).toEqual({ last_persisted_seq: "48" });
   });
 
   it.skipIf(!process.env.PI_CLOUD_TEST_DATABASE_URL)(

@@ -37,7 +37,7 @@
     "cubesandbox:ps": "node scripts/production-compose.mjs ps",
     "cubesandbox:logs": "node scripts/production-compose.mjs logs --follow",
     "cubesandbox:down": "node scripts/production-compose.mjs down",
-    "helm:check": "node scripts/check-helm-pi-worker-pool.mjs && node scripts/check-helm-platform.mjs && node scripts/check-enterprise-kafka.mjs",
+    "helm:check": "node scripts/check-helm-pi-worker-pool.mjs && node scripts/check-helm-platform.mjs",
     "image:closure-check": "node scripts/check-supervisor-image-closure.mjs",
     "kubernetes:pi-workers:install-runtime": "node scripts/ensure-k3d.mjs",
     "kubernetes:pi-workers:up": "node scripts/local-kubernetes-pi-workers.mjs up",
@@ -50,9 +50,7 @@
     "kubernetes:distributed:status": "node scripts/distributed-kubernetes.mjs status",
     "runtime-policy:check": "node scripts/check-runtime-time-budgets.mjs && node scripts/check-cubesandbox-template-retention.mjs",
     "benchmark:postgres-event-log": "tsx scripts/run-postgres-event-log-benchmark.ts",
-    "eval:kafka-events": "tsx scripts/run-kafka-event-log-acceptance.ts",
-    "eval:enterprise-events": "tsx --tsconfig packages/control-plane/tsconfig.json scripts/run-enterprise-event-pipeline-acceptance.ts",
-    "events:rebuild-live": "npm run rebuild-live-events --workspace @pi-cloud/event-gateway",
+    "eval:enterprise-events": "tsx scripts/run-postgres-event-log-benchmark.ts",
     "production:init": "node scripts/init-production.mjs",
     "production:config": "node scripts/production-compose.mjs config --quiet",
     "production:config:observability": "PI_CLOUD_PRODUCTION_PROFILES=observability node scripts/production-compose.mjs config --quiet",
@@ -97,7 +95,6 @@
     "eval:load": "node scripts/run-control-plane-load.mjs"
   },
   "devDependencies": {
-    "@confluentinc/kafka-javascript": "1.10.0",
     "@types/node": "24.12.4",
     "kysely": "0.29.4",
     "prettier": "3.9.5",

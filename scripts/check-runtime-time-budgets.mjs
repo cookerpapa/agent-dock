@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseAllDocuments, parseDocument } from "yaml";
+import { parseDocument } from "yaml";
 
 const MAX_TOOL_EXECUTION_MS = 5 * 60_000;
 const TOOL_TRANSPORT_MARGIN_MS = 60_000;
 const MODEL_CAPABILITY_MARGIN_MS = 60_000;
 const WORKER_SETTLEMENT_GRACE_MS = 5 * 60_000;
 const PROCESS_SHUTDOWN_MARGIN_MS = 60_000;
-const LIVE_STREAM_RETENTION_MS = 60 * 60_000;
 const WORKSPACE_VOLUME_GATEWAY_HTTP_MS = 11 * 60_000;
 
 function integer(value, description) {
@@ -154,29 +153,6 @@ validateWorkspaceVolumeGatewayPolicy(
     terminationGraceMs: 720_000,
   },
   "Platform Helm Workspace Volume Gateway",
-);
-
-const composeKafkaRetention =
-  /retention_ms=\$\{PI_CLOUD_WORKER_EVENT_RETENTION_MS:-([0-9]+)\}/.exec(composeText)?.[1];
-assert.ok(composeKafkaRetention, "Compose Kafka retention default is missing");
-assert.ok(
-  integer(composeKafkaRetention, "Compose Kafka retention") > LIVE_STREAM_RETENTION_MS,
-  "Compose Kafka retention must outlive the Valkey replay window",
-);
-
-const enterpriseKafka = parseAllDocuments(
-  readFileSync("deploy/enterprise/kafka/cluster.yaml", "utf8"),
-)
-  .map((document) => document.toJSON())
-  .find(
-    (resource) =>
-      resource?.kind === "KafkaTopic" && resource.metadata?.name === "pi-cloud-worker-events-v1",
-  );
-assert.ok(enterpriseKafka, "Enterprise Worker-event Kafka topic is missing");
-assert.ok(
-  integer(enterpriseKafka.spec.config["retention.ms"], "Enterprise Kafka retention") >
-    LIVE_STREAM_RETENTION_MS,
-  "Enterprise Kafka retention must outlive the Valkey replay window",
 );
 
 process.stdout.write("runtime_time_budget_check_passed\n");

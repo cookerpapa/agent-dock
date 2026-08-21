@@ -23,7 +23,6 @@ const TRIVY_IMAGE =
 const TRIVY_IGNORE_POLICY = resolve(repositoryRoot, ".trivyignore.yaml");
 const PRODUCTION_IMAGE_NAMES = [
   "control-plane",
-  "event-gateway",
   "supervisor-host",
   "tool-broker",
   "github-gateway",

@@ -52,7 +52,7 @@ retired and remain only in Git history or explicitly superseded ADRs.
       the cluster WebUI or Cube credentials to tenants.
 - [ ] Add branch rename controls to the tree UI.
 - [ ] Expand orphan reconciliation for Cube activations and persistent Volumes.
-- [ ] Publish sustained Kafka/Valkey projection and SSE reconnect evidence.
+- [ ] Publish sustained PostgreSQL hot-tail and SSE reconnect evidence.
 
 ## Distributed deployment
 
@@ -68,7 +68,7 @@ retired and remain only in Git history or explicitly superseded ADRs.
 - [ ] Add an enterprise egress allowlist and searchable network audit trail.
 - [ ] Add administrator-owned MCP connections and Session Tool grants on top
       of the Run capability snapshot; never load tenant code in the Pi Host.
-- [ ] Add tenant/session hard deletion and PostgreSQL/Kafka/Volume retention.
+- [ ] Add tenant/session hard deletion and PostgreSQL/Volume retention.
 - [ ] Add backup/restore coverage for PostgreSQL and Workspace storage as two
       explicit authorities.
 - [ ] Define a separate trust policy before enabling user Pi extensions.

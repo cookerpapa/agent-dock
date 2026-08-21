@@ -223,7 +223,7 @@ function projectPiEntries(
   if (terminal.failure !== null || terminal.cancellation !== null) {
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index]!;
-      if (item.kind === "tool" && (item.status === "preparing" || item.status === "running")) {
+      if (item.kind === "tool" && item.status === "running") {
         items[index] = {
           ...item,
           status: "unknown",

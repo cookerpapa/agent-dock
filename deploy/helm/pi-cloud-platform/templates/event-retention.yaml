@@ -50,7 +50,6 @@ spec:
           env:
             - { name: NODE_ENV, value: production }
             - { name: DATABASE_URL_FILE, value: /run/pi-cloud-secrets/database-url }
-            - { name: PI_CLOUD_LIVE_EVENT_STORE_URL_FILE, value: /run/pi-cloud-secrets/live-event-store-url }
             - { name: PI_CLOUD_EVENT_RETENTION_INTERVAL_MS, value: {{ .Values.eventRetention.intervalMs | quote }} }
             - { name: PI_CLOUD_EVENT_RETENTION_BATCH_SIZE, value: {{ .Values.eventRetention.batchSize | quote }} }
             - { name: PI_CLOUD_METRICS_HOST, value: 0.0.0.0 }
@@ -68,10 +67,6 @@ spec:
             - name: platform-secrets
               mountPath: /run/pi-cloud-secrets/database-url
               subPath: {{ .Values.external.database.secretKey }}
-              readOnly: true
-            - name: platform-secrets
-              mountPath: /run/pi-cloud-secrets/live-event-store-url
-              subPath: {{ .Values.external.liveEventStore.urlSecretKey }}
               readOnly: true
             - name: platform-secrets
               mountPath: /run/pi-cloud-secrets/metrics-token

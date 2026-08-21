@@ -2,7 +2,10 @@ import type { EventAckMessage, EventPublishMessage } from "@pi-cloud/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { DurableEventGroupIngestor } from "../src/durable-event-store.ts";
 import { GroupedDurableEventIngestor } from "../src/grouped-durable-event-ingestor.ts";
-import { HttpDurableEventIngestError } from "../src/http-durable-event-ingestor.ts";
+
+class RetryableStoreError extends Error {
+  readonly retryable = true;
+}
 
 function publication(sessionId: string, sequence = 1): EventPublishMessage {
   const occurredAt = new Date().toISOString();
@@ -114,7 +117,7 @@ describe("GroupedDurableEventIngestor", () => {
     const store: DurableEventGroupIngestor = {
       ingest: vi.fn(async (value: unknown) => acknowledgement(value as EventPublishMessage)),
       ingestGroup: vi.fn(async () => {
-        throw new HttpDurableEventIngestError(503, "Kafka is unavailable");
+        throw new RetryableStoreError("PostgreSQL is temporarily unavailable");
       }),
     };
     const ingestor = new GroupedDurableEventIngestor({
@@ -139,7 +142,7 @@ describe("GroupedDurableEventIngestor", () => {
       ingest: vi.fn(async (value: unknown) => acknowledgement(value as EventPublishMessage)),
       ingestGroup: vi.fn(async (values: readonly unknown[]) => {
         attempts += 1;
-        if (attempts === 1) throw new HttpDurableEventIngestError(503, "temporary deadlock");
+        if (attempts === 1) throw new RetryableStoreError("temporary deadlock");
         return values.map((value) => acknowledgement(value as EventPublishMessage));
       }),
     };

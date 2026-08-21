@@ -585,8 +585,8 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
   }, 30_000);
 });
 
-describe("Valkey Session live-stream compaction", () => {
-  it("retries a failed trim and advances the replay floor only after success", async () => {
+describe("PostgreSQL Session live-stream compaction", () => {
+  it("deletes a settled hot tail and advances the replay floor", async () => {
     const isolatedPglite = await PGlite.create();
     const isolatedSocket = new PGLiteSocketServer({
       db: isolatedPglite,
@@ -607,8 +607,6 @@ describe("Valkey Session live-stream compaction", () => {
         .values({
           session_id: IDS.session,
           last_persisted_seq: 3,
-          last_projected_seq: 3,
-          acknowledged_through_seq: 3,
           replay_floor_seq: 0,
         })
         .executeTakeFirstOrThrow();
@@ -630,29 +628,11 @@ describe("Valkey Session live-stream compaction", () => {
           completed_at: null,
         })
         .executeTakeFirstOrThrow();
-      let calls = 0;
       const service = new SessionLiveStreamCompactionService({
         database: isolatedDatabase,
-        liveEvents: {
-          append: () => Promise.resolve(0),
-          readPage: () => Promise.resolve([]),
-          readTurn: () => Promise.resolve([]),
-          resetSession: () => Promise.resolve(),
-          trimThrough: () => {
-            calls += 1;
-            return calls === 1
-              ? Promise.reject(new Error("injected Valkey outage"))
-              : Promise.resolve();
-          },
-        },
         ownerId: "compaction-test",
         clock: () => new Date("2026-08-10T00:00:00.000Z"),
       });
-      await expect(service.runOnce()).rejects.toThrow("injected Valkey outage");
-      await isolatedDatabase
-        .updateTable("session_live_stream_compactions")
-        .set({ available_at: new Date(0) })
-        .execute();
       await expect(service.runOnce()).resolves.toMatchObject({
         status: "compacted",
         throughSequence: 3,

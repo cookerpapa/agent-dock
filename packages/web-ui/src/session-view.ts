@@ -32,9 +32,8 @@ export type TranscriptItem =
       toolCallId: string;
       toolName: string;
       input: unknown;
-      inputJson?: string;
       output?: unknown;
-      status: "preparing" | "running" | "completed" | "failed" | "unknown";
+      status: "running" | "completed" | "failed" | "unknown";
       firstSequence: number;
       lastSequence?: number;
       startedAt: string;
@@ -230,32 +229,6 @@ function applyEvent(state: SessionViewState, event: PiCloudEvent): SessionViewSt
     if (event.type === "assistant.text.delta") {
       return appendText(turn, event.payload.text, event.seq);
     }
-    if (event.type === "tool.input.delta") {
-      let matched = false;
-      const items = turn.items.map((item): TranscriptItem => {
-        if (item.kind !== "tool" || item.toolCallId !== event.payload.toolCallId) return item;
-        matched = true;
-        return {
-          ...item,
-          toolName: event.payload.toolName,
-          inputJson: `${item.inputJson ?? ""}${event.payload.delta}`,
-        };
-      });
-      if (!matched) {
-        items.push({
-          kind: "tool",
-          key: `tool:${event.payload.toolCallId}`,
-          toolCallId: event.payload.toolCallId,
-          toolName: event.payload.toolName,
-          input: null,
-          inputJson: event.payload.delta,
-          status: "preparing",
-          firstSequence: event.seq,
-          startedAt: event.occurredAt,
-        });
-      }
-      return { ...turn, status: "running", items };
-    }
     if (event.type === "tool.started") {
       let matched = false;
       const items = turn.items.map((item): TranscriptItem => {
@@ -374,7 +347,7 @@ function applyEvent(state: SessionViewState, event: PiCloudEvent): SessionViewSt
       return {
         ...turn,
         items: turn.items.map((item): TranscriptItem =>
-          item.kind === "tool" && (item.status === "preparing" || item.status === "running")
+          item.kind === "tool" && item.status === "running"
             ? { ...item, status: "unknown", lastSequence: event.seq, completedAt: event.occurredAt }
             : item,
         ),
@@ -387,7 +360,7 @@ function applyEvent(state: SessionViewState, event: PiCloudEvent): SessionViewSt
       return {
         ...turn,
         items: turn.items.map((item): TranscriptItem =>
-          item.kind === "tool" && (item.status === "preparing" || item.status === "running")
+          item.kind === "tool" && item.status === "running"
             ? { ...item, status: "unknown", lastSequence: event.seq, completedAt: event.occurredAt }
             : item,
         ),

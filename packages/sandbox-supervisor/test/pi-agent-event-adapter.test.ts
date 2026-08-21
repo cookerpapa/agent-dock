@@ -228,7 +228,7 @@ describe("PiAgentEventAdapter", () => {
     });
   });
 
-  it("coalesces tiny tool-call fragments and flushes the reviewed live input preview", () => {
+  it("ignores provider tool-call fragments until validated execution starts", () => {
     const adapter = createAdapter();
     adapter.adapt({ type: "agent_start" });
 
@@ -255,89 +255,25 @@ describe("PiAgentEventAdapter", () => {
     });
     expect(first).toEqual({
       kind: "ignored",
-      sourceType: "message_update.toolcall_delta.buffered",
+      sourceType: "message_update.toolcall_delta",
     });
-
-    const body = `"content":"${"x".repeat(128)}`;
-    const outcome = adapter.adapt({
-      type: "message_update",
-      assistantMessageEvent: {
-        type: "toolcall_delta",
-        contentIndex: 0,
-        delta: body,
-        partial: {
-          content: [
-            {
-              type: "toolCall",
-              id: "write-1",
-              name: "write",
-              arguments: { path: "bubble_sort.py", content: "x".repeat(128) },
-            },
-          ],
-        },
-      },
-    });
-
-    expect(outcome).toMatchObject({
-      kind: "mapped",
-      event: {
-        type: "tool.input.delta",
-        payload: {
-          toolCallId: "write-1",
-          toolName: "write",
-          delta: `{"path":"bubble_sort.py",${body}`,
-        },
-      },
-    });
-    expect(JSON.stringify(outcome)).not.toContain("must-not-pass");
-
     expect(
       adapter.adapt({
         type: "message_update",
         assistantMessageEvent: {
-          type: "toolcall_delta",
+          type: "toolcall_end",
           contentIndex: 0,
-          delta: '"}',
-          partial: {
-            content: [
-              {
-                type: "toolCall",
-                id: "write-1",
-                name: "write",
-                arguments: { path: "bubble_sort.py", content: "x".repeat(128) },
-              },
-            ],
+          toolCall: {
+            type: "toolCall",
+            id: "write-1",
+            name: "write",
+            arguments: { path: "bubble_sort.py" },
           },
+          partial: { content: [] },
         },
       }),
-    ).toEqual({ kind: "ignored", sourceType: "message_update.toolcall_delta.buffered" });
-
-    const tail = adapter.adapt({
-      type: "message_update",
-      assistantMessageEvent: {
-        type: "toolcall_end",
-        contentIndex: 0,
-        toolCall: {
-          type: "toolCall",
-          id: "write-1",
-          name: "write",
-          arguments: { path: "bubble_sort.py" },
-        },
-        partial: { content: [] },
-      },
-    });
-
-    expect(tail).toMatchObject({
-      kind: "mapped",
-      event: {
-        type: "tool.input.delta",
-        payload: {
-          toolCallId: "write-1",
-          toolName: "write",
-          delta: '"}',
-        },
-      },
-    });
+    ).toEqual({ kind: "ignored", sourceType: "message_update.toolcall_end" });
+    expect(JSON.stringify(first)).not.toContain("must-not-pass");
   });
 
   it("classifies an ambiguous Cube result as unknown instead of failed", () => {

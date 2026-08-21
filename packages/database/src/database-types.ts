@@ -785,24 +785,7 @@ export interface SessionEventTable {
 export interface SessionEventCursorTable {
   session_id: string;
   last_persisted_seq: GeneratedInt8;
-  last_projected_seq: GeneratedInt8;
-  acknowledged_through_seq: GeneratedInt8;
   replay_floor_seq: GeneratedInt8;
-  updated_at: GeneratedTimestamp;
-}
-
-export interface SessionEventIdTable {
-  event_id: string;
-  session_id: string;
-  seq: Int8;
-  created_at: GeneratedTimestamp;
-}
-
-export interface WorkerEventProjectionOffsetTable {
-  consumer_group: string;
-  topic: string;
-  partition: number;
-  last_offset: Int8;
   updated_at: GeneratedTimestamp;
 }
 
@@ -1235,9 +1218,7 @@ export interface Database {
   commands: CommandTable;
   approvals: ApprovalTable;
   session_events: SessionEventTable;
-  session_event_ids: SessionEventIdTable;
   session_event_cursors: SessionEventCursorTable;
-  worker_event_projection_offsets: WorkerEventProjectionOffsetTable;
   conversation_fork_operations: ConversationForkOperationTable;
   session_terminal_events: SessionTerminalEventTable;
   session_live_stream_compactions: SessionLiveStreamCompactionTable;

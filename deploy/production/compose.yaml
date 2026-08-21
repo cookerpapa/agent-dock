@@ -43,9 +43,6 @@ x-control-plane-runtime-environment: &control-plane-runtime-environment
   PI_CLOUD_WEB_SESSION_COOKIE_SECURE: ${PI_CLOUD_WEB_SESSION_COOKIE_SECURE:-false}
   PI_CLOUD_WEB_SESSION_TTL_MS: ${PI_CLOUD_WEB_SESSION_TTL_MS:-2592000000}
   PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES: ${PI_CLOUD_SUPERVISOR_MANAGEMENT_URL_TEMPLATES:-http://{supervisorId}:4100}
-  PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG: "true"
-  PI_CLOUD_WORKER_EVENT_INGEST_URL: http://event-gateway:4600
-  PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE: /run/pi-cloud-secrets/worker-event-ingest-token
   PI_CLOUD_PUBLIC_REGISTRATION_ENABLED: ${PI_CLOUD_PUBLIC_REGISTRATION_ENABLED:-true}
   PI_CLOUD_PUBLIC_REGISTRATION_MAXIMUM_TENANTS: ${PI_CLOUD_PUBLIC_REGISTRATION_MAXIMUM_TENANTS:-32}
   PI_CLOUD_PUBLIC_TENANT_MAXIMUM_PROJECTS: ${PI_CLOUD_PUBLIC_TENANT_MAXIMUM_PROJECTS:-10}
@@ -110,10 +107,6 @@ x-control-plane-runtime-secrets: &control-plane-runtime-secrets
     source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
     target: /run/pi-cloud-secrets/metrics-token
     read_only: true
-  - type: bind
-    source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
-    target: /run/pi-cloud-secrets/worker-event-ingest-token
-    read_only: true
 
 x-bootstrap-secrets: &bootstrap-secrets
   - type: bind
@@ -156,127 +149,6 @@ services:
       - no-new-privileges:true
     logging: *bounded-logging
 
-  kafka:
-    image: apache/kafka@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75
-    restart: unless-stopped
-    environment:
-      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-      KAFKA_NODE_ID: "1"
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
-      KAFKA_NUM_PARTITIONS: "24"
-      KAFKA_LOG_DIRS: /var/lib/kafka/data
-    volumes:
-      - kafka-data:/var/lib/kafka/data
-    networks:
-      - event-log
-    healthcheck:
-      test:
-        [
-          CMD-SHELL,
-          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1",
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 20s
-    init: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 512
-    mem_limit: 1g
-    cpus: 2.0
-    stop_grace_period: 30s
-    logging: *bounded-logging
-
-  kafka-bootstrap:
-    image: apache/kafka@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75
-    restart: "no"
-    depends_on:
-      kafka:
-        condition: service_healthy
-    entrypoint: [/bin/bash, -eu, -o, pipefail, -c]
-    command:
-      - |
-        retention_ms=${PI_CLOUD_WORKER_EVENT_RETENTION_MS:-86400000}
-        if [[ ! "$${retention_ms}" =~ ^[0-9]+$ ]] || (( retention_ms <= 3600000 )); then
-          echo "PI_CLOUD_WORKER_EVENT_RETENTION_MS must exceed the one-hour live replay window" >&2
-          exit 1
-        fi
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
-          --create --if-not-exists \
-          --topic pi-cloud-worker-events-v1 \
-          --partitions 24 \
-          --replication-factor 1 \
-          --config cleanup.policy=delete \
-          --config retention.ms="$${retention_ms}" \
-          --config min.insync.replicas=1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic pi-cloud-worker-events-v1
-    networks:
-      - event-log
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 64
-    mem_limit: 256m
-    cpus: 0.5
-    logging: *bounded-logging
-
-  valkey:
-    image: valkey/valkey@sha256:a038175878d66b9d274fbf8be73c0305e93798b83917647f167e18cef3c71eec
-    restart: unless-stopped
-    command:
-      [
-        valkey-server,
-        --appendonly,
-        "yes",
-        --appendfsync,
-        everysec,
-        --maxmemory,
-        "${PI_CLOUD_LIVE_EVENT_MAXMEMORY:-320mb}",
-        --maxmemory-policy,
-        noeviction,
-      ]
-    user: "999:1000"
-    volumes:
-      - valkey-data:/data
-    networks:
-      - live-events
-    healthcheck:
-      test: [CMD, valkey-cli, ping]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 5s
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 128
-    mem_limit: 512m
-    cpus: 1.0
-    stop_grace_period: 30s
-    logging: *bounded-logging
-
   database-bootstrap:
     image: pi-cloud/control-plane:${PI_CLOUD_IMAGE_VERSION:-production}
     build:
@@ -313,8 +185,6 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
-      event-gateway:
-        condition: service_healthy
     environment: *control-plane-runtime-environment
     user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
     volumes: *control-plane-runtime-secrets
@@ -356,13 +226,10 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
-      valkey:
-        condition: service_healthy
     command: [/app/packages/control-plane/src/event-retention-main.ts]
     environment:
       NODE_ENV: production
       DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
-      PI_CLOUD_LIVE_EVENT_STORE_URL_FILE: /run/pi-cloud-secrets/live-event-store-url
       PI_CLOUD_EVENT_RETENTION_INTERVAL_MS: ${PI_CLOUD_EVENT_RETENTION_INTERVAL_MS:-60000}
       PI_CLOUD_EVENT_RETENTION_BATCH_SIZE: ${PI_CLOUD_EVENT_RETENTION_BATCH_SIZE:-100}
       PI_CLOUD_METRICS_HOST: 0.0.0.0
@@ -376,92 +243,16 @@ services:
         target: /run/pi-cloud-secrets/database-url
         read_only: true
       - type: bind
-        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/live-event-store-url
-        target: /run/pi-cloud-secrets/live-event-store-url
-        read_only: true
-      - type: bind
         source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
         target: /run/pi-cloud-secrets/metrics-token
         read_only: true
     networks:
       - database
-      - live-events
       - observability
     <<: *application-security
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
     pids_limit: 128
-    mem_limit: 512m
-    cpus: 1.0
-    stop_grace_period: 30s
-    logging: *bounded-logging
-
-  event-gateway:
-    image: pi-cloud/event-gateway:${PI_CLOUD_IMAGE_VERSION:-production}
-    build:
-      context: ../..
-      dockerfile: packages/event-gateway/Dockerfile
-      args: *application-build-args
-      network: host
-    restart: unless-stopped
-    depends_on:
-      database-bootstrap:
-        condition: service_completed_successfully
-      kafka-bootstrap:
-        condition: service_completed_successfully
-      valkey:
-        condition: service_healthy
-    environment:
-      NODE_ENV: production
-      HOST: 0.0.0.0
-      PORT: "4600"
-      DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
-      PI_CLOUD_DATABASE_NOTIFICATION_URL_FILE: /run/pi-cloud-secrets/database-url
-      PI_CLOUD_KAFKA_BROKERS: kafka:9092
-      PI_CLOUD_WORKER_EVENT_TOPIC: pi-cloud-worker-events-v1
-      PI_CLOUD_WORKER_EVENT_PROJECTOR_GROUP: pi-cloud-worker-event-projector-v2
-      PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE: /run/pi-cloud-secrets/worker-event-ingest-token
-      PI_CLOUD_LIVE_EVENT_STORE_URL_FILE: /run/pi-cloud-secrets/live-event-store-url
-      PI_CLOUD_AUTO_REPAIR_LIVE_EVENTS: ${PI_CLOUD_AUTO_REPAIR_LIVE_EVENTS:-true}
-      PI_CLOUD_METRICS_HOST: 0.0.0.0
-      PI_CLOUD_METRICS_PORT: "9467"
-      PI_CLOUD_OTLP_TRACES_ENDPOINT: ${PI_CLOUD_OTLP_TRACES_ENDPOINT:-}
-    user: "${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}"
-    volumes:
-      - type: bind
-        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
-        target: /run/pi-cloud-secrets/database-url
-        read_only: true
-      - type: bind
-        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
-        target: /run/pi-cloud-secrets/worker-event-ingest-token
-        read_only: true
-      - type: bind
-        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/live-event-store-url
-        target: /run/pi-cloud-secrets/live-event-store-url
-        read_only: true
-    networks:
-      - api
-      - database
-      - event-log
-      - live-events
-      - observability
-    healthcheck:
-      test:
-        [
-          CMD,
-          node,
-          -e,
-          "fetch('http://127.0.0.1:4600/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 10s
-    <<: *application-security
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777,uid=${PI_CLOUD_APPLICATION_UID:-1000},gid=${PI_CLOUD_APPLICATION_GID:-1000}
-    pids_limit: 256
     mem_limit: 512m
     cpus: 1.0
     stop_grace_period: 30s
@@ -590,7 +381,7 @@ services:
       NODE_USE_ENV_PROXY: "1"
       HTTP_PROXY: http://provider-egress-relay:3129
       HTTPS_PROXY: http://provider-egress-relay:3129
-      NO_PROXY: 127.0.0.1,localhost,control-plane,event-gateway,tool-broker,github-gateway,jaeger,postgres,supervisor-host,supervisor-host-1,pi-cloud-worker-1,pi-cloud-worker-2
+      NO_PROXY: 127.0.0.1,localhost,control-plane,tool-broker,github-gateway,jaeger,postgres,supervisor-host,supervisor-host-1,pi-cloud-worker-1,pi-cloud-worker-2
       DATABASE_URL_FILE: /run/pi-cloud-secrets/database-url
       PI_CLOUD_ALLOW_INSECURE_INTERNAL_HTTP: "true"
       PI_CLOUD_CONTROL_PLANE_URL: http://control-plane:3000
@@ -613,9 +404,6 @@ services:
       PI_CLOUD_CHECKPOINT_READ_CACHE_TTL_MS: "600000"
       PI_CLOUD_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES: "512"
       PI_CLOUD_CHECKPOINT_READ_CACHE_MAXIMUM_BYTES: "33554432"
-      PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG: "true"
-      PI_CLOUD_WORKER_EVENT_INGEST_URL: http://event-gateway:4600
-      PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE: /run/pi-cloud-secrets/worker-event-ingest-token
       PI_CLOUD_MODEL_GATEWAY_HOST: 127.0.0.1
       PI_CLOUD_MODEL_GATEWAY_PORT: "4200"
       PI_CLOUD_MODEL_GATEWAY_ADVERTISED_URL: http://127.0.0.1:4200
@@ -661,10 +449,6 @@ services:
       - type: bind
         source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/metrics-token
         target: /run/pi-cloud-secrets/metrics-token
-        read_only: true
-      - type: bind
-        source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/worker-event-ingest-token
-        target: /run/pi-cloud-secrets/worker-event-ingest-token
         read_only: true
     networks:
       management:
@@ -970,8 +754,6 @@ services:
     depends_on:
       control-plane:
         condition: service_healthy
-      event-gateway:
-        condition: service_healthy
     environment:
       XDG_CONFIG_HOME: /tmp/caddy-config
       XDG_DATA_HOME: /tmp/caddy-data
@@ -1206,16 +988,10 @@ networks:
   provider-egress: {}
   observability:
     internal: true
-  event-log:
-    internal: true
-  live-events:
-    internal: true
   observability-edge: {}
 
 volumes:
   postgres-data: {}
-  kafka-data: {}
-  valkey-data: {}
   supervisor-boot: {}
   supervisor-1-boot: {}
   prometheus-data: {}

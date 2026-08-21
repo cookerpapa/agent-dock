@@ -2,8 +2,8 @@
 
 Pi Cloud separates deterministic protocol checks, live infrastructure
 acceptance and model-quality experiments. A checked-in report is current only
-when its workload exercises the PostgreSQL queue/SessionStorage, Kafka/Valkey
-event path, persistent Cube Volume and CubeSandbox KVM runtime described in the
+when its workload exercises the PostgreSQL queue/SessionStorage/live-event
+path, persistent Cube Volume and CubeSandbox KVM runtime described in the
 current architecture ADR.
 
 ## Deterministic gates
@@ -30,32 +30,28 @@ prefix still survives Worker replacement.
 ## Live-event durability
 
 ```bash
-npm run eval:kafka-events
 npm run eval:enterprise-events
 ```
 
 The production stream is:
 
 ```text
-Pi text coalescer -> Host group commit -> Event Gateway -> Kafka
-                   -> Valkey projection -> resumable SSE
+Pi text coalescer -> Host PostgreSQL group commit -> LISTEN/NOTIFY -> resumable SSE
 ```
 
-Kafka acknowledgement precedes visibility. PostgreSQL stores Pi-native complete
-messages, projection watermarks, terminal events and Run state, not raw token
-deltas or a second reconstructed transcript. The
-transport acceptance checks per-Session ordering; the enterprise functional
-check adds real PostgreSQL, authenticated ingest, duplicate delivery,
-projector restart, lagging terminal-watermark promotion and zero raw-stream rows
-in PostgreSQL.
+PostgreSQL acknowledgement precedes visibility. It stores Pi-native complete
+messages once and retains only a bounded hot tail of coalesced Assistant text
+and complete Tool/lifecycle Items. The enterprise event check uses a real
+PostgreSQL server and the production grouped `DurableEventStore` path to measure
+ordering, acknowledgement latency, throughput and WAL bytes per event.
 
 Current evidence:
 
-- [Kafka transport acceptance](reports/kafka-worker-event-acceptance-latest.md)
-- [Event-pipeline acceptance](reports/enterprise-event-pipeline-acceptance-latest.md)
+- [PostgreSQL event-log capacity](reports/postgres-event-log-2000-latest.md)
+- [Pi SDK stream shape](reports/pi-sdk-stream-shape-latest.md)
 
-Both reports are single-host functional evidence, not multi-broker HA or
-saturation claims.
+These reports are single-host evidence, not managed-PostgreSQL HA or
+multi-region saturation claims.
 
 ## Cube and real-model acceptance
 

@@ -15,8 +15,8 @@ function toolItemIndex(
 /**
  * Reduces the durable public event history for one Turn into the bounded
  * semantic transcript used by conversation discovery. Pi SessionStorage
- * remains the model-context authority; Kafka/Valkey supplies live deltas and
- * PostgreSQL stores this canonical terminal view.
+ * remains the model-context authority; PostgreSQL supplies the bounded live
+ * tail and stores the canonical terminal view.
  */
 export function projectConversationTurnTranscript(
   events: readonly PiCloudEvent[],
@@ -69,30 +69,6 @@ export function projectConversationTurnTranscript(
           firstSequence: event.seq,
           lastSequence: event.seq,
         });
-      }
-      continue;
-    }
-    if (event.type === "tool.input.delta") {
-      const index = toolItemIndex(items, event.payload.toolCallId);
-      if (index < 0) {
-        items.push({
-          kind: "tool",
-          toolCallId: event.payload.toolCallId,
-          toolName: event.payload.toolName,
-          input: null,
-          inputJson: event.payload.delta,
-          status: "preparing",
-          firstSequence: event.seq,
-          startedAt: event.occurredAt,
-        });
-      } else {
-        const existing = items[index]!;
-        if (existing.kind !== "tool") throw new Error("Tool projection index was corrupted");
-        items[index] = {
-          ...existing,
-          toolName: event.payload.toolName,
-          inputJson: `${existing.inputJson ?? ""}${event.payload.delta}`,
-        };
       }
       continue;
     }
@@ -193,7 +169,7 @@ export function projectConversationTurnTranscript(
     if (event.type === "turn.failed") {
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index]!;
-        if (item.kind === "tool" && (item.status === "preparing" || item.status === "running")) {
+        if (item.kind === "tool" && item.status === "running") {
           items[index] = {
             ...item,
             status: "unknown",
@@ -209,7 +185,7 @@ export function projectConversationTurnTranscript(
     if (event.type === "turn.cancelled") {
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index]!;
-        if (item.kind === "tool" && (item.status === "preparing" || item.status === "running")) {
+        if (item.kind === "tool" && item.status === "running") {
           items[index] = {
             ...item,
             status: "unknown",

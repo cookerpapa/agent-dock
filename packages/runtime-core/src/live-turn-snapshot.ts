@@ -1,12 +1,11 @@
 import type { Database } from "@pi-cloud/database";
 import {
   parseLiveTurnSnapshotResource,
-  type PiCloudEvent,
+  parsePiCloudEvent,
   type LiveTurnSnapshotResource,
 } from "@pi-cloud/protocol";
 import type { Kysely } from "kysely";
 import { projectConversationTurnTranscript } from "./conversation-turn-projection.ts";
-import type { LiveSessionEventStore } from "./live-session-event-store.ts";
 
 export interface LiveTurnSnapshotSource {
   read(tenantId: string, sessionId: string): Promise<LiveTurnSnapshotResource>;
@@ -20,21 +19,24 @@ function safeSequence(value: string | number | bigint, description: string): num
   return parsed;
 }
 
-/**
- * Materializes the already-projected prefix of the current Turn. This is a
- * browser catch-up optimization only: PostgreSQL owns the watermark, Valkey
- * owns the retained payload and Pi's native Session remains model authority.
- */
-export class ValkeyLiveTurnSnapshotSource implements LiveTurnSnapshotSource {
+/** Builds a reconnect snapshot directly from the durable PostgreSQL hot tail. */
+export class PostgresLiveTurnSnapshotSource implements LiveTurnSnapshotSource {
   readonly #database: Kysely<Database>;
-  readonly #liveEvents: LiveSessionEventStore;
 
-  constructor(options: { database: Kysely<Database>; liveEvents: LiveSessionEventStore }) {
+  constructor(options: { database: Kysely<Database> }) {
     this.#database = options.database;
-    this.#liveEvents = options.liveEvents;
   }
 
   async read(tenantId: string, sessionId: string): Promise<LiveTurnSnapshotResource> {
+    const state = await this.#database
+      .selectFrom("sessions as session_row")
+      .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
+      .select("cursor.last_persisted_seq as persistedThrough")
+      .where("session_row.tenant_id", "=", tenantId)
+      .where("session_row.id", "=", sessionId)
+      .executeTakeFirst();
+    if (state === undefined) throw new Error("Live Turn Session was not found");
+    const persistedThrough = safeSequence(state.persistedThrough, "Persisted event sequence");
     const activeTurn = await this.#database
       .selectFrom("turns as turn_row")
       .innerJoin("commands as command_row", (join) =>
@@ -52,75 +54,50 @@ export class ValkeyLiveTurnSnapshotSource implements LiveTurnSnapshotSource {
       .orderBy("command_row.id", "desc")
       .executeTakeFirst();
     if (activeTurn === undefined) {
-      const session = await this.#database
-        .selectFrom("sessions")
-        .select("id")
-        .where("tenant_id", "=", tenantId)
-        .where("id", "=", sessionId)
-        .executeTakeFirst();
-      if (session === undefined) throw new Error("Live Turn Session was not found");
-      return { sessionId, replayAfterSequence: 0, turn: null };
+      return { sessionId, replayAfterSequence: persistedThrough, turn: null };
     }
 
-    const cursor = await this.#database
-      .selectFrom("session_event_cursors")
-      .select(["last_projected_seq as projectedThrough", "replay_floor_seq as replayFloor"])
-      .where("session_id", "=", sessionId)
-      .executeTakeFirstOrThrow();
-    const projectedThrough = safeSequence(cursor.projectedThrough, "Projected event sequence");
-    const replayFloor = safeSequence(cursor.replayFloor, "Live replay floor");
-    const terminalAtWatermark = await this.#database
-      .selectFrom("session_terminal_events")
-      .select("seq as sequence")
+    const rows = await this.#database
+      .selectFrom("session_events")
+      .select([
+        "event_id",
+        "session_id",
+        "turn_id",
+        "agent_id",
+        "seq",
+        "schema_version",
+        "type",
+        "payload",
+        "occurred_at",
+      ])
       .where("tenant_id", "=", tenantId)
       .where("session_id", "=", sessionId)
-      .where("seq", "=", String(projectedThrough))
-      .executeTakeFirst();
-    // Terminal events live in PostgreSQL rather than the retained Valkey
-    // stream. A Run can settle between the active-Turn lookup and this cursor
-    // read, so leave that terminal sequence for the following SSE catch-up.
-    const liveThrough = terminalAtWatermark === undefined ? projectedThrough : projectedThrough - 1;
-    const previousTerminal = await this.#database
-      .selectFrom("session_terminal_events")
-      .select((expression) => expression.fn.max<string>("seq").as("sequence"))
-      .where("tenant_id", "=", tenantId)
-      .where("session_id", "=", sessionId)
-      .where("seq", "<=", String(liveThrough))
-      .executeTakeFirstOrThrow();
-    const rangeStart = Math.max(
-      replayFloor,
-      previousTerminal.sequence === null
-        ? 0
-        : safeSequence(previousTerminal.sequence, "Previous terminal event sequence"),
+      .where("turn_id", "=", activeTurn.turnId)
+      .where("seq", "<=", String(persistedThrough))
+      .orderBy("seq", "asc")
+      .execute();
+    if (rows.length === 0) {
+      return { sessionId, replayAfterSequence: persistedThrough, turn: null };
+    }
+    const events = rows.map((row) =>
+      parsePiCloudEvent({
+        schemaVersion: row.schema_version,
+        eventId: row.event_id,
+        sessionId: row.session_id,
+        turnId: row.turn_id,
+        agentId: row.agent_id,
+        seq: safeSequence(row.seq, "Event sequence"),
+        occurredAt: new Date(row.occurred_at).toISOString(),
+        type: row.type,
+        payload: row.payload,
+      }),
     );
-    if (liveThrough <= rangeStart) {
-      return { sessionId, replayAfterSequence: rangeStart, turn: null };
-    }
-
-    const turnEvents: PiCloudEvent[] = [];
-    let sequence = rangeStart;
-    while (sequence < liveThrough) {
-      const page = await this.#liveEvents.readPage(tenantId, sessionId, sequence, liveThrough, 500);
-      if (page.length === 0 || page[0]!.seq !== sequence + 1) {
-        throw new Error(`Live Turn snapshot is missing event ${String(sequence + 1)}`);
-      }
-      for (const event of page) {
-        if (event.seq !== sequence + 1) {
-          throw new Error(`Live Turn snapshot is missing event ${String(sequence + 1)}`);
-        }
-        sequence = event.seq;
-        if (event.turnId === activeTurn.turnId) turnEvents.push(event);
-      }
-    }
-    if (turnEvents.length === 0) {
-      return { sessionId, replayAfterSequence: rangeStart, turn: null };
-    }
     return parseLiveTurnSnapshotResource({
       sessionId,
-      replayAfterSequence: liveThrough,
+      replayAfterSequence: persistedThrough,
       turn: {
         turnId: activeTurn.turnId,
-        transcript: projectConversationTurnTranscript(turnEvents),
+        transcript: projectConversationTurnTranscript(events),
       },
     });
   }

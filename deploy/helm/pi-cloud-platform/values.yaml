@@ -24,10 +24,6 @@ images:
     repository: pi-cloud/control-plane
     tag: production
     pullPolicy: IfNotPresent
-  eventGateway:
-    repository: pi-cloud/event-gateway
-    tag: production
-    pullPolicy: IfNotPresent
   web:
     repository: pi-cloud/web-ui
     tag: production
@@ -83,20 +79,6 @@ eventRetention:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
 
-eventGateway:
-  replicas: 3
-  autoscaling:
-    enabled: true
-    minReplicas: 3
-    maxReplicas: 32
-    targetCpuUtilization: 60
-    pollingIntervalSeconds: 5
-    cooldownSeconds: 300
-    kafkaLagThreshold: "1000"
-  resources:
-    requests: { cpu: 250m, memory: 256Mi }
-    limits: { cpu: "2", memory: 768Mi }
-
 web:
   replicas: 2
   autoscaling:
@@ -114,27 +96,12 @@ web:
     limits: { cpu: 500m, memory: 256Mi }
 
 external:
-  eventIngest:
-    serviceUrl: http://event-gateway:4600
-    tokenSecretKey: worker-event-ingest-token
   database:
     # database-url should target PgBouncer transaction pooling. The separate
     # database-notification-url Secret key must target PostgreSQL directly.
     secretKey: database-url
     notificationSecretKey: database-notification-url
     apiTokenSecretKey: api-token
-  kafka:
-    brokers:
-      - pi-cloud-kafka-bootstrap.pi-cloud-eventing.svc.cluster.local:9093
-    topic: pi-cloud-worker-events-v1
-    projectorGroupId: pi-cloud-worker-event-projector-v2
-    security:
-      enabled: true
-      caSecretKey: kafka-ca.crt
-      usernameSecretKey: kafka-username
-      passwordSecretKey: kafka-password
-  liveEventStore:
-    urlSecretKey: live-event-store-url
   providerProxyUrl: https://provider-proxy.example.com:3129
   otlpTracesEndpoint: ""
 
@@ -143,9 +110,8 @@ networkPolicy:
   trustedNamespaceLabel:
     key: pi-cloud.io/trusted-plane
     value: "true"
-  trustedTcpPorts:
-    [443, 3000, 3129, 4100, 4300, 4318, 4600, 5432, 6379, 9093, 9464, 9465, 9466, 9467]
-  # Add explicit CIDRs for PostgreSQL/PgBouncer, Kafka, provider proxy,
+  trustedTcpPorts: [443, 3000, 3129, 4100, 4300, 4318, 5432, 9464, 9465, 9466]
+  # Add explicit CIDRs for PostgreSQL/PgBouncer, provider proxy,
   # Cube API and OTLP endpoints. Never use 0.0.0.0/0 here.
   externalEgressCidrs: []
 
@@ -206,7 +172,6 @@ pi-workers:
     pullPolicy: IfNotPresent
   services:
     controlPlaneUrl: http://control-plane:3000
-    eventGatewayUrl: http://event-gateway:4600
     toolBrokerUrls:
       - http://tool-broker:4300
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
@@ -223,10 +188,8 @@ pi-workers:
     modelCredentialMasterKeyKey: model-credential-master-key
     githubGatewayTokenKey: github-gateway-token
     metricsTokenKey: metrics-token
-    workerEventIngestTokenKey: worker-event-ingest-token
   runtime:
     allowInsecureInternalHttp: true
-    externalWorkerEventLog: true
     checkpointCache: { ttlMs: 600000, maximumEntries: 512, maximumBytes: 33554432 }
     timeouts:
       toolBrokerRequestMs: 360000
@@ -246,7 +209,7 @@ pi-workers:
   networkPolicy:
     enabled: true
     trustedNamespaceLabel: { key: pi-cloud.io/trusted-plane, value: "true" }
-    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 4600, 5432, 7233, 9000]
+    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 5432, 7233, 9000]
     externalEgressCidrs: []
   disruptionBudget: { minAvailable: 1 }
   placement: { nodeSelector: {}, tolerations: [] }

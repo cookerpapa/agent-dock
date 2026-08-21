@@ -1,16 +1,12 @@
 import type { Database } from "@pi-cloud/database";
 import {
   parsePiCloudEvent,
-  parseConversationTurnTranscriptResource,
   type PiCloudEvent,
   type PiCloudEventBody,
   type ConversationTurnTranscriptResource,
 } from "@pi-cloud/protocol";
 import type { Kysely } from "kysely";
 import { projectConversationTurnTranscript } from "./conversation-turn-projection.ts";
-import type { LiveSessionEventStore } from "./live-session-event-store.ts";
-
-export const TERMINAL_TURN_PROJECTION_PATH = "/internal/v1/terminal-turn-projections";
 
 type TerminalEventBody = Extract<PiCloudEventBody, { type: "turn.failed" | "turn.cancelled" }>;
 
@@ -36,100 +32,24 @@ export interface TerminalTurnProjectionSource {
   prepare(input: PrepareTerminalTurnProjectionInput): Promise<PreparedTerminalTurnProjection>;
 }
 
-export function parsePrepareTerminalTurnProjectionInput(
-  value: unknown,
-): PrepareTerminalTurnProjectionInput {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("Terminal Turn projection request is invalid");
+function safeSequence(value: string | number | bigint, description: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`${description} is outside the non-negative safe integer range`);
   }
-  const candidate = value as Record<string, unknown>;
-  const requiredIdentities = [
-    "tenantId",
-    "sessionId",
-    "turnId",
-    "commandId",
-    "agentId",
-    "eventId",
-  ] as const;
-  for (const field of requiredIdentities) {
-    if (typeof candidate[field] !== "string" || candidate[field].length < 1) {
-      throw new TypeError(`Terminal Turn projection ${field} is invalid`);
-    }
-  }
-  if (typeof candidate.occurredAt !== "string" || candidate.occurredAt.length < 1) {
-    throw new TypeError("Terminal Turn projection occurredAt is invalid");
-  }
-  if (typeof candidate.body !== "object" || candidate.body === null) {
-    throw new TypeError("Terminal Turn projection body is invalid");
-  }
-  const event = parsePiCloudEvent({
-    schemaVersion: 1,
-    eventId: candidate.eventId,
-    sessionId: candidate.sessionId,
-    turnId: candidate.turnId,
-    agentId: candidate.agentId,
-    seq: 1,
-    occurredAt: candidate.occurredAt,
-    ...(candidate.body as Record<string, unknown>),
-  });
-  if (event.type !== "turn.failed" && event.type !== "turn.cancelled") {
-    throw new TypeError("Interrupted Turn projection body is invalid");
-  }
-  return {
-    tenantId: candidate.tenantId as string,
-    sessionId: candidate.sessionId as string,
-    turnId: candidate.turnId as string,
-    commandId: candidate.commandId as string,
-    agentId: candidate.agentId as string,
-    body: { type: event.type, payload: event.payload } as TerminalEventBody,
-    eventId: candidate.eventId as string,
-    occurredAt: event.occurredAt,
-  };
+  return parsed;
 }
 
-function nonNegativeSafeInteger(value: unknown, description: string): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`${description} must be a non-negative safe integer`);
-  }
-  return value;
-}
-
-export function parsePreparedTerminalTurnProjection(
-  value: unknown,
-): PreparedTerminalTurnProjection {
-  if (typeof value !== "object" || value === null) {
-    throw new TypeError("Prepared terminal Turn projection is invalid");
-  }
-  const candidate = value as Record<string, unknown>;
-  if (candidate.schemaVersion !== 1) {
-    throw new TypeError("Prepared terminal Turn projection schema is invalid");
-  }
-  const previousSequence = nonNegativeSafeInteger(
-    candidate.previousSequence,
-    "Prepared terminal previous sequence",
-  );
-  const terminalEvent = parsePiCloudEvent(candidate.terminalEvent);
-  if (terminalEvent.type !== "turn.failed" && terminalEvent.type !== "turn.cancelled") {
-    throw new TypeError("Prepared interrupted Turn projection has an invalid event");
-  }
-  const transcript = parseConversationTurnTranscriptResource(candidate.transcript);
-  if (
-    terminalEvent.seq !== previousSequence + 1 ||
-    transcript.throughSequence !== terminalEvent.seq ||
-    transcript.terminalSequence !== terminalEvent.seq
-  ) {
-    throw new TypeError("Prepared terminal Turn projection sequence is inconsistent");
-  }
-  return { schemaVersion: 1, previousSequence, terminalEvent, transcript };
-}
-
-export class LiveTerminalTurnProjectionSource implements TerminalTurnProjectionSource {
+/**
+ * Reads the durable PostgreSQL hot tail when a failed/cancelled Run needs to
+ * preserve text that reached the browser before Pi emitted message_end.
+ * Successful Runs use the complete Pi message already in SessionStorage.
+ */
+export class PostgresTerminalTurnProjectionSource implements TerminalTurnProjectionSource {
   readonly #database: Kysely<Database>;
-  readonly #liveEvents: LiveSessionEventStore;
 
-  constructor(options: { database: Kysely<Database>; liveEvents: LiveSessionEventStore }) {
+  constructor(options: { database: Kysely<Database> }) {
     this.#database = options.database;
-    this.#liveEvents = options.liveEvents;
   }
 
   async prepare(
@@ -152,116 +72,64 @@ export class LiveTerminalTurnProjectionSource implements TerminalTurnProjectionS
       .select([
         "session_row.next_event_seq as nextSequence",
         "cursor.last_persisted_seq as persistedThrough",
-        "cursor.last_projected_seq as projectedThrough",
-        "cursor.acknowledged_through_seq as acknowledgedThrough",
       ])
       .where("session_row.tenant_id", "=", input.tenantId)
       .where("session_row.id", "=", input.sessionId)
       .executeTakeFirst();
     if (state === undefined) throw new Error("Terminal Turn identity was not found");
-    const nextSequence = Number(state.nextSequence);
-    const previousSequence = Number(state.projectedThrough);
-    if (
-      !Number.isSafeInteger(nextSequence) ||
-      !Number.isSafeInteger(previousSequence) ||
-      nextSequence !== previousSequence + 1 ||
-      Number(state.persistedThrough) !== previousSequence ||
-      Number(state.acknowledgedThrough) !== previousSequence
-    ) {
-      throw new Error("Terminal Turn event stream is not fully projected");
+
+    const previousSequence = safeSequence(state.persistedThrough, "Persisted event sequence");
+    if (safeSequence(state.nextSequence, "Next event sequence") !== previousSequence + 1) {
+      throw new Error("Terminal Turn event stream is not a committed PostgreSQL prefix");
     }
-    const previousTerminal = await this.#database
-      .selectFrom("session_terminal_events")
-      .select((expression) => expression.fn.max<string>("seq").as("sequence"))
-      .where("tenant_id", "=", input.tenantId)
-      .where("session_id", "=", input.sessionId)
-      .where("seq", "<=", String(previousSequence))
-      .executeTakeFirstOrThrow();
-    const turnRangeStart =
-      previousTerminal.sequence === null
-        ? 0
-        : nonNegativeSafeInteger(
-            Number(previousTerminal.sequence),
-            "Previous terminal Turn sequence",
-          );
+
     const terminalEvent = parsePiCloudEvent({
       schemaVersion: 1,
       eventId: input.eventId,
       sessionId: input.sessionId,
       turnId: input.turnId,
       agentId: input.agentId,
-      seq: nextSequence,
+      seq: previousSequence + 1,
       occurredAt: input.occurredAt,
       ...input.body,
     });
-    const events: PiCloudEvent[] = [];
-    let cursor = turnRangeStart;
-    while (cursor < previousSequence) {
-      const page = await this.#liveEvents.readPage(
-        input.tenantId,
-        input.sessionId,
-        cursor,
-        previousSequence,
-        500,
-      );
-      if (page.length === 0 || page[0]!.seq !== cursor + 1) {
-        throw new Error(`Terminal Turn projection is missing live event ${cursor + 1}`);
-      }
-      for (const event of page) {
-        if (event.seq !== cursor + 1) {
-          throw new Error(`Terminal Turn projection is missing live event ${cursor + 1}`);
-        }
-        cursor = event.seq;
-        if (event.turnId === input.turnId) events.push(event);
-      }
-    }
-    const transcript = projectConversationTurnTranscript([...events, terminalEvent]);
+    const rows = await this.#database
+      .selectFrom("session_events")
+      .select([
+        "event_id",
+        "session_id",
+        "turn_id",
+        "agent_id",
+        "seq",
+        "schema_version",
+        "type",
+        "payload",
+        "occurred_at",
+      ])
+      .where("tenant_id", "=", input.tenantId)
+      .where("session_id", "=", input.sessionId)
+      .where("turn_id", "=", input.turnId)
+      .where("seq", "<=", String(previousSequence))
+      .orderBy("seq", "asc")
+      .execute();
+    const events = rows.map((row) =>
+      parsePiCloudEvent({
+        schemaVersion: row.schema_version,
+        eventId: row.event_id,
+        sessionId: row.session_id,
+        turnId: row.turn_id,
+        agentId: row.agent_id,
+        seq: safeSequence(row.seq, "Event sequence"),
+        occurredAt: new Date(row.occurred_at).toISOString(),
+        type: row.type,
+        payload: row.payload,
+      }),
+    );
     return {
       schemaVersion: 1,
       previousSequence,
       terminalEvent,
-      transcript,
+      transcript: projectConversationTurnTranscript([...events, terminalEvent]),
     };
-  }
-}
-
-export class HttpTerminalTurnProjectionSource implements TerminalTurnProjectionSource {
-  readonly #endpoint: URL;
-  readonly #authorization: string;
-  readonly #fetch: typeof fetch;
-
-  constructor(options: {
-    baseUrl: string;
-    serviceToken: string;
-    fetchImplementation?: typeof fetch;
-  }) {
-    const base = new URL(options.baseUrl);
-    if (
-      (base.protocol !== "http:" && base.protocol !== "https:") ||
-      base.username ||
-      base.password
-    ) {
-      throw new TypeError("Terminal projection service URL is invalid");
-    }
-    if (!/^[A-Za-z0-9._~+/=-]{32,4096}$/u.test(options.serviceToken)) {
-      throw new TypeError("Terminal projection service token is invalid");
-    }
-    this.#endpoint = new URL(TERMINAL_TURN_PROJECTION_PATH, base);
-    this.#authorization = `Bearer ${options.serviceToken}`;
-    this.#fetch = options.fetchImplementation ?? fetch;
-  }
-
-  async prepare(
-    input: PrepareTerminalTurnProjectionInput,
-  ): Promise<PreparedTerminalTurnProjection> {
-    const response = await this.#fetch(this.#endpoint, {
-      method: "POST",
-      headers: { authorization: this.#authorization, "content-type": "application/json" },
-      body: JSON.stringify({ schemaVersion: 1, ...input }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok)
-      throw new Error(`Terminal projection service returned HTTP ${response.status}`);
-    return parsePreparedTerminalTurnProjection(await response.json());
   }
 }

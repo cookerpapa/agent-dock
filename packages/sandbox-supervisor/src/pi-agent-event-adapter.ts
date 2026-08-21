@@ -47,7 +47,6 @@ const REVIEWED_IGNORED_EVENT_TYPES = new Set([
 ]);
 
 const DEFAULT_MAXIMUM_TOOL_OUTPUT_BYTES = 65_536;
-const MINIMUM_TOOL_INPUT_DELTA_BYTES = 128;
 
 function nonNegativeInteger(value: unknown): number | undefined {
   return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : undefined;
@@ -104,30 +103,6 @@ function assistantStopReason(value: unknown): AssistantStopReason | undefined {
   }
 }
 
-type StreamedToolCallIdentity = { toolCallId: string; toolName: string };
-
-function toolCallIdentity(value: unknown): StreamedToolCallIdentity | undefined {
-  if (!isRecord(value) || value.type !== "toolCall") return undefined;
-  if (
-    typeof value.id !== "string" ||
-    value.id.length === 0 ||
-    typeof value.name !== "string" ||
-    value.name.length === 0
-  ) {
-    return undefined;
-  }
-  return { toolCallId: value.id, toolName: value.name };
-}
-
-function streamedToolCallIdentity(streamEvent: JsonRecord): StreamedToolCallIdentity | undefined {
-  const contentIndex = nonNegativeInteger(streamEvent.contentIndex);
-  const partial = isRecord(streamEvent.partial) ? streamEvent.partial : undefined;
-  const content =
-    partial !== undefined && Array.isArray(partial.content) ? partial.content : undefined;
-  const toolCall = contentIndex === undefined ? undefined : content?.[contentIndex];
-  return toolCallIdentity(toolCall) ?? toolCallIdentity(streamEvent.toolCall);
-}
-
 /**
  * Converts the reviewed, public subset of Pi agent events into PiCloud v1
  * events. Pi event objects never leave this adapter.
@@ -143,7 +118,6 @@ export class PiAgentEventAdapter {
   #compactionActive = false;
   #activeSampling: ModelSamplingIdentity | undefined;
   #lastCompletedSampling: ModelSamplingIdentity | undefined;
-  readonly #pendingToolInputDeltas = new Map<string, { toolName: string; delta: string }>();
   readonly #maximumToolOutputBytes: number;
   readonly #requireSamplingIdentity: boolean;
 
@@ -200,45 +174,6 @@ export class PiAgentEventAdapter {
     });
   }
 
-  #toolInputDelta(
-    identity: StreamedToolCallIdentity,
-    delta: string,
-    flush: boolean,
-  ): PiAgentEventAdapterOutcome {
-    const pending = this.#pendingToolInputDeltas.get(identity.toolCallId);
-    if (pending !== undefined && pending.toolName !== identity.toolName) {
-      return {
-        kind: "invalid",
-        sourceType: "message_update.toolcall_delta",
-        reason: "Pi changed a streamed tool name for one call ID",
-      };
-    }
-    const combined = `${pending?.delta ?? ""}${delta}`;
-    if (!flush && Buffer.byteLength(combined, "utf8") < MINIMUM_TOOL_INPUT_DELTA_BYTES) {
-      this.#pendingToolInputDeltas.set(identity.toolCallId, {
-        toolName: identity.toolName,
-        delta: combined,
-      });
-      return { kind: "ignored", sourceType: "message_update.toolcall_delta.buffered" };
-    }
-    this.#pendingToolInputDeltas.delete(identity.toolCallId);
-    if (combined.length === 0) {
-      return { kind: "ignored", sourceType: "message_update.toolcall_delta.empty" };
-    }
-    return {
-      kind: "mapped",
-      terminal: false,
-      event: this.#eventFactory.next({
-        type: "tool.input.delta",
-        payload: {
-          ...identity,
-          delta: combined,
-          ...(this.#activeSampling ?? this.#lastCompletedSampling ?? {}),
-        },
-      }),
-    };
-  }
-
   adapt(value: unknown): PiAgentEventAdapterOutcome {
     const type = sourceType(value);
     if (!isRecord(value) || typeof value.type !== "string") {
@@ -287,31 +222,13 @@ export class PiAgentEventAdapter {
         };
       }
       if (streamEvent.type === "toolcall_delta") {
-        if (typeof streamEvent.delta !== "string") {
-          return {
-            kind: "invalid",
-            sourceType: "message_update.toolcall_delta",
-            reason: "Pi toolcall_delta is missing its JSON fragment",
-          };
-        }
-        if (streamEvent.delta.length === 0) {
-          return { kind: "ignored", sourceType: "message_update.toolcall_delta.empty" };
-        }
-        const identity = streamedToolCallIdentity(streamEvent);
-        if (identity === undefined) {
-          // Some compatible providers do not attach a tool-call ID until a
-          // later chunk. The final tool_execution_start remains authoritative,
-          // so a missing optional preview identity must not fail the run.
-          return { kind: "ignored", sourceType: "message_update.toolcall_delta.unidentified" };
-        }
-        return this.#toolInputDelta(identity, streamEvent.delta, false);
+        // Tool arguments can arrive as hundreds of tiny provider fragments.
+        // The validated complete arguments are published once at
+        // tool_execution_start, so partial JSON is not a public event.
+        return { kind: "ignored", sourceType: "message_update.toolcall_delta" };
       }
       if (streamEvent.type === "toolcall_end") {
-        const identity = streamedToolCallIdentity(streamEvent);
-        if (identity === undefined) {
-          return { kind: "ignored", sourceType: "message_update.toolcall_end.unidentified" };
-        }
-        return this.#toolInputDelta(identity, "", true);
+        return { kind: "ignored", sourceType: "message_update.toolcall_end" };
       }
       if (streamEvent.type !== "text_delta") {
         return { kind: "ignored", sourceType: `message_update.${streamEvent.type}` };
@@ -346,7 +263,6 @@ export class PiAgentEventAdapter {
           reason: "Pi tool start is missing its call ID or tool name",
         };
       }
-      this.#pendingToolInputDeltas.delete(value.toolCallId);
       return {
         kind: "mapped",
         terminal: false,

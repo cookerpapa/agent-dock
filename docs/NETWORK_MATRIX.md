@@ -2,15 +2,12 @@
 
 | Source | Destination | Allowed | Purpose |
 | --- | --- | --- | --- |
-| Browser | Web/Control Plane/Event Gateway | yes | product API and SSE |
+| Browser | Web/Control Plane | yes | product API and SSE |
 | Control Plane | PostgreSQL | yes | product/Run authority |
-| Control Plane | Event Gateway | yes | live projection coordination |
 | Control Plane | Tool Broker | yes | authenticated Workspace terminal proxy |
 | Pi Worker | PostgreSQL | yes | queue, Session and lifecycle state |
-| Pi Worker | Event Gateway | yes | authenticated event batches |
 | Pi Worker | Tool Broker | yes | fenced Tool RPC |
 | Pi Worker | provider proxy/model provider | yes | model requests |
-| Event Gateway | PostgreSQL/Kafka/Valkey | yes | ingest, projection, replay |
 | Tool Broker | PostgreSQL | yes | activation and authority state |
 | Tool Broker | Cube API | yes | KVM lifecycle |
 | Volume gateway | PostgreSQL/RWX Workspace storage | yes | revision/Volume coordination |

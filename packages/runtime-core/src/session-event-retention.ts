@@ -1,7 +1,6 @@
 import type { Database } from "@pi-cloud/database";
 import type { Kysely } from "kysely";
 import { randomUUID } from "node:crypto";
-import type { LiveSessionEventStore } from "./live-session-event-store.ts";
 
 const DEFAULT_CLAIM_MS = 5 * 60 * 1_000;
 
@@ -17,7 +16,6 @@ export type SessionLiveStreamCompactionResult =
 
 export type SessionLiveStreamCompactionOptions = {
   database: Kysely<Database>;
-  liveEvents: LiveSessionEventStore;
   ownerId?: string;
   clock?: () => Date;
   claimMs?: number;
@@ -57,14 +55,12 @@ function positiveInteger(value: number | string | bigint, description: string): 
 
 export class SessionLiveStreamCompactionService {
   readonly #database: Kysely<Database>;
-  readonly #liveEvents: LiveSessionEventStore;
   readonly #ownerId: string;
   readonly #clock: () => Date;
   readonly #claimMs: number;
 
   constructor(options: SessionLiveStreamCompactionOptions) {
     this.#database = options.database;
-    this.#liveEvents = options.liveEvents;
     this.#ownerId = options.ownerId ?? `live-stream-compactor-${randomUUID()}`;
     if (this.#ownerId.length < 1 || this.#ownerId.length > 256) {
       throw new TypeError("Live stream compaction owner ID is invalid");
@@ -93,7 +89,7 @@ export class SessionLiveStreamCompactionService {
         ])
         .where("compaction.state", "=", "pending")
         .where("compaction.available_at", "<=", now)
-        .whereRef("cursor.last_projected_seq", ">=", "compaction.through_seq")
+        .whereRef("cursor.last_persisted_seq", ">=", "compaction.through_seq")
         .where((expression) =>
           expression.or([
             expression("compaction.claim_until", "is", null),
@@ -127,9 +123,14 @@ export class SessionLiveStreamCompactionService {
     if (job === undefined) return { status: "idle" };
 
     try {
-      await this.#liveEvents.trimThrough(job.tenantId, job.sessionId, job.throughSequence);
       const completedAt = safeDate(this.#clock);
       await this.#database.transaction().execute(async (transaction) => {
+        await transaction
+          .deleteFrom("session_events")
+          .where("tenant_id", "=", job.tenantId)
+          .where("session_id", "=", job.sessionId)
+          .where("seq", "<=", String(job.throughSequence))
+          .execute();
         const updated = await transaction
           .updateTable("session_live_stream_compactions")
           .set({

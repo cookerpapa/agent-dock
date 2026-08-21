@@ -61,6 +61,7 @@ import {
   type WorkspaceDeletionResource,
   type DevelopmentEnvironmentListResource,
   type DevelopmentEnvironmentResource,
+  type LiveTurnSnapshotResource,
 } from "@pi-cloud/protocol";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
@@ -74,6 +75,7 @@ import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
 import { TurnSteeringService } from "./turn-steering-service.ts";
 import { ConversationTreeService } from "./conversation-tree-service.ts";
 import { DevelopmentEnvironmentService } from "./development-environment-service.ts";
+import { PostgresLiveTurnSnapshotSource } from "@pi-cloud/runtime-core/live-turn-snapshot";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -83,6 +85,8 @@ export class ControlPlaneController {
     private readonly publicTenantRegistration: PublicTenantRegistrationService,
     @Inject(TenantRequestContext) private readonly tenantRequestContext: TenantRequestContext,
     @Inject(SessionEventStream) private readonly sessionEventStream: SessionEventStream,
+    @Inject(PostgresLiveTurnSnapshotSource)
+    private readonly liveTurnSnapshots: PostgresLiveTurnSnapshotSource,
     @Inject(TenantModelConfigurationService)
     private readonly tenantModelConfiguration: TenantModelConfigurationService,
     @Inject(WorkspaceVersionService)
@@ -521,5 +525,15 @@ export class ControlPlaneController {
     } finally {
       if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();
     }
+  }
+
+  @Get("sessions/:sessionId/live-turn-snapshot")
+  async getLiveTurnSnapshot(
+    @Req() request: FastifyRequest,
+    @Param("sessionId") sessionIdValue: unknown,
+  ): Promise<LiveTurnSnapshotResource> {
+    const sessionId = parseUuidPathParameter(sessionIdValue, "sessionId");
+    const identity = this.tenantRequestContext.resolve(request);
+    return this.liveTurnSnapshots.read(identity.tenantId, sessionId);
   }
 }

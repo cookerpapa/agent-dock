@@ -58,9 +58,9 @@ protocol, record the decision under `docs/adr/` before implementation.
 - Do not mount the Docker socket, host home directory, or long-lived provider
   credentials into an agent sandbox.
 - Do not add a second event broker, cache, workflow scheduler or cluster layer
-  merely to make the architecture look larger. Kafka, Valkey and Kubernetes
-  already have bounded current roles; additions require a demonstrated gap and
-  the adopt-before-build policy below.
+  merely to make the architecture look larger. PostgreSQL and Kubernetes have
+  bounded current roles; additions require a demonstrated gap and the
+  adopt-before-build policy below.
 - Pin Pi and other important dependency versions and provide upgrade contract tests.
 - Never commit secrets, generated credentials, session transcripts, or user repositories.
 

@@ -5,7 +5,6 @@ import {
   TtlCheckpointObjectStore,
 } from "@pi-cloud/runtime-core/checkpoint-runtime";
 import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
-import { HttpDurableEventIngestor } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
 import { GroupedDurableEventIngestor } from "@pi-cloud/runtime-core/grouped-durable-event-ingestor";
 import { AgentRunExecutionBackend } from "@pi-cloud/runtime-core/agent-run-execution-backend";
 import {
@@ -16,7 +15,7 @@ import { RunCommandExecutor } from "@pi-cloud/runtime-core/run-command-executor"
 import { PostgresSessionEventNotifications } from "@pi-cloud/runtime-core/postgres-session-event-notifications";
 import { PostgresRunAttemptPhaseObserver } from "@pi-cloud/runtime-core/run-attempt-runtime";
 import { SessionLeaseCoordinator } from "@pi-cloud/runtime-core/session-lease-coordinator";
-import { HttpTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
+import { PostgresTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 import { createDatabase, type Database } from "@pi-cloud/database";
 import { GitHubGatewayClient } from "@pi-cloud/github-gateway";
 import { operationalLog, type PiCloudMetrics } from "@pi-cloud/observability";
@@ -618,24 +617,15 @@ export class PiWorkerRuntime {
         connectionString: this.#config.databaseUrl,
         applicationName: `${this.#config.supervisorId}-event-publisher`,
       });
-      const eventStore = this.#config.externalWorkerEventLog
-        ? new HttpDurableEventIngestor({
-            baseUrl: this.#config.workerEventIngestBaseUrl!,
-            serviceToken: this.#config.workerEventIngestToken!,
-            allowInsecureHttp: this.#config.allowInsecureInternalHttp,
-          })
-        : new DurableEventStore({
-            database: this.#database,
-            eventNotificationPublisher: eventNotifications,
-            ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
-          });
+      const eventStore = new DurableEventStore({
+        database: this.#database,
+        eventNotificationPublisher: eventNotifications,
+        ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
+      });
       const groupedEventIngestor = new GroupedDurableEventIngestor({ store: eventStore });
-      const terminalTurnProjectionSource = this.#config.externalWorkerEventLog
-        ? new HttpTerminalTurnProjectionSource({
-            baseUrl: this.#config.workerEventIngestBaseUrl!,
-            serviceToken: this.#config.workerEventIngestToken!,
-          })
-        : undefined;
+      const terminalTurnProjectionSource = new PostgresTerminalTurnProjectionSource({
+        database: this.#database,
+      });
       const leaseCoordinator = new SessionLeaseCoordinator({
         database: this.#database,
         sandboxId: identity.sandboxId,
@@ -674,7 +664,7 @@ export class PiWorkerRuntime {
           backend: runBackend,
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
-          ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
+          terminalTurnProjectionSource,
           claimOwnerId: runWorkerIdentity,
           ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
         }),
@@ -683,7 +673,7 @@ export class PiWorkerRuntime {
           backend: runBackend,
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
-          ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
+          terminalTurnProjectionSource,
         }),
         onFailure: (operation, error) =>
           operationalLog({

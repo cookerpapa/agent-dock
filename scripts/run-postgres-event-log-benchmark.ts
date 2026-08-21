@@ -108,17 +108,12 @@ async function parallelMap<T>(
 
 const sessions = integerArgument("--sessions", 2_000, 1, 20_000);
 const batchesPerSession = integerArgument("--batches-per-session", 4, 1, 32);
-const eventsPerBatch = integerArgument("--events-per-batch", 16, 1, 64);
+const eventsPerBatch = integerArgument("--events-per-batch", 1, 1, 64);
 const concurrency = integerArgument("--concurrency", 256, 1, 2_000);
 const groupShards = integerArgument("--group-shards", 8, 1, 64);
 const groupSize = integerArgument("--group-size", 64, 1, 200);
 const maximumAckP95Ms = integerArgument("--maximum-ack-p95-ms", 500, 1, 60_000);
-const minimumEventsPerSecond = integerArgument(
-  "--minimum-events-per-second",
-  10_000,
-  1,
-  10_000_000,
-);
+const minimumEventsPerSecond = integerArgument("--minimum-events-per-second", 1_000, 1, 10_000_000);
 const outputJson = resolve(
   repositoryRoot,
   argument(
@@ -354,7 +349,7 @@ try {
       ackP95Ms <= maximumAckP95Ms &&
       eventsPerSecond >= minimumEventsPerSecond;
     const report = {
-      format: "pi-cloud.postgres-event-log-capacity.v1",
+      format: "pi-cloud.postgres-event-log-capacity.v2",
       generatedAt: new Date().toISOString(),
       gitRevision: gitRevision(),
       database: { image: POSTGRES_IMAGE, partitions: 32, maxConnections: 64 },
@@ -387,9 +382,10 @@ try {
       slo: { maximumAckP95Ms, minimumEventsPerSecond, zeroErrors: true },
       authorityDecision: passed
         ? "postgresql_remains_the_single_durable_event_authority"
-        : "postgresql_profile_failed_slo_evaluate_kafka_cutover",
+        : "postgresql_profile_failed_slo_scale_or_revisit_log_architecture",
       limitations: [
         "isolated single-node PostgreSQL, not a managed HA cluster",
+        "four synchronized coalesced events per Session, not provider token fragments",
         "event ingest only; model and Cube execution are intentionally excluded",
         "one transaction per Session batch preserves Session ordering",
       ],

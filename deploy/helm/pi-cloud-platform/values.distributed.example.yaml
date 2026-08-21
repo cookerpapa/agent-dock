@@ -15,10 +15,6 @@ images:
     repository: registry.example.com/pi-cloud/control-plane
     tag: git-sha-0123456789abcdef
     pullPolicy: IfNotPresent
-  eventGateway:
-    repository: registry.example.com/pi-cloud/event-gateway
-    tag: git-sha-0123456789abcdef
-    pullPolicy: IfNotPresent
   web:
     repository: registry.example.com/pi-cloud/web-ui
     tag: git-sha-0123456789abcdef
@@ -48,13 +44,6 @@ web:
     tlsSecretName: pi-cloud-web-tls
 
 external:
-  kafka:
-    brokers:
-      - pi-cloud-kafka-bootstrap.pi-cloud-eventing.svc.cluster.local:9093
-    topic: pi-cloud-worker-events-v1
-    projectorGroupId: pi-cloud-worker-event-projector-v2
-  liveEventStore:
-    urlSecretKey: live-event-store-url
   providerProxyUrl: https://provider-proxy.example.com:3129
 
 networkPolicy:

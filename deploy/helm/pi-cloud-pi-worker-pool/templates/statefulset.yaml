@@ -133,14 +133,6 @@ spec:
               value: /run/pi-cloud-secrets/database-url
             - name: DATABASE_NOTIFICATION_URL_FILE
               value: /run/pi-cloud-secrets/database-notification-url
-            - name: PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG
-              value: {{ .Values.runtime.externalWorkerEventLog | quote }}
-            {{- if .Values.runtime.externalWorkerEventLog }}
-            - name: PI_CLOUD_WORKER_EVENT_INGEST_URL
-              value: {{ .Values.services.eventGatewayUrl | quote }}
-            - name: PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE
-              value: /run/pi-cloud-secrets/worker-event-ingest-token
-            {{- end }}
             - name: PI_CLOUD_ALLOW_INSECURE_INTERNAL_HTTP
               value: {{ .Values.runtime.allowInsecureInternalHttp | quote }}
             - name: PI_CLOUD_CONTROL_PLANE_URL
@@ -298,12 +290,6 @@ spec:
               mountPath: /run/pi-cloud-secrets/metrics-token
               subPath: {{ .Values.credentials.metricsTokenKey }}
               readOnly: true
-            {{- if .Values.runtime.externalWorkerEventLog }}
-            - name: secrets
-              mountPath: /run/pi-cloud-secrets/worker-event-ingest-token
-              subPath: {{ .Values.credentials.workerEventIngestTokenKey }}
-              readOnly: true
-            {{- end }}
       volumes:
         - name: workspace
           emptyDir:
@@ -336,10 +322,6 @@ spec:
               {{- end }}
               - key: {{ .Values.credentials.metricsTokenKey }}
                 path: metrics-token
-              {{- if .Values.runtime.externalWorkerEventLog }}
-              - key: {{ .Values.credentials.workerEventIngestTokenKey }}
-                path: worker-event-ingest-token
-              {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: worker-state

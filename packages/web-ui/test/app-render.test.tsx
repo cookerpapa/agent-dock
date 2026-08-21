@@ -350,27 +350,4 @@ describe("product chat experience", () => {
     expect(markup).not.toContain("Successfully wrote");
     expect(markup).toContain("Took 0.0s");
   });
-
-  it("renders a partial write call as genuinely streaming highlighted source", () => {
-    const markup = renderToStaticMarkup(
-      <ToolActivity
-        item={{
-          kind: "tool",
-          key: "tool:write-streaming",
-          toolCallId: "write-streaming",
-          toolName: "write",
-          input: null,
-          inputJson:
-            '{"path":"bubble_sort.py","content":"def bubble_sort(values):\\n    return values',
-          status: "preparing",
-          firstSequence: 6,
-          startedAt: "2026-07-21T00:00:00.000Z",
-        }}
-      />,
-    );
-    expect(markup).toContain("正在生成");
-    expect(markup).toContain("product-tool-stream-cursor");
-    expect(markup).toContain("def bubble_sort");
-    expect(markup).toContain("bubble_sort");
-  });
 });

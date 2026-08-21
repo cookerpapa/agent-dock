@@ -292,27 +292,25 @@ gateway. It neither creates a Cube nor consumes Cube admission capacity; the
 stored revision, path, size and SHA-256 are revalidated before bytes reach the
 browser.
 
-### Event Gateway
+### Durable browser stream
 
-Workers coalesce adjacent text fragments and submit all Sessions through one
-bounded Host-level group-commit queue. Kafka is the first remote durability
-boundary; an event that has not received its Kafka-backed acknowledgement can
-never reach the browser. A projector builds the bounded Valkey SSE view, then
-advances PostgreSQL's projected watermark.
+Pi exposes separate Assistant-message, Tool-execution and Agent lifecycle
+events. The public adapter intentionally ignores thinking fragments, streamed
+Tool-call JSON and partial Tool stdout. It publishes only coalesced Assistant
+text, complete Tool start/result Items and low-frequency lifecycle boundaries.
 
-Pi SessionStorage and the live stream are independent projections of one Agent
-Run. `message_end` appends the complete Pi message without waiting for Kafka or
-Valkey. Kafka acknowledgement is required only before a delta becomes browser
-visible. Terminal settlement never reads Valkey and does not wait for its
-projector; if the live projection is behind, the terminal event becomes visible
-after the Kafka projector closes the sequence gap.
+Workers combine adjacent text for 100 ms or 4 KiB, then independent Sessions
+share one bounded Host-level PostgreSQL group-commit queue. An event is eligible
+for SSE only after the transaction commits. `LISTEN/NOTIFY` wakes every Control
+Plane replica, but the bounded `session_events` table is the replay authority;
+heartbeat polling repairs a missed notification.
 
-PostgreSQL stores each complete Pi entry once; the ordered Pi log stores entry
-and record identifiers and hydrates them on read. Raw deltas age out of
-Kafka/Valkey. Valkey uses a one-second AOF availability buffer and is rebuilt
-from retained Kafka on startup when its projected suffix is missing; it is not
-an authority. Only abnormal hard-interruption recovery may inspect the retained
-stream to preserve an already-visible prefix that never reached `message_end`.
+Pi SessionStorage and the browser hot tail are independent projections of one
+Agent Run. `message_end` appends the complete Pi message without waiting for a
+delta replay. After terminal settlement and a one-hour reconnect window, the
+retention worker deletes the Turn's hot events and advances its replay floor.
+Only abnormal hard-interruption recovery reads the retained tail to preserve a
+visible prefix that never reached `message_end`.
 
 ## State ownership
 
@@ -324,8 +322,7 @@ stream to preserve an already-visible prefix that never reached `message_end`.
 | Session Tool grants and immutable Run capability snapshots | PostgreSQL |
 | conversation parent/fork graph | PostgreSQL |
 | canonical completed conversation | PostgreSQL |
-| retained high-frequency Worker events | Kafka |
-| bounded live SSE replay | Valkey, rebuildable from Kafka |
+| bounded live SSE replay | PostgreSQL hot event partitions |
 | Workspace bytes | persistent Cube Volume |
 | Workspace revision/reference and Git baseline | PostgreSQL + trusted Volume envelope |
 | live process tree | one Cube KVM only |
@@ -371,8 +368,8 @@ Turns. SSE sequence numbers remain local to the child Session.
 
 ## Scaling
 
-Control Plane, Event Gateway, Pi Worker and Tool Broker are independent
-replica sets. PostgreSQL/PgBouncer, Kafka, Valkey, Workspace storage and Cube
-are external authorities. Scaling the Worker pool adds Agent Loop slots;
+Control Plane, Pi Worker and Tool Broker are independent replica sets.
+PostgreSQL/PgBouncer, Workspace storage and Cube are external authorities.
+Scaling the Worker pool adds Agent Loop slots;
 scaling Cube compute adds concurrent Tool environments. No Cell abstraction or
 per-Worker affinity is required for correctness.

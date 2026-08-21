@@ -30,6 +30,7 @@ import { TurnSteeringService } from "./turn-steering-service.ts";
 import type { TurnSteerBackend } from "./turn-steer.ts";
 import { ConversationTreeService } from "./conversation-tree-service.ts";
 import { DevelopmentEnvironmentService } from "./development-environment-service.ts";
+import { PostgresLiveTurnSnapshotSource } from "@pi-cloud/runtime-core/live-turn-snapshot";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
@@ -205,6 +206,10 @@ export class ControlPlaneModule {
         { provide: SessionEventHub, useValue: eventHub },
         { provide: DurableEventStore, useValue: eventStore },
         {
+          provide: PostgresLiveTurnSnapshotSource,
+          useValue: new PostgresLiveTurnSnapshotSource({ database: options.database }),
+        },
+        {
           provide: SessionEventStream,
           useValue: new SessionEventStream(eventStore, eventHub, options.sessionEventStreamOptions),
         },
@@ -217,7 +222,13 @@ export class ControlPlaneModule {
               },
             ]),
       ],
-      exports: [DurableEventStore, SessionEventHub, SessionEventStream, WorkspaceVersionService],
+      exports: [
+        DurableEventStore,
+        SessionEventHub,
+        SessionEventStream,
+        PostgresLiveTurnSnapshotSource,
+        WorkspaceVersionService,
+      ],
     };
   }
 }

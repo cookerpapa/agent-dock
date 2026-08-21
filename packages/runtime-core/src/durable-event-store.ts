@@ -12,17 +12,7 @@ import { sql, type Kysely, type Transaction } from "kysely";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEventHub } from "./session-event-hub.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
-import {
-  LiveSessionEventStoreError,
-  type LiveSessionEventStore,
-} from "./live-session-event-store.ts";
 import { classifyStructuredTestCommand } from "./structured-test-command.ts";
-import type {
-  WorkerEventLogAppender,
-  WorkerEventLogEnvelope,
-  WorkerEventLogPosition,
-  WorkerEventProjectionSink,
-} from "./worker-event-log.ts";
 import type { PiCloudMetrics } from "@pi-cloud/observability";
 
 const DEFAULT_REPLAY_PAGE_SIZE = 500;
@@ -55,8 +45,6 @@ export type DurableEventStoreOptions = {
   eventNotificationPublisher?: SessionEventNotificationPublisher;
   clock?: () => Date;
   idGenerator?: () => string;
-  workerEventLog?: WorkerEventLogAppender;
-  liveEventStore?: LiveSessionEventStore;
   metrics?: PiCloudMetrics;
 };
 
@@ -215,17 +203,12 @@ type PreparedPublication = {
   last: EventPublishMessage;
 };
 
-export class DurableEventStore
-  implements DurableEventLog, DurableEventGroupIngestor, WorkerEventProjectionSink
-{
+export class DurableEventStore implements DurableEventLog, DurableEventGroupIngestor {
   readonly #database: Kysely<Database>;
   readonly #eventHub: SessionEventHub | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
-  readonly #workerEventLog: WorkerEventLogAppender | undefined;
-  readonly #externalWorkerEventLog: boolean;
-  readonly #liveEventStore: LiveSessionEventStore | undefined;
   readonly #metrics: PiCloudMetrics | undefined;
 
   constructor(options: DurableEventStoreOptions) {
@@ -234,15 +217,7 @@ export class DurableEventStore
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#clock = options.clock ?? (() => new Date());
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
-    this.#workerEventLog = options.workerEventLog;
-    this.#externalWorkerEventLog = options.workerEventLog !== undefined;
-    this.#liveEventStore = options.liveEventStore;
     this.#metrics = options.metrics;
-    if (this.#externalWorkerEventLog !== (this.#liveEventStore !== undefined)) {
-      throw new TypeError(
-        "External Worker event log and live event store must be configured together",
-      );
-    }
   }
 
   async ingest(value: unknown): Promise<EventAckMessage> {
@@ -254,11 +229,10 @@ export class DurableEventStore
   }
 
   async ingestGroup(values: readonly unknown[]): Promise<readonly EventAckMessage[]> {
-    const boundary = this.#externalWorkerEventLog ? "kafka" : "postgresql";
     const startedAt = performance.now();
     let outcome = "success";
     try {
-      return await this.#ingestGroup(values, boundary);
+      return await this.#ingestGroup(values);
     } catch (error: unknown) {
       outcome = "failure";
       if (postgresRetryable(error)) {
@@ -271,22 +245,19 @@ export class DurableEventStore
       throw error;
     } finally {
       this.#metrics?.eventDurabilityDuration
-        .labels(boundary, outcome)
+        .labels(outcome)
         .observe((performance.now() - startedAt) / 1_000);
     }
   }
 
-  async #ingestGroup(
-    values: readonly unknown[],
-    boundary: "kafka" | "postgresql",
-  ): Promise<readonly EventAckMessage[]> {
+  async #ingestGroup(values: readonly unknown[]): Promise<readonly EventAckMessage[]> {
     if (values.length < 1) {
       throw new DurableEventStoreError("invalid_event", "Event publication group was empty");
     }
     const prepared = values.map((value) => this.#prepare(value));
-    this.#metrics?.eventDurabilityGroupSize
-      .labels(boundary)
-      .observe(prepared.reduce((total, publication) => total + publication.publications.length, 0));
+    this.#metrics?.eventDurabilityGroupSize.observe(
+      prepared.reduce((total, publication) => total + publication.publications.length, 0),
+    );
     const now = validDate(this.#clock);
     const results = await this.#database.transaction().execute(async (transaction) => {
       const ingested = await this.#ingestPreparedGroupTransaction(transaction, prepared, now);
@@ -299,12 +270,9 @@ export class DurableEventStore
           throughSequence: result.acknowledgedThroughSeq,
         } as const;
       });
-      if (
-        !this.#externalWorkerEventLog &&
-        this.#eventNotificationPublisher?.publishGroup !== undefined
-      ) {
+      if (this.#eventNotificationPublisher?.publishGroup !== undefined) {
         await this.#eventNotificationPublisher.publishGroup(transaction, notifications);
-      } else if (!this.#externalWorkerEventLog) {
+      } else {
         for (const notification of notifications) {
           await this.#eventNotificationPublisher?.publish(transaction, notification);
         }
@@ -319,13 +287,11 @@ export class DurableEventStore
           "Grouped event acknowledgement is missing",
         );
       }
-      if (!this.#externalWorkerEventLog) {
-        this.#eventHub?.notifyThrough(
-          result.tenantId,
-          publication.last.payload.event.sessionId,
-          result.acknowledgedThroughSeq,
-        );
-      }
+      this.#eventHub?.notifyThrough(
+        result.tenantId,
+        publication.last.payload.event.sessionId,
+        result.acknowledgedThroughSeq,
+      );
       return this.#acknowledgement(publication.last, result.acknowledgedThroughSeq, now);
     });
   }
@@ -399,7 +365,7 @@ export class DurableEventStore
     prepared: readonly PreparedPublication[],
     now: Date,
   ): Promise<readonly { tenantId: string; acknowledgedThroughSeq: number }[]> {
-    if (prepared.length === 1 && !this.#externalWorkerEventLog) {
+    if (prepared.length === 1) {
       return [await this.#ingestBatchTransaction(transaction, prepared[0]!.publications, now)];
     }
     const sessionIds = prepared.map(
@@ -408,15 +374,9 @@ export class DurableEventStore
     if (new Set(sessionIds).size !== sessionIds.length) {
       const results = [];
       for (const publication of prepared) {
-        if (this.#externalWorkerEventLog) {
-          results.push(
-            ...(await this.#ingestPreparedGroupTransaction(transaction, [publication], now)),
-          );
-        } else {
-          results.push(
-            await this.#ingestBatchTransaction(transaction, publication.publications, now),
-          );
-        }
+        results.push(
+          await this.#ingestBatchTransaction(transaction, publication.publications, now),
+        );
       }
       return results;
     }
@@ -430,7 +390,7 @@ export class DurableEventStore
       .execute();
     const cursors = await transaction
       .selectFrom("session_event_cursors")
-      .select(["session_id", "last_persisted_seq", "acknowledged_through_seq"])
+      .select(["session_id", "last_persisted_seq"])
       .where("session_id", "in", sortedSessionIds)
       .orderBy("session_id", "asc")
       .forUpdate()
@@ -504,16 +464,6 @@ export class DurableEventStore
         );
       }
       const lastPersisted = safeInteger(cursor.last_persisted_seq, "last persisted sequence");
-      const acknowledged = safeInteger(
-        cursor.acknowledged_through_seq,
-        "acknowledged event sequence",
-      );
-      if (acknowledged !== lastPersisted) {
-        throw new DurableEventStoreError(
-          "event_store_invariant",
-          "Durable event cursor is not a fully ACK-eligible prefix",
-        );
-      }
       if (
         lease === undefined ||
         normalizedUuid(lease.lease_id) !== normalizedUuid(first.payload.leaseId) ||
@@ -597,75 +547,35 @@ export class DurableEventStore
       });
     }
 
-    const eventIds = newPublications.map((message) => message.payload.event.eventId);
-    if (new Set(eventIds.map((eventId) => eventId.toLowerCase())).size !== eventIds.length) {
-      throw new DurableEventStoreError("event_conflict", "Event ID was reused inside one group");
-    }
-    if (eventIds.length > 0) {
-      const reusedEventId = await transaction
-        .selectFrom("session_event_ids")
-        .select("event_id")
-        .where("event_id", "in", eventIds)
-        .executeTakeFirst();
-      if (reusedEventId !== undefined) {
-        throw new DurableEventStoreError(
-          "event_conflict",
-          "Event ID was already used by another sequence",
-        );
-      }
-      if (!this.#externalWorkerEventLog) {
-        await transaction
-          .insertInto("session_events")
-          .values(
-            newPublications.map((message) =>
-              this.#eventRow(
-                sessionById.get(message.payload.event.sessionId)!.tenant_id,
-                message,
-                now,
-              ),
+    if (newPublications.length > 0) {
+      await transaction
+        .insertInto("session_events")
+        .values(
+          newPublications.map((message) =>
+            this.#eventRow(
+              sessionById.get(message.payload.event.sessionId)!.tenant_id,
+              message,
+              now,
             ),
-          )
-          .executeTakeFirstOrThrow();
-        for (const message of newPublications) {
-          await this.#recordStructuredTestResult(
-            transaction,
-            sessionById.get(message.payload.event.sessionId)!.tenant_id,
-            message,
-          );
-          await this.#recordContextCompaction(
-            transaction,
-            sessionById.get(message.payload.event.sessionId)!.tenant_id,
-            message,
-          );
-        }
-      } else {
-        const batches = prepared
-          .map((publication) => {
-            const sessionId = publication.publications[0]!.payload.event.sessionId;
-            const session = sessionById.get(sessionId)!;
-            const cursor = cursorBySession.get(sessionId)!;
-            const lastPersisted = safeInteger(cursor.last_persisted_seq, "last persisted sequence");
-            const messages = publication.publications.filter(
-              (message) => message.payload.event.seq > lastPersisted,
-            );
-            if (messages.length === 0) return undefined;
-            return { tenantId: session.tenant_id, messages };
-          })
-          .filter((value): value is NonNullable<typeof value> => value !== undefined);
-        if (batches.length > 0) {
-          // Kafka is the enterprise stream's first durable acceptance
-          // boundary. Keep the Session rows locked until the broker ACKs so
-          // the projector cannot overtake the lightweight cursor commit.
-          await this.#workerEventLog!.append(batches);
-        }
+          ),
+        )
+        .executeTakeFirstOrThrow();
+      for (const message of newPublications) {
+        await this.#recordStructuredTestResult(
+          transaction,
+          sessionById.get(message.payload.event.sessionId)!.tenant_id,
+          message,
+        );
+        await this.#recordContextCompaction(
+          transaction,
+          sessionById.get(message.payload.event.sessionId)!.tenant_id,
+          message,
+        );
       }
     }
 
     if (advances.length > 0) {
       const advanceJson = JSON.stringify(advances);
-      const projectionAdvance = !this.#externalWorkerEventLog
-        ? sql`, last_projected_seq = advances."acknowledgedThrough"`
-        : sql``;
       const cursorUpdates = await sql<{ session_id: string }>`
         with advances as (
           select * from jsonb_to_recordset(${advanceJson}::jsonb) as value(
@@ -677,13 +587,10 @@ export class DurableEventStore
         )
         update session_event_cursors as cursor
            set last_persisted_seq = advances."acknowledgedThrough",
-               acknowledged_through_seq = advances."acknowledgedThrough",
                updated_at = ${now}
-               ${projectionAdvance}
           from advances
          where cursor.session_id = advances."sessionId"
            and cursor.last_persisted_seq = advances."expectedLast"
-           and cursor.acknowledged_through_seq = advances."expectedLast"
         returning cursor.session_id
       `.execute(transaction);
       if (cursorUpdates.rows.length !== advances.length) {
@@ -735,8 +642,7 @@ export class DurableEventStore
       .selectFrom("sessions as session_row")
       .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
       .select([
-        "cursor.last_projected_seq as highWaterMark",
-        "cursor.last_persisted_seq as persistedThrough",
+        "cursor.last_persisted_seq as highWaterMark",
         "cursor.replay_floor_seq as replayFloor",
       ])
       .where("session_row.tenant_id", "=", tenantId)
@@ -746,7 +652,6 @@ export class DurableEventStore
       throw new DurableEventStoreError("not_found", "Session event stream was not found");
     }
     const highWaterMark = safeInteger(cursor.highWaterMark, "session event high-water mark");
-    const persistedThrough = safeInteger(cursor.persistedThrough, "persisted event sequence");
     const replayFloor = safeInteger(cursor.replayFloor, "session event replay floor");
     if (afterSequence < replayFloor) {
       throw new DurableEventStoreError(
@@ -754,7 +659,7 @@ export class DurableEventStore
         "Last-Event-ID is older than the retained hot event window; reload the conversation",
       );
     }
-    if (afterSequence > persistedThrough) {
+    if (afterSequence > highWaterMark) {
       throw new DurableEventStoreError(
         "cursor_ahead",
         "Last-Event-ID is ahead of the accepted session event stream",
@@ -784,72 +689,6 @@ export class DurableEventStore
       throughSequence < afterSequence
     ) {
       throw new TypeError("replay sequence bounds are invalid");
-    }
-    if (this.#liveEventStore !== undefined) {
-      const [liveEvents, terminalRows] = await Promise.all([
-        this.#liveEventStore.readPage(
-          tenantId,
-          sessionId,
-          afterSequence,
-          throughSequence,
-          pageSize,
-        ),
-        this.#database
-          .selectFrom("session_terminal_events")
-          .select([
-            "event_id",
-            "session_id",
-            "turn_id",
-            "agent_id",
-            "seq",
-            "schema_version",
-            "type",
-            "payload",
-            "occurred_at",
-          ])
-          .where("tenant_id", "=", tenantId)
-          .where("session_id", "=", sessionId)
-          .where("seq", ">", String(afterSequence))
-          .where("seq", "<=", String(throughSequence))
-          .orderBy("seq", "asc")
-          .limit(pageSize)
-          .execute(),
-      ]);
-      const terminalEvents = terminalRows.map((row) =>
-        parsePiCloudEvent({
-          schemaVersion: row.schema_version,
-          eventId: row.event_id,
-          sessionId: row.session_id,
-          turnId: row.turn_id,
-          agentId: row.agent_id,
-          seq: safeInteger(row.seq, "terminal event sequence"),
-          occurredAt: isoTimestamp(row.occurred_at),
-          type: row.type,
-          payload: row.payload,
-        }),
-      );
-      const page = [...liveEvents, ...terminalEvents]
-        .sort((left, right) => left.seq - right.seq)
-        .slice(0, pageSize);
-      let expectedSequence = afterSequence + 1;
-      for (const event of page) {
-        if (event.seq !== expectedSequence) {
-          throw new DurableEventStoreError(
-            "event_store_invariant",
-            `Live event replay is missing sequence ${expectedSequence}`,
-            true,
-          );
-        }
-        expectedSequence += 1;
-      }
-      if (page.length === 0 && afterSequence < throughSequence) {
-        throw new DurableEventStoreError(
-          "event_store_invariant",
-          `Live event replay is missing sequence ${expectedSequence}`,
-          true,
-        );
-      }
-      return page;
     }
     const [rows, terminalRows] = await Promise.all([
       this.#database
@@ -903,227 +742,6 @@ export class DurableEventStore
       .slice(0, pageSize);
   }
 
-  async project(envelope: WorkerEventLogEnvelope, position: WorkerEventLogPosition): Promise<void> {
-    const startedAt = performance.now();
-    let outcome = "success";
-    try {
-      await this.#project(envelope, position);
-      const occurredAt = new Date(envelope.messages.at(-1)!.payload.event.occurredAt);
-      if (Number.isFinite(occurredAt.valueOf())) {
-        this.#metrics?.eventProjectionLag.observe(
-          Math.max(0, Date.now() - occurredAt.valueOf()) / 1_000,
-        );
-      }
-    } catch (error: unknown) {
-      outcome = "failure";
-      throw error;
-    } finally {
-      this.#metrics?.eventProjectionDuration
-        .labels(outcome)
-        .observe((performance.now() - startedAt) / 1_000);
-    }
-  }
-
-  async #project(
-    envelope: WorkerEventLogEnvelope,
-    position: WorkerEventLogPosition,
-  ): Promise<void> {
-    const first = envelope.messages[0];
-    const last = envelope.messages.at(-1);
-    if (envelope.schemaVersion !== 1 || first === undefined || last === undefined) {
-      throw new DurableEventStoreError("invalid_event", "Worker event envelope was invalid");
-    }
-    const sessionId = first.payload.event.sessionId;
-    if (
-      envelope.messages.some(
-        (message, index) =>
-          message.payload.event.sessionId !== sessionId ||
-          message.payload.event.seq !== first.payload.event.seq + index,
-      )
-    ) {
-      throw new DurableEventStoreError(
-        "invalid_event",
-        "Worker event envelope was not one contiguous Session range",
-      );
-    }
-    if (
-      !Number.isSafeInteger(position.partition) ||
-      position.partition < 0 ||
-      !/^(0|[1-9][0-9]{0,18})$/u.test(position.offset)
-    ) {
-      throw new DurableEventStoreError("invalid_event", "Kafka projection position was invalid");
-    }
-    const now = validDate(this.#clock);
-    const result = await this.#database.transaction().execute(async (transaction) => {
-      // Startup repair takes the matching exclusive session lock through the
-      // direct PostgreSQL endpoint. Shared transaction locks let all normal
-      // projectors run concurrently while making reset/rebuild race-free even
-      // when an older Event Gateway replica is still serving.
-      await sql`select pg_advisory_xact_lock_shared(hashtext('pi-cloud'), hashtext('live-event-repair-v1'))`.execute(
-        transaction,
-      );
-      const consumed = await transaction
-        .selectFrom("worker_event_projection_offsets")
-        .select("last_offset")
-        .where("consumer_group", "=", position.consumerGroup)
-        .where("topic", "=", position.topic)
-        .where("partition", "=", position.partition)
-        .forUpdate()
-        .executeTakeFirst();
-      if (consumed !== undefined && BigInt(consumed.last_offset) >= BigInt(position.offset)) {
-        return { projectedThrough: null, notified: false } as const;
-      }
-      const session = await transaction
-        .selectFrom("sessions")
-        .select("tenant_id")
-        .where("id", "=", sessionId)
-        .executeTakeFirst();
-      if (session === undefined || session.tenant_id !== envelope.tenantId) {
-        throw new DurableEventStoreError("not_found", "Worker event Session was not found");
-      }
-      const cursor = await transaction
-        .selectFrom("session_event_cursors")
-        .select(["last_persisted_seq", "last_projected_seq"])
-        .where("session_id", "=", sessionId)
-        .forUpdate()
-        .executeTakeFirst();
-      if (cursor === undefined) {
-        throw new DurableEventStoreError(
-          "event_store_invariant",
-          "Session event cursor is missing",
-        );
-      }
-      const persisted = safeInteger(cursor.last_persisted_seq, "last persisted sequence");
-      const projected = safeInteger(cursor.last_projected_seq, "last projected sequence");
-      if (last.payload.event.seq > persisted) {
-        throw new DurableEventStoreError(
-          "event_store_invariant",
-          "Kafka event range was not authorized by the durable Session cursor",
-          true,
-        );
-      }
-
-      const redeliveries = envelope.messages.filter(
-        (message) => message.payload.event.seq <= projected,
-      );
-      if (redeliveries.length > 0) {
-        const existing = await this.#liveEventStore!.readPage(
-          envelope.tenantId,
-          sessionId,
-          redeliveries[0]!.payload.event.seq - 1,
-          redeliveries.at(-1)!.payload.event.seq,
-          redeliveries.length,
-        );
-        const bySequence = new Map(existing.map((event) => [event.seq, event]));
-        for (const message of redeliveries) {
-          const event = bySequence.get(message.payload.event.seq);
-          if (event === undefined || !isDeepStrictEqual(event, message.payload.event)) {
-            throw new DurableEventStoreError(
-              "event_conflict",
-              `Kafka redelivery conflicted at sequence ${message.payload.event.seq}`,
-            );
-          }
-        }
-      }
-
-      const newMessages = envelope.messages.filter(
-        (message) => message.payload.event.seq > projected,
-      );
-      if (newMessages.length > 0 && newMessages[0]!.payload.event.seq !== projected + 1) {
-        throw new DurableEventStoreError(
-          "sequence_gap",
-          `Expected projected sequence ${projected + 1}, received ${newMessages[0]!.payload.event.seq}`,
-          true,
-        );
-      }
-      let throughSequence = projected;
-      if (newMessages.length > 0) {
-        try {
-          await this.#liveEventStore!.append({
-            tenantId: envelope.tenantId,
-            sessionId,
-            previousSequence: projected,
-            messages: newMessages,
-          });
-        } catch (error: unknown) {
-          if (error instanceof LiveSessionEventStoreError) {
-            throw new DurableEventStoreError(
-              error.code === "sequence_gap" ? "sequence_gap" : "event_conflict",
-              "Kafka projection conflicted with the live event stream",
-              error.code === "sequence_gap" || error.code === "redelivery_missing",
-            );
-          }
-          throw error;
-        }
-        const turnId = newMessages[0]!.payload.event.turnId;
-        const turnEvents =
-          turnId === null
-            ? []
-            : await this.#liveEventStore!.readTurn(
-                envelope.tenantId,
-                sessionId,
-                turnId,
-                0,
-                newMessages.at(-1)!.payload.event.seq,
-              );
-        for (const message of newMessages) {
-          await this.#recordStructuredTestResult(
-            transaction,
-            envelope.tenantId,
-            message,
-            turnEvents,
-          );
-          await this.#recordContextCompaction(transaction, envelope.tenantId, message);
-        }
-        throughSequence = newMessages.at(-1)!.payload.event.seq;
-        const terminal = await transaction
-          .selectFrom("session_terminal_events")
-          .select("seq")
-          .where("tenant_id", "=", envelope.tenantId)
-          .where("session_id", "=", sessionId)
-          .where("seq", "=", String(throughSequence + 1))
-          .executeTakeFirst();
-        if (terminal !== undefined) {
-          throughSequence = safeInteger(terminal.seq, "terminal projection sequence");
-        }
-        const update = await transaction
-          .updateTable("session_event_cursors")
-          .set({ last_projected_seq: throughSequence, updated_at: now })
-          .where("session_id", "=", sessionId)
-          .where("last_projected_seq", "=", cursor.last_projected_seq)
-          .executeTakeFirst();
-        expectOne(update.numUpdatedRows, "advancing the projected event cursor");
-        const notification = {
-          schemaVersion: 1,
-          tenantId: envelope.tenantId,
-          sessionId,
-          throughSequence,
-        } as const;
-        await this.#eventNotificationPublisher?.publish(transaction, notification);
-      }
-      await transaction
-        .insertInto("worker_event_projection_offsets")
-        .values({
-          consumer_group: position.consumerGroup,
-          topic: position.topic,
-          partition: position.partition,
-          last_offset: position.offset,
-          updated_at: now,
-        })
-        .onConflict((conflict) =>
-          conflict.columns(["consumer_group", "topic", "partition"]).doUpdateSet({
-            last_offset: position.offset,
-            updated_at: now,
-          }),
-        )
-        .executeTakeFirstOrThrow();
-      return { projectedThrough: throughSequence, notified: newMessages.length > 0 } as const;
-    });
-    if (result.notified && result.projectedThrough !== null) {
-      this.#eventHub?.notifyThrough(envelope.tenantId, sessionId, result.projectedThrough);
-    }
-  }
-
   async #verifyRedeliveries(
     transaction: Transaction<Database>,
     tenantId: string,
@@ -1149,12 +767,6 @@ export class DurableEventStore
       const event = message.payload.event;
       const row = bySequence.get(event.seq);
       if (row === undefined) {
-        if (this.#externalWorkerEventLog) {
-          // The Kafka ACK can legitimately precede the PostgreSQL projection.
-          // The original record is already durable, so an ACK retry does not
-          // need a second Kafka append or a temporary identity row.
-          continue;
-        }
         throw new DurableEventStoreError(
           "event_store_invariant",
           "Durable event prefix contains a missing sequence",
@@ -1214,7 +826,7 @@ export class DurableEventStore
     const tenantId = session.tenant_id;
     const cursor = await transaction
       .selectFrom("session_event_cursors")
-      .select(["last_persisted_seq", "acknowledged_through_seq"])
+      .select(["last_persisted_seq"])
       .where("session_id", "=", firstEvent.sessionId)
       .forUpdate()
       .executeTakeFirst();
@@ -1223,17 +835,6 @@ export class DurableEventStore
     }
 
     const lastPersisted = safeInteger(cursor.last_persisted_seq, "last persisted sequence");
-    const acknowledged = safeInteger(
-      cursor.acknowledged_through_seq,
-      "acknowledged event sequence",
-    );
-    if (acknowledged !== lastPersisted) {
-      throw new DurableEventStoreError(
-        "event_store_invariant",
-        "Durable event cursor is not a fully ACK-eligible prefix",
-      );
-    }
-
     const redeliveries = messages.filter((message) => message.payload.event.seq <= lastPersisted);
     if (redeliveries.length > 0) {
       const existingRows = await transaction
@@ -1303,22 +904,6 @@ export class DurableEventStore
       throw new DurableEventStoreError("stale_fence", "Event publication lease is stale");
     }
 
-    const eventIds = newMessages.map((message) => message.payload.event.eventId);
-    if (new Set(eventIds.map((eventId) => eventId.toLowerCase())).size !== eventIds.length) {
-      throw new DurableEventStoreError("event_conflict", "Event ID was reused inside one batch");
-    }
-    const reusedEventId = await transaction
-      .selectFrom("session_event_ids")
-      .select(["session_id", "seq"])
-      .where("event_id", "in", eventIds)
-      .executeTakeFirst();
-    if (reusedEventId !== undefined) {
-      throw new DurableEventStoreError(
-        "event_conflict",
-        "Event ID was already used by another sequence",
-      );
-    }
-
     await transaction
       .insertInto("session_events")
       .values(
@@ -1355,13 +940,10 @@ export class DurableEventStore
       .updateTable("session_event_cursors")
       .set({
         last_persisted_seq: acknowledgedThroughSeq,
-        last_projected_seq: acknowledgedThroughSeq,
-        acknowledged_through_seq: acknowledgedThroughSeq,
         updated_at: now,
       })
       .where("session_id", "=", firstEvent.sessionId)
       .where("last_persisted_seq", "=", cursor.last_persisted_seq)
-      .where("acknowledged_through_seq", "=", cursor.acknowledged_through_seq)
       .executeTakeFirst();
     expectOne(cursorUpdate.numUpdatedRows, "advancing the event cursor");
 

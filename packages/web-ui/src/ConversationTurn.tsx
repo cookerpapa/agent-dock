@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { parse as parsePartialJson } from "partial-json";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { TranscriptItem, TurnView } from "./session-view.ts";
@@ -126,15 +125,6 @@ function ExpandableToolText({
   );
 }
 
-function displayedToolInput(item: Extract<TranscriptItem, { kind: "tool" }>): unknown {
-  if (item.status !== "preparing" || item.inputJson === undefined) return item.input;
-  try {
-    return parsePartialJson(item.inputJson);
-  } catch {
-    return item.input;
-  }
-}
-
 export function Markdown({ children }: { children: string }) {
   return (
     <div className="product-markdown">
@@ -156,7 +146,7 @@ export function Markdown({ children }: { children: string }) {
 }
 
 export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "tool" }> }) {
-  const input = objectValue(displayedToolInput(item));
+  const input = objectValue(item.input);
   const command = stringValue(input?.command);
   const path = stringValue(input?.path);
   const content = stringValue(input?.content);
@@ -164,17 +154,15 @@ export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "
   const duration = durationLabel(item.startedAt, item.completedAt);
   const conventionalWriteResult = /^Successfully wrote \d+ bytes to /u.test(output.trim());
   const statusLabel =
-    item.status === "preparing"
-      ? "正在生成"
-      : item.status === "running"
-        ? "执行中"
-        : item.status === "unknown"
-          ? "结果未知"
-          : item.status === "failed"
-            ? "执行失败"
-            : "执行完成";
+    item.status === "running"
+      ? "执行中"
+      : item.status === "unknown"
+        ? "结果未知"
+        : item.status === "failed"
+          ? "执行失败"
+          : "执行完成";
   const icon =
-    item.status === "preparing" || item.status === "running"
+    item.status === "running"
       ? "◌"
       : item.status === "unknown"
         ? "?"
@@ -211,7 +199,7 @@ export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "
             className="product-tool-source"
             direction="head"
             sourcePath={path}
-            streaming={item.status === "preparing"}
+            streaming={false}
             text={content}
           />
         ) : item.toolName !== "bash" && path === null ? (

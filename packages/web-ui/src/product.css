@@ -1203,18 +1203,9 @@ body.product-panel-resizing {
   animation: product-tool-spin 1.1s linear infinite;
   color: #a89bea;
 }
-.product-tool-preparing .product-tool-icon {
-  animation: product-tool-pulse 1s ease-in-out infinite;
-  color: #a89bea;
-}
 @keyframes product-tool-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-@keyframes product-tool-pulse {
-  50% {
-    opacity: 0.35;
   }
 }
 .product-tool-body {

@@ -73,8 +73,8 @@ export type PiCloudTurnRunnerOptions = Readonly<{
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_TURN_TIMEOUT_MS = 30_000;
-const TEXT_DELTA_COALESCE_WINDOW_MS = 50;
-const TEXT_DELTA_COALESCE_BYTES = 2 * 1_024;
+const TEXT_DELTA_COALESCE_WINDOW_MS = 100;
+const TEXT_DELTA_COALESCE_BYTES = 4 * 1_024;
 const MAXIMUM_PENDING_PUBLIC_EVENTS = 512;
 const BASE_SYSTEM_PROMPT = [
   "You are a coding agent working in a remote, isolated project workspace.",

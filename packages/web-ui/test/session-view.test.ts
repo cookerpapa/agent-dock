@@ -426,59 +426,6 @@ describe("session transcript reducer", () => {
     ]);
   });
 
-  it("assembles streamed tool input before execution and reconciles it with tool.started", () => {
-    const events: PiCloudEvent[] = [
-      envelope(1, { type: "turn.started", payload: { inputKind: "prompt" } }),
-      envelope(2, {
-        type: "tool.input.delta",
-        payload: {
-          toolCallId: "write-1",
-          toolName: "write",
-          delta: '{"path":"bubble_sort.py","content":"def ',
-        },
-      }),
-      envelope(3, {
-        type: "tool.input.delta",
-        payload: { toolCallId: "write-1", toolName: "write", delta: 'bubble_sort():\\n"}' },
-      }),
-    ];
-    let state = events.reduce(
-      (current, value) => sessionViewReducer(current, { type: "stream.event", event: value }),
-      preparedState(),
-    );
-
-    expect(state.turns[0]?.items).toEqual([
-      expect.objectContaining({
-        kind: "tool",
-        toolCallId: "write-1",
-        status: "preparing",
-        inputJson: '{"path":"bubble_sort.py","content":"def bubble_sort():\\n"}',
-        firstSequence: 2,
-      }),
-    ]);
-
-    state = sessionViewReducer(state, {
-      type: "stream.event",
-      event: envelope(4, {
-        type: "tool.started",
-        payload: {
-          toolCallId: "write-1",
-          toolName: "write",
-          input: { path: "bubble_sort.py", content: "def bubble_sort():\n" },
-        },
-      }),
-    });
-    expect(state.turns[0]?.items).toEqual([
-      expect.objectContaining({
-        kind: "tool",
-        status: "running",
-        input: { path: "bubble_sort.py", content: "def bubble_sort():\n" },
-        inputJson: '{"path":"bubble_sort.py","content":"def bubble_sort():\\n"}',
-        firstSequence: 2,
-      }),
-    ]);
-  });
-
   it("marks cancellation intent before terminal confirmation", () => {
     let state = preparedState();
     state = sessionViewReducer(state, {

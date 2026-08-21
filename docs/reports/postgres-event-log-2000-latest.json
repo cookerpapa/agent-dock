@@ -1,0 +1,46 @@
+{
+  "format": "pi-cloud.postgres-event-log-capacity.v2",
+  "generatedAt": "2026-08-21T15:32:10.407Z",
+  "gitRevision": "be8bfec0641099fd3678692e72aad1a4e12ea74a",
+  "database": {
+    "image": "postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94",
+    "partitions": 32,
+    "maxConnections": 64
+  },
+  "workload": {
+    "sessions": 2000,
+    "batchesPerSession": 4,
+    "eventsPerBatch": 1,
+    "concurrency": 256,
+    "groupShards": 8,
+    "groupSize": 64,
+    "totalEvents": 8000
+  },
+  "result": {
+    "passed": true,
+    "failures": [],
+    "persistedEvents": 8000,
+    "elapsedMs": 5932,
+    "eventsPerSecond": 1348.62,
+    "batchTransactionsPerSecond": 1348.62,
+    "ackLatencyMs": {
+      "p50": 176,
+      "p95": 262.01,
+      "p99": 288.15
+    },
+    "walBytes": 13251949,
+    "walBytesPerEvent": 1656.49
+  },
+  "slo": {
+    "maximumAckP95Ms": 500,
+    "minimumEventsPerSecond": 1000,
+    "zeroErrors": true
+  },
+  "authorityDecision": "postgresql_remains_the_single_durable_event_authority",
+  "limitations": [
+    "isolated single-node PostgreSQL, not a managed HA cluster",
+    "four synchronized coalesced events per Session, not provider token fragments",
+    "event ingest only; model and Cube execution are intentionally excluded",
+    "one transaction per Session batch preserves Session ordering"
+  ]
+}

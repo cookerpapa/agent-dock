@@ -34,7 +34,7 @@ may have run but its result cannot be proven, the outcome is `UNKNOWN`; it is
 not replayed automatically.
 
 The Worker never receives Cube management credentials. Cube receives no model,
-PostgreSQL, Kafka, Valkey, Kubernetes, Volume-gateway or Cube-control
+PostgreSQL, Kubernetes, Volume-gateway or Cube-control
 credential.
 
 ## Workspace and process lifetime

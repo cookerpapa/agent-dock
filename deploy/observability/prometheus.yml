@@ -19,10 +19,6 @@ scrape_configs:
     bearer_token_file: /run/pi-cloud-secrets/metrics-token
     static_configs:
       - targets: [tool-broker:9466]
-  - job_name: pi-cloud-event-gateway
-    bearer_token_file: /run/pi-cloud-secrets/metrics-token
-    static_configs:
-      - targets: [event-gateway:9467]
   - job_name: pi-cloud-event-retention
     bearer_token_file: /run/pi-cloud-secrets/metrics-token
     static_configs:

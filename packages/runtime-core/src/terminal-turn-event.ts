@@ -55,7 +55,7 @@ export async function commitTerminalTurnEvent(
     .executeTakeFirst();
   const cursor = await transaction
     .selectFrom("session_event_cursors")
-    .select(["last_persisted_seq", "last_projected_seq", "acknowledged_through_seq"])
+    .select(["last_persisted_seq"])
     .where("session_id", "=", input.sessionId)
     .forUpdate()
     .executeTakeFirst();
@@ -64,14 +64,7 @@ export async function commitTerminalTurnEvent(
   }
   const sequence = safeSequence(session.next_event_seq, "Session next event sequence");
   const persisted = safeSequence(cursor.last_persisted_seq, "Persisted event cursor");
-  const acknowledged = safeSequence(cursor.acknowledged_through_seq, "Acknowledged event cursor");
-  const projected = safeSequence(cursor.last_projected_seq, "Projected event cursor");
-  if (
-    sequence < 1 ||
-    persisted !== sequence - 1 ||
-    projected > persisted ||
-    acknowledged !== persisted
-  ) {
+  if (sequence < 1 || persisted !== sequence - 1) {
     throw new Error("Terminal event stream is not contiguous");
   }
 
@@ -162,19 +155,14 @@ export async function commitTerminalTurnEvent(
     })
     .executeTakeFirstOrThrow();
 
-  const projectedAfter = projected === persisted ? sequence : projected;
   const cursorUpdate = await transaction
     .updateTable("session_event_cursors")
     .set({
       last_persisted_seq: sequence,
-      last_projected_seq: projectedAfter,
-      acknowledged_through_seq: sequence,
       updated_at: input.now,
     })
     .where("session_id", "=", input.sessionId)
     .where("last_persisted_seq", "=", cursor.last_persisted_seq)
-    .where("last_projected_seq", "=", cursor.last_projected_seq)
-    .where("acknowledged_through_seq", "=", cursor.acknowledged_through_seq)
     .executeTakeFirst();
   expectOne(cursorUpdate.numUpdatedRows, "Advancing the terminal event cursor");
 
@@ -192,13 +180,11 @@ export async function commitTerminalTurnEvent(
     .executeTakeFirst();
   expectOne(sessionUpdate.numUpdatedRows, "Advancing the terminal session sequence");
 
-  if (projectedAfter > projected) {
-    await input.notificationPublisher?.publish(transaction, {
-      schemaVersion: 1,
-      tenantId: input.tenantId,
-      sessionId: input.sessionId,
-      throughSequence: projectedAfter,
-    });
-  }
+  await input.notificationPublisher?.publish(transaction, {
+    schemaVersion: 1,
+    tenantId: input.tenantId,
+    sessionId: input.sessionId,
+    throughSequence: sequence,
+  });
   return event;
 }

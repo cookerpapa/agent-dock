@@ -1,6 +1,5 @@
 import { createDatabase } from "@pi-cloud/database";
 import { operationalLog, startServiceObservability } from "@pi-cloud/observability";
-import { ValkeyLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
 import { SessionLiveStreamCompactionService } from "@pi-cloud/runtime-core/session-event-retention";
 import { readFile } from "node:fs/promises";
 
@@ -46,16 +45,11 @@ async function wait(delayMs: number, signal: AbortSignal): Promise<void> {
 }
 
 export async function startEventRetentionWorker(): Promise<void> {
-  const [databaseUrl, liveEventStoreUrl] = await Promise.all([
-    secret(process.env.DATABASE_URL_FILE ?? "/run/pi-cloud-secrets/database-url", "Database URL"),
-    secret(
-      process.env.PI_CLOUD_LIVE_EVENT_STORE_URL_FILE ??
-        "/run/pi-cloud-secrets/live-event-store-url",
-      "Valkey live event store URL",
-    ),
-  ]);
+  const databaseUrl = await secret(
+    process.env.DATABASE_URL_FILE ?? "/run/pi-cloud-secrets/database-url",
+    "Database URL",
+  );
   const database = createDatabase({ connectionString: databaseUrl, maxConnections: 4 });
-  const liveEvents = new ValkeyLiveSessionEventStore({ url: liveEventStoreUrl });
   const observability = await startServiceObservability({
     serviceName: "pi-cloud-live-stream-compactor",
     defaultMetricsPort: 9468,
@@ -79,12 +73,11 @@ export async function startEventRetentionWorker(): Promise<void> {
     1,
     10_000,
   );
-  const service = new SessionLiveStreamCompactionService({ database, liveEvents });
+  const service = new SessionLiveStreamCompactionService({ database });
   const stop = (): void => controller.abort();
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   try {
-    await liveEvents.checkHealth();
     while (!controller.signal.aborted) {
       let compacted = 0;
       try {
@@ -113,7 +106,6 @@ export async function startEventRetentionWorker(): Promise<void> {
   } finally {
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
-    await liveEvents.close();
     await database.destroy();
     await observability.close();
   }

@@ -43,17 +43,17 @@ result is `UNKNOWN`.
 
 ## Events and terminal commit
 
-Pi text fragments are coalesced, then independent Sessions share one bounded
-Host group-commit queue. Kafka acknowledgement is the first remote durability
-boundary. The Valkey projector advances PostgreSQL's projected watermark only
-after it builds the contiguous live read model. SSE exposes no later prefix.
+Pi text fragments are coalesced for 100 ms or 4 KiB, then independent Sessions
+share one bounded Host PostgreSQL group-commit queue. Tool arguments and Tool
+results enter this stream only as complete Items. PostgreSQL acknowledgement is
+the visibility boundary; `LISTEN/NOTIFY` wakes SSE readers after commit.
 
-Pi `message_end` appends complete SessionStorage state independently of the live
-event path. On successful settlement, the Worker prepares the bounded Workspace
-Volume revision. The terminal transaction validates the current Attempt/fence,
-advances the Workspace revision if applicable, commits the terminal event and
-settles the Run without waiting for Valkey. A lagging Kafka projector exposes
-that terminal event only after the preceding live-event gap closes.
+Pi `message_end` appends complete SessionStorage state independently of the
+short-lived delta rows. On successful settlement, the Worker prepares the
+bounded Workspace Volume revision. The terminal transaction validates the
+current Attempt/fence, advances the Workspace revision if applicable, commits
+the terminal event and settles the Run. After the reconnect window, a retention
+worker deletes the hot Turn events while keeping canonical Pi messages.
 
 ## Cancellation and failure
 

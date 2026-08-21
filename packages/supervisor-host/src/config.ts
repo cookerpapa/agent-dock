@@ -46,9 +46,6 @@ export type SupervisorHostConfig = {
   repositoryImportWaitMs: number;
   githubGatewayBaseUrl?: string;
   githubGatewayServiceToken?: string;
-  externalWorkerEventLog?: boolean;
-  workerEventIngestBaseUrl?: string;
-  workerEventIngestToken?: string;
 };
 
 function required(environment: SupervisorHostEnvironment, name: string): string {
@@ -249,21 +246,6 @@ export async function loadSupervisorHostConfig(
   if ((githubGatewayBaseUrl === undefined) !== (githubGatewayServiceToken === undefined)) {
     throw new TypeError("GitHub Gateway URL and service token must be configured together");
   }
-  const externalWorkerEventLog = booleanValue(environment, "PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG");
-  const workerEventIngest = externalWorkerEventLog
-    ? {
-        workerEventIngestBaseUrl: internalServiceBaseUrl(
-          required(environment, "PI_CLOUD_WORKER_EVENT_INGEST_URL"),
-          allowInsecureInternalHttp,
-          "PI_CLOUD_WORKER_EVENT_INGEST_URL",
-        ),
-        workerEventIngestToken: await secret(
-          environment,
-          "PI_CLOUD_WORKER_EVENT_INGEST_TOKEN",
-          allowInlineSecrets,
-        ),
-      }
-    : {};
   const toolBrokerRequestTimeoutMs = integerValue(
     environment,
     "PI_CLOUD_TOOL_BROKER_REQUEST_TIMEOUT_MS",
@@ -385,8 +367,6 @@ export async function loadSupervisorHostConfig(
     ),
     databaseUrl,
     databaseNotificationUrl,
-    externalWorkerEventLog,
-    ...workerEventIngest,
     managementHost: bounded(
       environment.PI_CLOUD_SUPERVISOR_MANAGEMENT_HOST ?? "127.0.0.1",
       "PI_CLOUD_SUPERVISOR_MANAGEMENT_HOST",

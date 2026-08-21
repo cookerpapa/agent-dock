@@ -100,7 +100,6 @@
       "additionalProperties": false,
       "required": [
         "controlPlaneUrl",
-        "eventGatewayUrl",
         "toolBrokerUrls",
         "githubGateway",
         "providerProxyUrl",
@@ -108,7 +107,6 @@
       ],
       "properties": {
         "controlPlaneUrl": { "$ref": "#/$defs/httpUrl" },
-        "eventGatewayUrl": { "$ref": "#/$defs/httpUrl" },
         "toolBrokerUrls": {
           "type": "array",
           "minItems": 1,
@@ -145,8 +143,7 @@
         "toolBrokerTokenKey",
         "modelCredentialMasterKeyKey",
         "githubGatewayTokenKey",
-        "metricsTokenKey",
-        "workerEventIngestTokenKey"
+        "metricsTokenKey"
       ],
       "properties": {
         "supervisorEnrollmentTokenKey": { "$ref": "#/$defs/secretKey" },
@@ -154,8 +151,7 @@
         "toolBrokerTokenKey": { "$ref": "#/$defs/secretKey" },
         "modelCredentialMasterKeyKey": { "$ref": "#/$defs/secretKey" },
         "githubGatewayTokenKey": { "$ref": "#/$defs/secretKey" },
-        "metricsTokenKey": { "$ref": "#/$defs/secretKey" },
-        "workerEventIngestTokenKey": { "$ref": "#/$defs/secretKey" }
+        "metricsTokenKey": { "$ref": "#/$defs/secretKey" }
       }
     },
     "runtime": {
@@ -163,7 +159,6 @@
       "additionalProperties": false,
       "required": [
         "allowInsecureInternalHttp",
-        "externalWorkerEventLog",
         "subagents",
         "checkpointCache",
         "timeouts",
@@ -171,7 +166,6 @@
       ],
       "properties": {
         "allowInsecureInternalHttp": { "type": "boolean" },
-        "externalWorkerEventLog": { "type": "boolean" },
         "subagents": {
           "type": "object",
           "additionalProperties": false,

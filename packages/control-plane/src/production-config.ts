@@ -18,9 +18,6 @@ export type ProductionControlPlaneConfig = {
   toolBrokerBaseUrls: readonly string[];
   sandboxMaterializerToken: string;
   workspaceTerminalToken: string;
-  externalWorkerEventLog: boolean;
-  workerEventIngestBaseUrl?: string;
-  workerEventIngestToken?: string;
   supervisorIdPrefix: string;
   supervisorMaximumCapacity: number;
   supervisorManagementBaseUrlTemplates: readonly string[];
@@ -322,25 +319,9 @@ export async function loadProductionControlPlaneConfig(
     environment.PI_CLOUD_DATABASE_NOTIFICATION_URL === undefined
       ? databaseUrl
       : await secret(environment, "PI_CLOUD_DATABASE_NOTIFICATION_URL", allowInlineSecrets);
-  const externalWorkerEventLog = booleanValue(environment, "PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG");
-  const workerEventIngest = externalWorkerEventLog
-    ? {
-        workerEventIngestBaseUrl: managementUrl(
-          required(environment, "PI_CLOUD_WORKER_EVENT_INGEST_URL"),
-          allowInsecureInternalHttp,
-        ),
-        workerEventIngestToken: await secret(
-          environment,
-          "PI_CLOUD_WORKER_EVENT_INGEST_TOKEN",
-          allowInlineSecrets,
-        ),
-      }
-    : {};
   return {
     databaseUrl,
     databaseNotificationUrl,
-    externalWorkerEventLog,
-    ...workerEventIngest,
     supervisorEnrollmentToken: await secret(
       environment,
       "PI_CLOUD_SUPERVISOR_ENROLLMENT_TOKEN",

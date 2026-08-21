@@ -67,12 +67,6 @@ const composeNetworks = {
 
 const bridgeTargets = [
   {
-    name: "event-gateway",
-    composeService: "event-gateway",
-    network: composeNetworks.api,
-    port: 4600,
-  },
-  {
     name: "control-plane",
     composeService: "control-plane",
     network: composeNetworks.management,
@@ -670,7 +664,6 @@ async function applyWorkerSecret(githubGatewayEnabled) {
     "supervisor-enrollment-token": await source("supervisor-enrollment-token"),
     "supervisor-management-token": await source("supervisor-management-token"),
     "tool-broker-token": await source("tool-broker-token"),
-    "worker-event-ingest-token": await source("worker-event-ingest-token"),
     "model-credential-master-key": await source("model-credential-master-key"),
     "metrics-token": await source("metrics-token"),
   };
@@ -921,11 +914,7 @@ async function deployWorkerPool(revision, imageTag, resolvedTargets, runtimeEnvi
     "--set",
     "image.pullPolicy=Never",
     "--set",
-    "runtime.externalWorkerEventLog=true",
-    "--set",
     "services.controlPlaneUrl=http://control-plane.pi-cloud-system.svc.cluster.local:3000",
-    "--set",
-    "services.eventGatewayUrl=http://event-gateway.pi-cloud-system.svc.cluster.local:4600",
     "--set",
     "services.toolBrokerUrls[0]=http://tool-broker.pi-cloud-system.svc.cluster.local:4300",
     "--set",
@@ -1083,45 +1072,7 @@ async function checkDeployment(expectedRevision, { emit = true } = {}) {
       (condition) => condition.type === "Ready" && condition.status === "True",
     );
     if (!ready) throw new Error(`Worker Pod ${pod.metadata?.name} is not Ready`);
-    const worker = pod.spec?.containers?.find((container) => container.name === "pi-worker");
-    const environment = new Map((worker?.env ?? []).map((entry) => [entry.name, entry]));
-    if (environment.get("PI_CLOUD_EXTERNAL_WORKER_EVENT_LOG")?.value !== "true") {
-      throw new Error(`Worker Pod ${pod.metadata?.name} bypasses the durable Event Gateway`);
-    }
-    if (
-      environment.get("PI_CLOUD_WORKER_EVENT_INGEST_URL")?.value !==
-      `http://event-gateway.${systemNamespace}.svc.cluster.local:4600`
-    ) {
-      throw new Error(`Worker Pod ${pod.metadata?.name} has an invalid Event Gateway route`);
-    }
-    const eventToken = environment.get("PI_CLOUD_WORKER_EVENT_INGEST_TOKEN_FILE");
-    if (eventToken?.value !== "/run/pi-cloud-secrets/worker-event-ingest-token") {
-      throw new Error(`Worker Pod ${pod.metadata?.name} has no Event Gateway credential file`);
-    }
   }
-  const eventGatewayProbe = await kubectlCapture(
-    [
-      "--namespace",
-      workerNamespace,
-      "exec",
-      pods.items[0].metadata.name,
-      "--",
-      "node",
-      "--input-type=module",
-      "--eval",
-      [
-        "const response=await fetch(",
-        "'http://event-gateway.pi-cloud-system.svc.cluster.local:4600/internal/v1/worker-events',",
-        "{method:'POST',headers:{'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(5000)});",
-        "console.log(response.status);",
-      ].join(""),
-    ],
-    10_000,
-  );
-  if (eventGatewayProbe !== "401") {
-    throw new Error("Kubernetes Pi Workers cannot reach the authenticated Event Gateway");
-  }
-
   const controlPlane = await composeContainer("control-plane");
   await waitForManagementRoutes(controlPlane);
 

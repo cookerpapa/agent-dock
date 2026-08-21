@@ -12,8 +12,6 @@ import {
 import { SessionLeaseCoordinator } from "@pi-cloud/runtime-core/session-lease-coordinator";
 import { PostgresCheckpointObjectStore } from "@pi-cloud/runtime-core/postgres-checkpoint-object-store";
 import { PostgresSessionEventNotifications } from "@pi-cloud/runtime-core/postgres-session-event-notifications";
-import { HttpDurableEventIngestor } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
-import { HttpTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 import {
   PostgresSupervisorCredentialAuthorizer,
   SupervisorBootProvisioner,
@@ -166,23 +164,8 @@ export async function startControlPlane(): Promise<void> {
       terminalToken: config.workspaceTerminalToken,
       allowInsecureInternalHttp: config.allowInsecureInternalHttp,
     });
-    const workerEventIngestor = config.externalWorkerEventLog
-      ? new HttpDurableEventIngestor({
-          baseUrl: config.workerEventIngestBaseUrl!,
-          serviceToken: config.workerEventIngestToken!,
-          allowInsecureHttp: config.allowInsecureInternalHttp,
-        })
-      : undefined;
-    const terminalTurnProjectionSource = config.externalWorkerEventLog
-      ? new HttpTerminalTurnProjectionSource({
-          baseUrl: config.workerEventIngestBaseUrl!,
-          serviceToken: config.workerEventIngestToken!,
-        })
-      : undefined;
     runtime = await createControlPlaneRuntime({
       database,
-      ...(workerEventIngestor === undefined ? {} : { workerEventIngestor }),
-      ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
       controlPlaneInstanceId: randomUUID(),
       sessionEventNotifications: notifications,
       developmentEnvironmentService,

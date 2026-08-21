@@ -8,10 +8,7 @@ import {
   type ControlPlaneApplicationOptions,
 } from "./application.ts";
 import { AssignmentReconciler } from "./assignment-reconciler.ts";
-import {
-  DurableEventStore,
-  type DurableEventGroupIngestor,
-} from "@pi-cloud/runtime-core/durable-event-store";
+import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
 import { GroupedDurableEventIngestor } from "@pi-cloud/runtime-core/grouped-durable-event-ingestor";
 import {
   SupervisorMaintenanceRuntime,
@@ -35,7 +32,7 @@ import {
 } from "./supervisor-websocket-gateway.ts";
 import type { SupervisorProvisioningGateway } from "./supervisor-boot-provisioner.ts";
 import type { ProductionHttpGateway } from "./production-http-gateway.ts";
-import type { TerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
+import { PostgresTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 
 type ConnectionManagerConfiguration = Omit<
   SupervisorConnectionManagerOptions,
@@ -66,8 +63,6 @@ export type ControlPlaneRuntimeOptions = Omit<
   controlChannelRouter?: ControlChannelConfiguration;
   gateway?: GatewayConfiguration;
   maintenance?: MaintenanceConfiguration;
-  workerEventIngestor?: DurableEventGroupIngestor;
-  terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
 export type ControlPlaneRuntimeState = "ready" | "running" | "closing" | "closed";
@@ -163,7 +158,10 @@ export async function createControlPlaneRuntime(
       : { eventNotificationPublisher: options.sessionEventNotifications }),
   });
   const eventIngestor = new GroupedDurableEventIngestor({
-    store: options.workerEventIngestor ?? eventStore,
+    store: eventStore,
+  });
+  const terminalTurnProjectionSource = new PostgresTerminalTurnProjectionSource({
+    database: options.database,
   });
   const controlChannelRouter = new WorkerControlChannelRouter(options.controlChannelRouter);
   const connectionManager = new SupervisorConnectionManager({
@@ -179,9 +177,7 @@ export async function createControlPlaneRuntime(
         ...(options.sessionEventNotifications === undefined
           ? {}
           : { eventNotificationPublisher: options.sessionEventNotifications }),
-        ...(options.terminalTurnProjectionSource === undefined
-          ? {}
-          : { terminalTurnProjectionSource: options.terminalTurnProjectionSource }),
+        terminalTurnProjectionSource,
       }),
   });
   const gateway = new SupervisorWebSocketGateway({

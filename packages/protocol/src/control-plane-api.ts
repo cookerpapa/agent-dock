@@ -609,10 +609,8 @@ export const ConversationTranscriptItemResourceSchema = Type.Union([
       toolCallId: Type.String({ minLength: 1, maxLength: 1_024 }),
       toolName: Type.String({ minLength: 1, maxLength: 1_024 }),
       input: Type.Unknown(),
-      inputJson: Type.Optional(Type.String()),
       output: Type.Optional(Type.Unknown()),
       status: Type.Union([
-        Type.Literal("preparing"),
         Type.Literal("running"),
         Type.Literal("completed"),
         Type.Literal("failed"),
