@@ -294,15 +294,25 @@ browser.
 
 ### Event Gateway
 
-Workers batch events into a local WAL and send authenticated ordered batches.
-Kafka is the durable high-frequency stream. A projector builds the bounded
-Valkey SSE view, then advances PostgreSQL's projected watermark. The browser is
-shown only the acknowledged prefix.
+Workers coalesce adjacent text fragments and submit all Sessions through one
+bounded Host-level group-commit queue. Kafka is the first remote durability
+boundary; an event that has not received its Kafka-backed acknowledgement can
+never reach the browser. A projector builds the bounded Valkey SSE view, then
+advances PostgreSQL's projected watermark.
 
-At terminal settlement, PostgreSQL stores one canonical complete Turn and the
-terminal sequence. Raw deltas age out of Kafka/Valkey rather than permanently
-doubling conversation storage. Valkey can be rebuilt from retained Kafka; it is
-not an authority.
+Pi SessionStorage and the live stream are independent projections of one Agent
+Run. `message_end` appends the complete Pi message without waiting for Kafka or
+Valkey. Kafka acknowledgement is required only before a delta becomes browser
+visible. Terminal settlement never reads Valkey and does not wait for its
+projector; if the live projection is behind, the terminal event becomes visible
+after the Kafka projector closes the sequence gap.
+
+PostgreSQL stores each complete Pi entry once; the ordered Pi log stores entry
+and record identifiers and hydrates them on read. Raw deltas age out of
+Kafka/Valkey. Valkey uses a one-second AOF availability buffer and is rebuilt
+from retained Kafka on startup when its projected suffix is missing; it is not
+an authority. Only abnormal hard-interruption recovery may inspect the retained
+stream to preserve an already-visible prefix that never reached `message_end`.
 
 ## State ownership
 

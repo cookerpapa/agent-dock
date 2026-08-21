@@ -1,10 +1,8 @@
 import {
   TWO_PHASE_COMMAND_CAPABILITY,
   PI_STEER_CAPABILITY,
-  createPiCloudEventFactory,
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
-  type EventPublishMessage,
   type SteerTurnCommandMessage,
 } from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
@@ -18,8 +16,6 @@ const IDS = {
   connection: "10000000-0000-4000-8000-000000000005",
   boot: "10000000-0000-4000-8000-000000000006",
   sandbox: "10000000-0000-4000-8000-000000000007",
-  event: "10000000-0000-4000-8000-000000000008",
-  eventMessage: "10000000-0000-4000-8000-000000000009",
   run: "10000000-0000-4000-8000-000000000010",
   attempt: "10000000-0000-4000-8000-000000000011",
   commit: "10000000-0000-4000-8000-000000000014",
@@ -55,36 +51,10 @@ function command(): SteerTurnCommandMessage {
   return parsed;
 }
 
-function event(commandMessage = command()): EventPublishMessage {
-  const factory = createPiCloudEventFactory(
-    {
-      sessionId: commandMessage.payload.sessionId,
-      turnId: commandMessage.payload.turnId,
-      agentId: commandMessage.payload.agentId,
-    },
-    { clock: () => new Date(SENT_AT), idGenerator: () => IDS.event },
-  );
-  const parsed = parseSupervisorToControlMessage({
-    protocolVersion: 1,
-    messageId: IDS.eventMessage,
-    sentAt: SENT_AT,
-    type: "event.publish",
-    payload: {
-      commandId: commandMessage.payload.commandId,
-      leaseId: commandMessage.payload.leaseId,
-      fencingToken: commandMessage.payload.fencingToken,
-      event: factory.next({ type: "turn.started", payload: { inputKind: "prompt" } }),
-    },
-  });
-  if (parsed.type !== "event.publish") throw new Error("Expected event publication");
-  return parsed;
-}
-
 function connection(
   options: {
     capabilities?: readonly string[];
     sent?: unknown[];
-    assertEventAuthority?: (message: EventPublishMessage) => Promise<void>;
   } = {},
 ): WorkerControlConnection {
   return {
@@ -96,11 +66,6 @@ function connection(
     async send(message) {
       options.sent?.push(message);
     },
-    assertEventAuthority:
-      options.assertEventAuthority ??
-      (async () => {
-        return undefined;
-      }),
   };
 }
 
@@ -109,11 +74,6 @@ describe("Worker control channel", () => {
     const sent: unknown[] = [];
     const attached = connection({ sent });
     const router = new WorkerControlChannelRouter({
-      eventIngestor: {
-        async ingest() {
-          throw new Error("events are not expected");
-        },
-      },
       commandAckTimeoutMs: 1_000,
       commandResultTimeoutMs: 1_000,
     });
@@ -179,13 +139,7 @@ describe("Worker control channel", () => {
 
   it("does not send steer commands to a Worker that omitted the steer capability", async () => {
     const sent: unknown[] = [];
-    const router = new WorkerControlChannelRouter({
-      eventIngestor: {
-        async ingest() {
-          throw new Error("events are not expected");
-        },
-      },
-    });
+    const router = new WorkerControlChannelRouter({});
     router.attach(connection({ capabilities: [TWO_PHASE_COMMAND_CAPABILITY], sent }));
 
     await expect(router.prepare(IDS.sandbox, command())).rejects.toMatchObject({
@@ -200,11 +154,6 @@ describe("Worker control channel", () => {
     const sent: unknown[] = [];
     const attached = connection({ sent });
     const router = new WorkerControlChannelRouter({
-      eventIngestor: {
-        async ingest() {
-          throw new Error("events are not expected");
-        },
-      },
       commandAckTimeoutMs: 1_000,
     });
     router.attach(attached);
@@ -231,27 +180,5 @@ describe("Worker control channel", () => {
     });
     router.detach(attached);
     await expect(pending).resolves.toMatchObject({ code: "connection_closed" });
-  });
-
-  it("checks sandbox lease authority before an event reaches durable ingestion", async () => {
-    let ingested = 0;
-    const authorityError = new Error("forged sandbox lease");
-    const attached = connection({
-      assertEventAuthority: async () => {
-        throw authorityError;
-      },
-    });
-    const router = new WorkerControlChannelRouter({
-      eventIngestor: {
-        async ingest() {
-          ingested += 1;
-          throw new Error("must not ingest unauthorized event");
-        },
-      },
-    });
-    router.attach(attached);
-
-    await expect(router.receive(attached, event())).rejects.toBe(authorityError);
-    expect(ingested).toBe(0);
   });
 });

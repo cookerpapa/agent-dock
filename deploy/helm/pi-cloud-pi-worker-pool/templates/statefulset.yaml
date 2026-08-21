@@ -181,8 +181,6 @@ spec:
               value: /workspace
             - name: PI_CLOUD_BOOT_STATE_DIRECTORY
               value: /var/lib/pi-cloud/boot
-            - name: PI_CLOUD_EVENT_SPOOL_DIRECTORY
-              value: /var/lib/pi-cloud/spool
             - name: PI_CLOUD_CHECKPOINT_READ_CACHE_TTL_MS
               value: {{ .Values.runtime.checkpointCache.ttlMs | quote }}
             - name: PI_CLOUD_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES

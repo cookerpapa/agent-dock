@@ -7,7 +7,6 @@ export {
   type CommandKind,
   type CommandState,
   type ConversationPruneOperationTable,
-  type ConversationTurnProjectionTable,
   type CredentialBindingStatus,
   type CredentialKind,
   type EnvironmentValidationStatus,
@@ -130,6 +129,8 @@ export {
   downRecursiveSubagentTrees,
   upUserOwnedDevelopmentEnvironments,
   downUserOwnedDevelopmentEnvironments,
+  upCanonicalPiConversationEntries,
+  downCanonicalPiConversationEntries,
 } from "./migrations/index.ts";
 
 export {

@@ -1,51 +1,51 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-18T11:32:02.780Z",
+  "checkedAt": "2026-08-21T13:20:56.916Z",
   "upstream": "TencentCloud/CubeSandbox@v0.6.0",
   "model": {
     "provider": "deepseek",
     "modelId": "deepseek-v4-flash"
   },
   "pureChat": {
-    "firstTextMs": 2493,
-    "settledMs": 2871,
+    "firstTextMs": 1479,
+    "settledMs": 1714,
     "toolCalls": 0,
     "cubeActivations": 0,
     "usage": {
       "requests": 1,
-      "inputTokens": 27,
+      "inputTokens": 36,
       "outputTokens": 5,
-      "cacheReadTokens": 1024,
+      "cacheReadTokens": 6016,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "firstCoding": {
-    "firstTextMs": 10186,
-    "settledMs": 12000,
+    "firstTextMs": 8769,
+    "settledMs": 9642,
     "toolCalls": 2,
     "cubeActivations": 1,
-    "workspaceFileBytes": 2018,
+    "workspaceFileBytes": 1342,
     "usage": {
       "requests": 3,
-      "inputTokens": 453,
-      "outputTokens": 916,
-      "cacheReadTokens": 4608,
+      "inputTokens": 338,
+      "outputTokens": 621,
+      "cacheReadTokens": 19200,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
   "followUpCoding": {
-    "firstTextMs": 8529,
-    "settledMs": 9926,
-    "toolCalls": 3,
+    "firstTextMs": 6471,
+    "settledMs": 7089,
+    "toolCalls": 2,
     "cubeActivations": 1,
-    "workspaceFileBytes": 2144,
+    "workspaceFileBytes": 1448,
     "usage": {
-      "requests": 4,
-      "inputTokens": 1125,
-      "outputTokens": 450,
-      "cacheReadTokens": 9856,
+      "requests": 3,
+      "inputTokens": 559,
+      "outputTokens": 380,
+      "cacheReadTokens": 20864,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
@@ -56,10 +56,10 @@
     "persistentSandboxPolicy": true,
     "workspaceRestored": true,
     "workspaceVersions": 2,
-    "finalWorkspaceFileBytes": 2144
+    "finalWorkspaceFileBytes": 1448
   },
   "workspaceIsolation": {
-    "volumeId": "pcw-ff7cd69e3d652f65a785545286505a2d652e49cefb750c40",
+    "volumeId": "pcw-8239e36dd2495b0467c606da272a61b24b73944c2ddbb96b",
     "trustedMetadataSibling": true,
     "userWorkspaceGitEntryAbsent": true
   },
@@ -68,40 +68,40 @@
     "lowerLevelCubeTenantGate": 2
   },
   "largeWorkspace": {
-    "source": "github.com/TencentCloud/CubeSandbox",
-    "firstRunId": "8819c453-984b-4bef-8c63-562d7acf8126",
-    "followUpRunId": "66aaf521-4a81-47b8-9102-c0dd9245876b",
-    "firstFileCount": 3230,
-    "restoredFileCount": 3231,
-    "volumeReferenceBytes": 593743,
+    "source": "deterministic 1024-file local fixture",
+    "firstRunId": "6a50e801-e678-4d53-ac2b-31e7c16a8a96",
+    "followUpRunId": "ba4a1dff-b465-4465-8b7d-4955eb1aaff9",
+    "firstFileCount": 1025,
+    "restoredFileCount": 1026,
+    "volumeReferenceBytes": 154709,
     "sourceSandboxDestroyed": true,
     "persistentVolumeRetained": true,
-    "volumeId": "pcw-d8656b4d260d95c78b215908b06a0195f5b3e1fc91c1d4d9",
+    "volumeId": "pcw-9eed454bc1462765d4329a035952a9cc803abe4f12f08df9",
     "restoredFromPersistentVolume": true,
     "freshCubeMicroVm": true,
     "higherFenceActivation": true,
     "firstUsage": {
-      "requests": 4,
-      "inputTokens": 1897,
-      "outputTokens": 557,
-      "cacheReadTokens": 8064,
+      "requests": 2,
+      "inputTokens": 270,
+      "outputTokens": 378,
+      "cacheReadTokens": 12288,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     },
     "followUpUsage": {
       "requests": 2,
-      "inputTokens": 259,
-      "outputTokens": 156,
-      "cacheReadTokens": 6912,
+      "inputTokens": 292,
+      "outputTokens": 277,
+      "cacheReadTokens": 13440,
       "cacheWriteTokens": 0,
       "costMicrousd": 0
     }
   },
-  "semanticConversation": {
-    "projectionCount": 3,
-    "projectedSourceEvents": 93,
-    "semanticItems": 8,
-    "replayAfterSequence": 93
+  "canonicalConversation": {
+    "terminalCount": 3,
+    "piEntryCount": 17,
+    "canonicalPayloadBytes": 13282,
+    "replayAfterSequence": 65
   },
   "scheduler": {
     "authority": "PostgreSQL",
@@ -109,10 +109,10 @@
     "workerPool": "shared"
   },
   "totalUsage": {
-    "requests": 14,
-    "inputTokens": 3761,
-    "outputTokens": 2084,
-    "cacheReadTokens": 30464,
+    "requests": 11,
+    "inputTokens": 1495,
+    "outputTokens": 1661,
+    "cacheReadTokens": 71808,
     "cacheWriteTokens": 0
   },
   "cleanup": {

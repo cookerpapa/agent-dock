@@ -1,11 +1,5 @@
 import fastifyWebsocket from "@fastify/websocket";
-import {
-  parseControlToSupervisorMessage,
-  parseSupervisorToControlMessage,
-  type EventPublishBatchMessage,
-  type EventPublishMessage,
-  type EventRejectedMessage,
-} from "@pi-cloud/protocol";
+import { parseSupervisorToControlMessage } from "@pi-cloud/protocol";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { TLSSocket } from "node:tls";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -51,7 +45,6 @@ export type SupervisorWebSocketGatewayOptions = {
   authorizer: SupervisorUpgradeAuthorizer;
   path?: string;
   idGenerator?: () => string;
-  clock?: () => Date;
   maxPayloadBytes?: number;
   maxPendingFrames?: number;
   maxBufferedSendBytes?: number;
@@ -91,14 +84,6 @@ function nonEmpty(value: string, name: string): string {
 function requireUuid(value: string, name: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
     throw new TypeError(`${name} must be a UUID`);
-  }
-  return value;
-}
-
-function validDate(clock: () => Date): Date {
-  const value = clock();
-  if (!(value instanceof Date) || Number.isNaN(value.valueOf())) {
-    throw new TypeError("supervisor WebSocket gateway clock must return a valid Date");
   }
   return value;
 }
@@ -201,7 +186,6 @@ export class SupervisorWebSocketGateway {
   readonly #authorizer: SupervisorUpgradeAuthorizer;
   readonly #path: string;
   readonly #idGenerator: () => string;
-  readonly #clock: () => Date;
   readonly #maxPayloadBytes: number;
   readonly #maxPendingFrames: number;
   readonly #maxBufferedSendBytes: number;
@@ -218,7 +202,6 @@ export class SupervisorWebSocketGateway {
     this.#authorizer = options.authorizer;
     this.#path = validPath(options.path ?? SUPERVISOR_WEBSOCKET_PATH);
     this.#idGenerator = options.idGenerator ?? (() => globalThis.crypto.randomUUID());
-    this.#clock = options.clock ?? (() => new Date());
     this.#maxPayloadBytes = positiveInteger(
       options.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
       "maxPayloadBytes",
@@ -422,12 +405,6 @@ export class SupervisorWebSocketGateway {
           connectionId: acknowledgement.payload.connectionId,
           capabilities: [...message.payload.capabilities],
           send: (outbound) => this.#send(context, outbound),
-          assertEventAuthority: (event) =>
-            this.#manager.assertEventAuthority(
-              acknowledgement.payload.connectionId,
-              context.authority,
-              event,
-            ),
         };
         context.controlConnection = connection;
         this.#controlChannelRouter.attach(connection);
@@ -454,49 +431,9 @@ export class SupervisorWebSocketGateway {
         context.registeredConnectionId,
         context.authority,
       );
-      try {
-        if (await this.#controlChannelRouter.receive(context.controlConnection, message)) return;
-      } catch (error: unknown) {
-        if (
-          (message.type === "event.publish" || message.type === "event.publish_batch") &&
-          error instanceof SupervisorConnectionManagerError &&
-          error.code === "stale_fence" &&
-          !error.retryable
-        ) {
-          await this.#send(context, this.#eventRejection(message));
-          return;
-        }
-        throw error;
-      }
+      if (await this.#controlChannelRouter.receive(context.controlConnection, message)) return;
     }
     this.#close(context, 1_003, "message type unsupported");
-  }
-
-  #eventRejection(message: EventPublishMessage | EventPublishBatchMessage): EventRejectedMessage {
-    const event =
-      message.type === "event.publish" ? message.payload.event : message.payload.events.at(-1)!;
-    const parsed = parseControlToSupervisorMessage({
-      protocolVersion: 1,
-      messageId: requireUuid(this.#idGenerator(), "generated event rejection messageId"),
-      sentAt: validDate(this.#clock).toISOString(),
-      type: "event.rejected",
-      payload: {
-        sessionId: event.sessionId,
-        leaseId: message.payload.leaseId,
-        fencingToken: message.payload.fencingToken,
-        rejectedSeq: event.seq,
-        code: "stale_fence",
-        retryable: false,
-      },
-    });
-    if (parsed.type !== "event.rejected") {
-      throw new SupervisorConnectionManagerError(
-        "event_rejection_invariant",
-        "Constructed event rejection was invalid",
-        false,
-      );
-    }
-    return parsed;
   }
 
   async #send(context: SocketContext, value: unknown): Promise<void> {

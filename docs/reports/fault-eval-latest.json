@@ -1,79 +1,73 @@
 {
   "format": "pi-cloud.fault-eval-report.v1",
-  "generatedAt": "2026-08-19T03:53:38.955Z",
+  "generatedAt": "2026-08-21T13:12:45.519Z",
   "methodology": "deterministic_targeted_fault_injection",
   "liveChaosExperiment": false,
-  "caseCount": 11,
-  "successful": 11,
+  "caseCount": 10,
+  "successful": 10,
   "successRate": 1,
-  "p50DurationMs": 7168,
-  "p95DurationMs": 15120,
+  "p50DurationMs": 4197,
+  "p95DurationMs": 6316,
   "results": [
     {
       "id": "duplicate-command",
       "success": true,
       "invariant": "At-least-once delivery does not execute the same command twice.",
-      "durationMs": 9524
+      "durationMs": 2223
     },
     {
       "id": "stale-fencing-token",
       "success": true,
       "invariant": "A released or recovered old worker cannot reacquire an obsolete fence.",
-      "durationMs": 6409
+      "durationMs": 2239
     },
     {
-      "id": "event-ack-loss",
+      "id": "message-stream-independence",
       "success": true,
-      "invariant": "A lost acknowledgement causes safe replay rather than event loss.",
-      "durationMs": 4881
+      "invariant": "A streaming-path failure cannot roll back a complete Pi message already committed to SessionStorage.",
+      "durationMs": 4132
     },
     {
-      "id": "worker-process-sigkill-after-wal-sync",
+      "id": "interrupted-visible-prefix",
       "success": true,
-      "invariant": "A real Worker process death after local WAL sync cannot erase the durable delivery suffix.",
-      "durationMs": 3786
+      "invariant": "A browser-visible failed prefix remains model-visible after Worker replacement.",
+      "durationMs": 4197
+    },
+    {
+      "id": "terminal-stream-independence",
+      "success": true,
+      "invariant": "A successful Run terminal commit does not read or wait for Kafka/Valkey projection state.",
+      "durationMs": 6108
     },
     {
       "id": "control-plane-process-sigkill",
       "success": true,
       "invariant": "A Control Plane process replacement does not revoke a healthy fenced Agent Loop.",
-      "durationMs": 4936
-    },
-    {
-      "id": "control-plane-recovery-ack-loss",
-      "success": true,
-      "invariant": "A Control Plane death with an in-flight recovery ACK cannot wedge Worker reconnection or discard the WAL suffix.",
-      "durationMs": 7168
-    },
-    {
-      "id": "corrupt-event-spool",
-      "success": true,
-      "invariant": "Corrupt durable events are rejected rather than silently skipped.",
-      "durationMs": 5859
+      "durationMs": 2432
     },
     {
       "id": "checkpoint-corruption-and-cas",
       "success": true,
       "invariant": "Checkpoint integrity and compare-and-swap fencing survive cold recovery.",
-      "durationMs": 13483
+      "durationMs": 5958
     },
     {
       "id": "cancel-complete-race",
       "success": true,
       "invariant": "Exactly one terminal Run outcome wins a cancel/complete race.",
-      "durationMs": 15120
+      "durationMs": 6163
     },
     {
       "id": "stale-dispatch-claim",
       "success": true,
       "invariant": "A superseded dispatcher cannot start external work.",
-      "durationMs": 12876
+      "durationMs": 6316
     },
     {
       "id": "orphan-runtime-cleanup",
       "success": true,
       "invariant": "Expired ownership is reconciled only after the orphan runtime is terminated.",
-      "durationMs": 13293
+      "durationMs": 6105
     }
   ]
 }

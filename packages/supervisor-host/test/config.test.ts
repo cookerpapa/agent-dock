@@ -46,7 +46,6 @@ async function validEnvironment(root: string): Promise<Record<string, string>> {
     PI_CLOUD_TOOL_BROKER_URLS: "http://tool-broker:4300",
     PI_CLOUD_TRUSTED_WORKSPACE_DIRECTORY: "/workspace",
     PI_CLOUD_BOOT_STATE_DIRECTORY: "/var/lib/pi-cloud/boot",
-    PI_CLOUD_EVENT_SPOOL_DIRECTORY: "/var/lib/pi-cloud/spool",
     PI_CLOUD_MODEL_GATEWAY_ADVERTISED_URL: "http://127.0.0.1:4200",
   };
 }
@@ -92,7 +91,6 @@ describe("Supervisor host production configuration", () => {
       PI_CLOUD_TOOL_BROKER_URLS: "http://tool-broker:4300",
       PI_CLOUD_TRUSTED_WORKSPACE_DIRECTORY: "/workspace",
       PI_CLOUD_BOOT_STATE_DIRECTORY: "/var/lib/pi-cloud/boot",
-      PI_CLOUD_EVENT_SPOOL_DIRECTORY: "/var/lib/pi-cloud/spool",
       PI_CLOUD_SUPERVISOR_CAPACITY: "1",
       PI_CLOUD_MODEL_GATEWAY_ADVERTISED_URL: "http://127.0.0.1:4200",
     });
@@ -189,7 +187,6 @@ describe("Supervisor host production configuration", () => {
         PI_CLOUD_TOOL_BROKER_URLS: "http://tool-broker:4300",
         PI_CLOUD_TRUSTED_WORKSPACE_DIRECTORY: "/workspace",
         PI_CLOUD_BOOT_STATE_DIRECTORY: "/var/lib/pi-cloud/boot",
-        PI_CLOUD_EVENT_SPOOL_DIRECTORY: "/var/lib/pi-cloud/spool",
         PI_CLOUD_MODEL_GATEWAY_ADVERTISED_URL: "http://127.0.0.1:4200",
       }),
     ).resolves.toMatchObject({ enrollmentToken: `enroll-${"e".repeat(48)}` });
@@ -227,7 +224,6 @@ describe("Supervisor host production configuration", () => {
         ),
         PI_CLOUD_SANDBOX_IMAGE: "pi-cloud/sandbox:0.1.0",
         PI_CLOUD_BOOT_STATE_DIRECTORY: "/var/lib/pi-cloud/boot",
-        PI_CLOUD_EVENT_SPOOL_DIRECTORY: "/var/lib/pi-cloud/spool",
       }),
     ).rejects.toThrow("not a private bounded regular file");
   });

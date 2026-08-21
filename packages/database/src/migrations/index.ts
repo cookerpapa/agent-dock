@@ -73,6 +73,7 @@ import * as subagentSupervisorChannel from "./071_subagent_supervisor_channel.ts
 import * as sharedPiSessionEntries from "./072_shared_pi_session_entries.ts";
 import * as recursiveSubagentTrees from "./073_recursive_subagent_trees.ts";
 import * as userOwnedDevelopmentEnvironments from "./074_user_owned_development_environments.ts";
+import * as canonicalPiConversationEntries from "./075_canonical_pi_conversation_entries.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -151,6 +152,7 @@ export const migrationProvider: MigrationProvider = {
       "072_shared_pi_session_entries": sharedPiSessionEntries,
       "073_recursive_subagent_trees": recursiveSubagentTrees,
       "074_user_owned_development_environments": userOwnedDevelopmentEnvironments,
+      "075_canonical_pi_conversation_entries": canonicalPiConversationEntries,
     };
   },
 };
@@ -427,3 +429,7 @@ export {
   down as downUserOwnedDevelopmentEnvironments,
   up as upUserOwnedDevelopmentEnvironments,
 } from "./074_user_owned_development_environments.ts";
+export {
+  down as downCanonicalPiConversationEntries,
+  up as upCanonicalPiConversationEntries,
+} from "./075_canonical_pi_conversation_entries.ts";

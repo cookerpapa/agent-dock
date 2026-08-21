@@ -4,7 +4,6 @@ import {
   type CommandAckMessage,
   type CancelTurnCommandMessage,
   type EventAckMessage,
-  type EventPublishBatchMessage,
   type EventPublishMessage,
   type ExecuteTurnCommandMessage,
   type SteerTurnCommandMessage,
@@ -13,23 +12,11 @@ import {
 } from "@pi-cloud/protocol";
 import { isDeepStrictEqual } from "node:util";
 import {
-  EventSpoolError,
-  InMemoryEventSpool,
-  type SupervisorEventSpool,
-  type SupervisorEventSpoolFactory,
-  type SupervisorEventSpoolRecovery,
-  type SupervisorEventSpoolRecoveryResult,
-} from "./in-memory-event-spool.ts";
-import {
   PiTurnCancelledError,
   type PiCancellationSignal,
   type PiEventPublisher,
   type PiTurnResult,
 } from "./pi-turn-runtime.ts";
-import {
-  BatchedEventPublisher,
-  type SupervisorEventPublication,
-} from "./batched-event-publisher.ts";
 
 export interface SupervisorTurnRunner {
   run(
@@ -85,8 +72,6 @@ export type RevokedSupervisorAssignments = {
 
 export type AgentRunSupervisorOptions = {
   runner: SupervisorTurnRunner;
-  eventSpoolFactory?: SupervisorEventSpoolFactory;
-  eventSpoolRecovery?: SupervisorEventSpoolRecovery;
   maxConcurrentSessions?: number;
   clock?: () => Date;
   idGenerator?: () => string;
@@ -97,12 +82,13 @@ type AssignmentState =
 
 type Assignment = {
   command: ExecuteTurnCommandMessage;
-  publishEvent: (message: SupervisorEventPublication) => Promise<EventAckMessage> | EventAckMessage;
-  eventSpool?: SupervisorEventSpool;
+  publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage;
   abortController: AbortController;
   state: AssignmentState;
   runPromise?: Promise<PiTurnResult>;
   leaseValidUntil?: string;
+  lastProducedSeq: number;
+  lastAcknowledgedSeq: number;
 };
 
 type CancellationState = "prepared" | "running" | "completed" | "failed";
@@ -165,8 +151,6 @@ function sameSteerIdentity(left: SteerTurnCommandMessage, right: SteerTurnComman
 
 export class AgentRunSupervisor {
   readonly #runner: SupervisorTurnRunner;
-  readonly #eventSpoolFactory: SupervisorEventSpoolFactory;
-  readonly #eventSpoolRecovery: SupervisorEventSpoolRecovery | undefined;
   readonly #maxConcurrentSessions: number;
   readonly #clock: () => Date;
   readonly #idGenerator: () => string;
@@ -175,13 +159,8 @@ export class AgentRunSupervisor {
   readonly #cancellationsByCommand = new Map<string, Cancellation>();
   readonly #steersByCommand = new Map<string, Steer>();
   readonly #highestFenceBySession = new Map<string, number>();
-  #recoveringPendingEvents = false;
-
   constructor(options: AgentRunSupervisorOptions) {
     this.#runner = options.runner;
-    this.#eventSpoolFactory =
-      options.eventSpoolFactory ?? ((spoolOptions) => new InMemoryEventSpool(spoolOptions));
-    this.#eventSpoolRecovery = options.eventSpoolRecovery;
     this.#maxConcurrentSessions = positiveInteger(
       options.maxConcurrentSessions ?? 1,
       "maxConcurrentSessions",
@@ -246,15 +225,14 @@ export class AgentRunSupervisor {
     const sessions = [...this.#currentBySession.values()]
       .filter((assignment) => assignment.state === "running" || assignment.state === "cancelling")
       .map((assignment) => {
-        const baseline = assignment.command.payload.nextEventSeq - 1;
         return {
           sessionId: assignment.command.payload.sessionId,
           turnId: assignment.command.payload.turnId,
           state: assignment.state === "cancelling" ? ("cancelling" as const) : ("running" as const),
           leaseId: assignment.command.payload.leaseId,
           fencingToken: assignment.command.payload.fencingToken,
-          lastProducedSeq: assignment.eventSpool?.highestProducedSeq ?? baseline,
-          lastAcknowledgedSeq: assignment.eventSpool?.acknowledgedThroughSeq ?? baseline,
+          lastProducedSeq: assignment.lastProducedSeq,
+          lastAcknowledgedSeq: assignment.lastAcknowledgedSeq,
         };
       });
     const message = parseSupervisorToControlMessage({
@@ -326,36 +304,9 @@ export class AgentRunSupervisor {
     return { renewedAssignments, revokedAssignments, revokedSessionIds };
   }
 
-  async recoverPendingEvents(
-    publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage,
-  ): Promise<SupervisorEventSpoolRecoveryResult> {
-    if (this.#currentBySession.size !== 0 || this.#recoveringPendingEvents) {
-      throw new AgentRunSupervisorError(
-        "invalid_state",
-        "Pending event recovery requires an idle supervisor",
-      );
-    }
-    this.#recoveringPendingEvents = true;
-    try {
-      return (
-        (await this.#eventSpoolRecovery?.redeliverPending(publishEvent)) ?? {
-          scannedSpools: 0,
-          replayedSpools: 0,
-          replayedEvents: 0,
-          quarantinedSpools: 0,
-          quarantinedEvents: 0,
-        }
-      );
-    } finally {
-      this.#recoveringPendingEvents = false;
-    }
-  }
-
   prepare(
     value: unknown,
-    publishEvent: (
-      message: EventPublishMessage | EventPublishBatchMessage,
-    ) => Promise<EventAckMessage> | EventAckMessage,
+    publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage> | EventAckMessage,
   ): PreparedTurnExecution {
     const parsed = parseControlToSupervisorMessage(value);
     if (parsed.type !== "command.turn.execute") {
@@ -365,14 +316,6 @@ export class AgentRunSupervisor {
       );
     }
     const command = parsed;
-    if (this.#recoveringPendingEvents) {
-      return this.#rejected(
-        command,
-        "invalid_state",
-        "Supervisor is recovering pending event delivery",
-        true,
-      );
-    }
     const duplicate = this.#byCommand.get(command.payload.commandId);
     if (duplicate !== undefined) {
       if (!sameIdentity(duplicate.command, command)) {
@@ -403,6 +346,8 @@ export class AgentRunSupervisor {
       publishEvent,
       abortController: new AbortController(),
       state: "prepared",
+      lastProducedSeq: command.payload.nextEventSeq - 1,
+      lastAcknowledgedSeq: command.payload.nextEventSeq - 1,
     };
     this.#highestFenceBySession.set(command.payload.sessionId, command.payload.fencingToken);
     this.#currentBySession.set(command.payload.sessionId, assignment);
@@ -645,26 +590,7 @@ export class AgentRunSupervisor {
       );
     }
     assignment.state = "running";
-    let execution: Promise<PiTurnResult>;
-    try {
-      const eventSpool = this.#eventSpoolFactory({
-        sessionId: assignment.command.payload.sessionId,
-        leaseId: assignment.command.payload.leaseId,
-        fencingToken: assignment.command.payload.fencingToken,
-        acknowledgedThroughSeq: assignment.command.payload.nextEventSeq - 1,
-      });
-      execution =
-        eventSpool instanceof Promise
-          ? eventSpool.then(
-              (resolved) => this.#runWithEventSpool(assignment, resolved),
-              (error: unknown) => {
-                throw this.#spoolOpenError(error);
-              },
-            )
-          : this.#runWithEventSpool(assignment, eventSpool);
-    } catch (error: unknown) {
-      execution = Promise.reject(this.#spoolOpenError(error));
-    }
+    const execution = this.#runWithDurableEventBoundary(assignment);
     assignment.runPromise = execution
       .then(
         (result) => {
@@ -694,82 +620,55 @@ export class AgentRunSupervisor {
     return assignment.runPromise;
   }
 
-  #runWithEventSpool(
-    assignment: Assignment,
-    eventSpool: SupervisorEventSpool,
-  ): Promise<PiTurnResult> {
-    assignment.eventSpool = eventSpool;
-    const publisher = new BatchedEventPublisher({
-      publish: assignment.publishEvent,
-      spool: eventSpool,
-      clock: this.#clock,
-      idGenerator: this.#idGenerator,
-    });
-    return (async () => {
-      try {
-        return await this.#runner.run(
-          assignment.command,
-          async (message) => {
-            const latest = this.#currentBySession.get(assignment.command.payload.sessionId);
-            if (
-              latest !== assignment ||
-              (assignment.state !== "running" && assignment.state !== "cancelling")
-            ) {
-              throw new AgentRunSupervisorError(
-                "stale_fence",
-                "Stale assignment cannot publish events",
-              );
-            }
-            if (
-              message.payload.leaseId !== assignment.command.payload.leaseId ||
-              message.payload.fencingToken !== assignment.command.payload.fencingToken ||
-              message.payload.commandId !== assignment.command.payload.commandId
-            ) {
-              throw new AgentRunSupervisorError(
-                "invalid_event",
-                "Runner event identity does not match its assignment",
-              );
-            }
-            try {
-              await eventSpool.append(message);
-            } catch (error: unknown) {
-              if (!(error instanceof EventSpoolError)) throw error;
-              throw new AgentRunSupervisorError(
-                "invalid_event_delivery",
-                "Supervisor event delivery contract was violated",
-              );
-            }
-            try {
-              await publisher.enqueue(message);
-            } catch {
-              throw new AgentRunSupervisorError(
-                "invalid_event_delivery",
-                "Supervisor event publisher rejected a queued event",
-              );
-            }
-          },
-          assignment.abortController.signal,
-        );
-      } finally {
+  #runWithDurableEventBoundary(assignment: Assignment): Promise<PiTurnResult> {
+    return this.#runner.run(
+      assignment.command,
+      async (message) => {
+        const latest = this.#currentBySession.get(assignment.command.payload.sessionId);
+        if (
+          latest !== assignment ||
+          (assignment.state !== "running" && assignment.state !== "cancelling")
+        ) {
+          throw new AgentRunSupervisorError(
+            "stale_fence",
+            "Stale assignment cannot publish events",
+          );
+        }
+        if (
+          message.payload.leaseId !== assignment.command.payload.leaseId ||
+          message.payload.fencingToken !== assignment.command.payload.fencingToken ||
+          message.payload.commandId !== assignment.command.payload.commandId ||
+          message.payload.event.seq !== assignment.lastProducedSeq + 1
+        ) {
+          throw new AgentRunSupervisorError(
+            "invalid_event",
+            "Runner event identity or sequence does not match its assignment",
+          );
+        }
+        assignment.lastProducedSeq = message.payload.event.seq;
+        let acknowledgement: EventAckMessage;
         try {
-          await publisher.drainToDurableBarrier();
+          acknowledgement = await assignment.publishEvent(message);
         } catch {
           throw new AgentRunSupervisorError(
             "invalid_event_delivery",
-            "Supervisor batched event delivery could not be drained",
+            "Supervisor event publisher did not cross the remote durability boundary",
           );
         }
-      }
-    })();
-  }
-
-  #spoolOpenError(error: unknown): Error {
-    if (error instanceof AgentRunSupervisorError) return error;
-    return new AgentRunSupervisorError(
-      "event_spool_unavailable",
-      error instanceof EventSpoolError
-        ? "Supervisor durable event spool could not be opened"
-        : "Supervisor event spool initialization failed",
+        if (
+          acknowledgement.payload.sessionId !== message.payload.event.sessionId ||
+          acknowledgement.payload.leaseId !== message.payload.leaseId ||
+          acknowledgement.payload.fencingToken !== message.payload.fencingToken ||
+          acknowledgement.payload.acknowledgedThroughSeq !== message.payload.event.seq
+        ) {
+          throw new AgentRunSupervisorError(
+            "invalid_event_delivery",
+            "Supervisor event acknowledgement did not match the published event",
+          );
+        }
+        assignment.lastAcknowledgedSeq = acknowledgement.payload.acknowledgedThroughSeq;
+      },
+      assignment.abortController.signal,
     );
   }
 

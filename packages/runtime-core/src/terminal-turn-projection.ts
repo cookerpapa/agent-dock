@@ -12,10 +12,7 @@ import type { LiveSessionEventStore } from "./live-session-event-store.ts";
 
 export const TERMINAL_TURN_PROJECTION_PATH = "/internal/v1/terminal-turn-projections";
 
-type TerminalEventBody = Extract<
-  PiCloudEventBody,
-  { type: "turn.completed" | "turn.failed" | "turn.cancelled" }
->;
+type TerminalEventBody = Extract<PiCloudEventBody, { type: "turn.failed" | "turn.cancelled" }>;
 
 export type PrepareTerminalTurnProjectionInput = Readonly<{
   tenantId: string;
@@ -32,7 +29,6 @@ export type PreparedTerminalTurnProjection = Readonly<{
   schemaVersion: 1;
   previousSequence: number;
   terminalEvent: PiCloudEvent;
-  sourceEventCount: number;
   transcript: ConversationTurnTranscriptResource;
 }>;
 
@@ -76,12 +72,8 @@ export function parsePrepareTerminalTurnProjectionInput(
     occurredAt: candidate.occurredAt,
     ...(candidate.body as Record<string, unknown>),
   });
-  if (
-    event.type !== "turn.completed" &&
-    event.type !== "turn.failed" &&
-    event.type !== "turn.cancelled"
-  ) {
-    throw new TypeError("Terminal Turn projection body is not terminal");
+  if (event.type !== "turn.failed" && event.type !== "turn.cancelled") {
+    throw new TypeError("Interrupted Turn projection body is invalid");
   }
   return {
     tenantId: candidate.tenantId as string,
@@ -116,20 +108,9 @@ export function parsePreparedTerminalTurnProjection(
     candidate.previousSequence,
     "Prepared terminal previous sequence",
   );
-  const sourceEventCount = nonNegativeSafeInteger(
-    candidate.sourceEventCount,
-    "Prepared terminal source event count",
-  );
-  if (sourceEventCount < 1) {
-    throw new TypeError("Prepared terminal Turn projection has no source events");
-  }
   const terminalEvent = parsePiCloudEvent(candidate.terminalEvent);
-  if (
-    terminalEvent.type !== "turn.completed" &&
-    terminalEvent.type !== "turn.failed" &&
-    terminalEvent.type !== "turn.cancelled"
-  ) {
-    throw new TypeError("Prepared terminal Turn projection has a non-terminal event");
+  if (terminalEvent.type !== "turn.failed" && terminalEvent.type !== "turn.cancelled") {
+    throw new TypeError("Prepared interrupted Turn projection has an invalid event");
   }
   const transcript = parseConversationTurnTranscriptResource(candidate.transcript);
   if (
@@ -139,7 +120,7 @@ export function parsePreparedTerminalTurnProjection(
   ) {
     throw new TypeError("Prepared terminal Turn projection sequence is inconsistent");
   }
-  return { schemaVersion: 1, previousSequence, terminalEvent, sourceEventCount, transcript };
+  return { schemaVersion: 1, previousSequence, terminalEvent, transcript };
 }
 
 export class LiveTerminalTurnProjectionSource implements TerminalTurnProjectionSource {
@@ -239,7 +220,6 @@ export class LiveTerminalTurnProjectionSource implements TerminalTurnProjectionS
       schemaVersion: 1,
       previousSequence,
       terminalEvent,
-      sourceEventCount: events.length + 1,
       transcript,
     };
   }

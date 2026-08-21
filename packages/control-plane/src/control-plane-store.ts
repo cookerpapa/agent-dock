@@ -38,14 +38,13 @@ import {
   canonicalWorkspaceSourceSetJson,
   parseEnvironmentRecipe,
   parseEnvironmentValidationReport,
-  parseConversationTurnTranscriptResource,
   parseCloudToolCapabilitySnapshot,
   parseWorkspaceSourceSetSnapshot,
   TURN_CANCELLATION_OUTBOX_TOPIC,
   TURN_COMMAND_OUTBOX_TOPIC,
 } from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
-import { materializeConversationTurnProjections } from "@pi-cloud/runtime-core/conversation-turn-projection";
+import { readCanonicalPiTurnTranscripts } from "@pi-cloud/runtime-core/canonical-pi-conversation";
 import type { PiCloudMetrics } from "@pi-cloud/observability";
 import { loadDelegatedSessionTreeSummaries } from "./delegated-session-projection.ts";
 
@@ -1481,60 +1480,10 @@ export class ControlPlaneStore {
           row.turnState === "cancelled",
       )
       .map((row) => row.turnId);
-    let projectionRows =
-      terminalTurnIds.length === 0
-        ? []
-        : await this.#database
-            .selectFrom("conversation_turn_projections")
-            .select(["session_id", "turn_id", "through_seq", "transcript"])
-            .where("tenant_id", "=", this.#tenantId)
-            .where("turn_id", "in", terminalTurnIds)
-            .execute();
-    const projectedTurnIds = new Set(projectionRows.map((row) => row.turn_id));
-    const missingTerminalTurnIds = terminalTurnIds.filter(
-      (turnId) => !projectedTurnIds.has(turnId),
-    );
-    if (missingTerminalTurnIds.length > 0) {
-      const sessionByTurnId = new Map(includedRows.map((row) => [row.turnId, row.originSessionId]));
-      for (const originSessionId of new Set(
-        missingTerminalTurnIds.map((turnId) => sessionByTurnId.get(turnId)!),
-      )) {
-        await this.#database.transaction().execute(async (transaction) => {
-          await materializeConversationTurnProjections(transaction, {
-            tenantId: this.#tenantId,
-            sessionId: originSessionId,
-            turnIds: missingTerminalTurnIds.filter(
-              (turnId) => sessionByTurnId.get(turnId) === originSessionId,
-            ),
-          });
-        });
-      }
-      projectionRows = await this.#database
-        .selectFrom("conversation_turn_projections")
-        .select(["session_id", "turn_id", "through_seq", "transcript"])
-        .where("tenant_id", "=", this.#tenantId)
-        .where("turn_id", "in", terminalTurnIds)
-        .execute();
-      const repairedTurnIds = new Set(projectionRows.map((row) => row.turn_id));
-      if (missingTerminalTurnIds.some((turnId) => !repairedTurnIds.has(turnId))) {
-        throw new ControlPlaneStoreError(
-          "control_plane_misconfigured",
-          "A terminal conversation projection is missing",
-        );
-      }
-    }
-    const transcriptByTurnId = new Map(
-      projectionRows.map((row) => {
-        const transcript = parseConversationTurnTranscriptResource(row.transcript);
-        if (transcript.throughSequence !== positiveSafeInteger(row.through_seq, "Projection seq")) {
-          throw new ControlPlaneStoreError(
-            "control_plane_misconfigured",
-            "Conversation transcript projection watermark is inconsistent",
-          );
-        }
-        return [row.turn_id, transcript] as const;
-      }),
-    );
+    const transcriptByTurnId = await readCanonicalPiTurnTranscripts(this.#database, {
+      tenantId: this.#tenantId,
+      turnIds: terminalTurnIds,
+    });
     const turns = includedRows.map((row) => {
       if (row.inputKind !== "prompt" || row.prompt === null || row.mailboxPosition === null) {
         throw new ControlPlaneStoreError(
@@ -1557,30 +1506,31 @@ export class ControlPlaneStore {
       };
     });
 
-    const currentProjectionRows = projectionRows.filter((row) => row.session_id === sessionId);
+    const currentTerminalTranscripts = includedRows
+      .filter((row) => row.originSessionId === sessionId)
+      .flatMap((row) => {
+        const transcript = transcriptByTurnId.get(row.turnId);
+        return transcript === undefined ? [] : [transcript];
+      });
     let replayAfterSequence = Math.max(
       nonNegativeSafeInteger(
         conversation.lastPersistedSequence,
         "Conversation durable event cursor",
       ),
-      ...currentProjectionRows.map((row) =>
-        positiveSafeInteger(row.through_seq, "Conversation projection sequence"),
-      ),
+      ...currentTerminalTranscripts.map((transcript) => transcript.throughSequence),
     );
     const unprojectedTurnIds = includedRows
       .filter((row) => row.originSessionId === sessionId)
       .filter((row) => !transcriptByTurnId.has(row.turnId))
       .map((row) => row.turnId);
     if (unprojectedTurnIds.length > 0) {
-      // An active Turn is not yet represented by a canonical transcript. Start
+      // An active Turn is not yet represented by canonical Pi entries. Start
       // SSE after the latest settled projection so the browser replays its
       // already-durable Kafka/Valkey events. This deliberately does not query
       // PostgreSQL's local-only raw-event adapter.
       replayAfterSequence = Math.max(
         nonNegativeSafeInteger(conversation.replayFloorSequence, "Conversation replay floor"),
-        ...currentProjectionRows.map((row) =>
-          positiveSafeInteger(row.through_seq, "Conversation projection sequence"),
-        ),
+        ...currentTerminalTranscripts.map((transcript) => transcript.throughSequence),
       );
     }
 

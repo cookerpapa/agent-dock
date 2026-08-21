@@ -1,11 +1,7 @@
 import type { Database } from "@pi-cloud/database";
 import { parsePiCloudEvent, type PiCloudEvent, type PiCloudEventBody } from "@pi-cloud/protocol";
 import { sql, type Transaction } from "kysely";
-import {
-  materializeConversationTurnProjection,
-  projectConversationTurnTranscript,
-  storeConversationTurnProjection,
-} from "./conversation-turn-projection.ts";
+import { appendInterruptedAssistantPrefix } from "./canonical-pi-conversation.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import type { PreparedTerminalTurnProjection } from "./terminal-turn-projection.ts";
 
@@ -27,7 +23,6 @@ export type CommitTerminalTurnEventInput = {
   eventId: string;
   notificationPublisher?: SessionEventNotificationPublisher;
   preparedProjection?: PreparedTerminalTurnProjection;
-  terminalOnlyProjection?: boolean;
   liveStreamRetentionMs?: number;
 };
 
@@ -74,7 +69,7 @@ export async function commitTerminalTurnEvent(
   if (
     sequence < 1 ||
     persisted !== sequence - 1 ||
-    projected !== persisted ||
+    projected > persisted ||
     acknowledged !== persisted
   ) {
     throw new Error("Terminal event stream is not contiguous");
@@ -97,114 +92,82 @@ export async function commitTerminalTurnEvent(
   ) {
     throw new Error("Constructed terminal Turn event is not terminal");
   }
-  if (input.preparedProjection !== undefined && input.terminalOnlyProjection === true) {
-    throw new Error("Terminal projection modes are mutually exclusive");
+  const prepared = input.preparedProjection;
+  if (prepared !== undefined) {
+    if (event.type === "turn.completed") {
+      throw new Error("A successful Turn cannot depend on a live-stream projection");
+    }
+    const preparedEvent = prepared.terminalEvent;
+    if (
+      prepared.previousSequence !== persisted ||
+      preparedEvent.eventId !== event.eventId ||
+      preparedEvent.sessionId !== event.sessionId ||
+      preparedEvent.turnId !== event.turnId ||
+      preparedEvent.agentId !== event.agentId ||
+      preparedEvent.seq !== event.seq ||
+      preparedEvent.occurredAt !== event.occurredAt ||
+      preparedEvent.type !== event.type ||
+      JSON.stringify(preparedEvent.payload) !== JSON.stringify(event.payload)
+    ) {
+      throw new Error("Prepared interrupted Turn projection no longer matches durable state");
+    }
   }
-  if (input.terminalOnlyProjection === true && event.type === "turn.completed") {
-    throw new Error("A completed Turn requires its full canonical projection");
-  }
-  if (input.preparedProjection === undefined && input.terminalOnlyProjection !== true) {
-    // Local development and deterministic store tests keep the compact
-    // PostgreSQL-only adapter. Production always supplies the externally
-    // prepared canonical projection and never stores streaming deltas here.
-    await transaction
-      .insertInto("session_events")
-      .values({
-        event_id: event.eventId,
-        tenant_id: input.tenantId,
-        session_id: input.sessionId,
-        turn_id: input.turnId,
-        agent_node_id: null,
-        agent_id: input.agentId,
-        command_id: input.commandId,
-        seq: sequence,
-        schema_version: event.schemaVersion,
-        type: event.type,
-        payload: event.payload,
-        lease_id: input.leaseId,
-        fencing_token: input.fencingToken,
-        occurred_at: input.now,
-        persisted_at: input.now,
-      })
-      .executeTakeFirstOrThrow();
-    await materializeConversationTurnProjection(transaction, {
+  await transaction
+    .insertInto("session_terminal_events")
+    .values({
+      event_id: event.eventId,
+      tenant_id: input.tenantId,
+      session_id: input.sessionId,
+      turn_id: input.turnId,
+      agent_id: input.agentId,
+      command_id: input.commandId,
+      seq: sequence,
+      schema_version: event.schemaVersion,
+      type: event.type,
+      payload: event.payload,
+      occurred_at: input.now,
+      persisted_at: input.now,
+    })
+    .executeTakeFirstOrThrow();
+  if (prepared !== undefined) {
+    await appendInterruptedAssistantPrefix(transaction, {
       tenantId: input.tenantId,
       sessionId: input.sessionId,
       turnId: input.turnId,
-      projectedAt: input.now,
+      transcript: prepared.transcript,
+      now: input.now,
+      entryId: globalThis.crypto.randomUUID(),
     });
-  } else {
-    const prepared = input.preparedProjection;
-    if (prepared !== undefined) {
-      const preparedEvent = prepared.terminalEvent;
-      if (
-        prepared.previousSequence !== persisted ||
-        preparedEvent.eventId !== event.eventId ||
-        preparedEvent.sessionId !== event.sessionId ||
-        preparedEvent.turnId !== event.turnId ||
-        preparedEvent.agentId !== event.agentId ||
-        preparedEvent.seq !== event.seq ||
-        preparedEvent.occurredAt !== event.occurredAt ||
-        preparedEvent.type !== event.type ||
-        JSON.stringify(preparedEvent.payload) !== JSON.stringify(event.payload)
-      ) {
-        throw new Error("Prepared terminal Turn projection no longer matches durable state");
-      }
-    }
-    await transaction
-      .insertInto("session_terminal_events")
-      .values({
-        event_id: event.eventId,
-        tenant_id: input.tenantId,
-        session_id: input.sessionId,
-        turn_id: input.turnId,
-        agent_id: input.agentId,
-        command_id: input.commandId,
-        seq: sequence,
-        schema_version: event.schemaVersion,
-        type: event.type,
-        payload: event.payload,
-        occurred_at: input.now,
-        persisted_at: input.now,
-      })
-      .executeTakeFirstOrThrow();
-    await storeConversationTurnProjection(transaction, {
-      tenantId: input.tenantId,
-      sessionId: input.sessionId,
-      turnId: input.turnId,
-      transcript: prepared?.transcript ?? projectConversationTurnTranscript([event]),
-      sourceEventCount: prepared?.sourceEventCount ?? 1,
-      projectedAt: input.now,
-    });
-    const retentionMs = input.liveStreamRetentionMs ?? 60 * 60 * 1_000;
-    if (!Number.isSafeInteger(retentionMs) || retentionMs < 60_000) {
-      throw new TypeError("Live event retention must be at least one minute");
-    }
-    await transaction
-      .insertInto("session_live_stream_compactions")
-      .values({
-        id: globalThis.crypto.randomUUID(),
-        tenant_id: input.tenantId,
-        session_id: input.sessionId,
-        turn_id: input.turnId,
-        through_seq: sequence,
-        state: "pending",
-        attempts: 0,
-        available_at: new Date(input.now.valueOf() + retentionMs),
-        claim_owner: null,
-        claim_until: null,
-        last_error: null,
-        created_at: input.now,
-        completed_at: null,
-      })
-      .executeTakeFirstOrThrow();
   }
+  const retentionMs = input.liveStreamRetentionMs ?? 60 * 60 * 1_000;
+  if (!Number.isSafeInteger(retentionMs) || retentionMs < 60_000) {
+    throw new TypeError("Live event retention must be at least one minute");
+  }
+  await transaction
+    .insertInto("session_live_stream_compactions")
+    .values({
+      id: globalThis.crypto.randomUUID(),
+      tenant_id: input.tenantId,
+      session_id: input.sessionId,
+      turn_id: input.turnId,
+      through_seq: sequence,
+      state: "pending",
+      attempts: 0,
+      available_at: new Date(input.now.valueOf() + retentionMs),
+      claim_owner: null,
+      claim_until: null,
+      last_error: null,
+      created_at: input.now,
+      completed_at: null,
+    })
+    .executeTakeFirstOrThrow();
 
+  const projectedAfter = projected === persisted ? sequence : projected;
   const cursorUpdate = await transaction
     .updateTable("session_event_cursors")
     .set({
       last_persisted_seq: sequence,
-      last_projected_seq: sequence,
+      last_projected_seq: projectedAfter,
       acknowledged_through_seq: sequence,
       updated_at: input.now,
     })
@@ -229,11 +192,13 @@ export async function commitTerminalTurnEvent(
     .executeTakeFirst();
   expectOne(sessionUpdate.numUpdatedRows, "Advancing the terminal session sequence");
 
-  await input.notificationPublisher?.publish(transaction, {
-    schemaVersion: 1,
-    tenantId: input.tenantId,
-    sessionId: input.sessionId,
-    throughSequence: sequence,
-  });
+  if (projectedAfter > projected) {
+    await input.notificationPublisher?.publish(transaction, {
+      schemaVersion: 1,
+      tenantId: input.tenantId,
+      sessionId: input.sessionId,
+      throughSequence: projectedAfter,
+    });
+  }
   return event;
 }

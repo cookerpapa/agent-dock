@@ -575,24 +575,6 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
   it("forks a settled Pi branch transactionally and renders inherited history", async () => {
     const userEntryId = "10000000-0000-4000-8000-000000000001";
     const assistantEntryId = "10000000-0000-4000-8000-000000000002";
-    const transcript = {
-      schemaVersion: 1,
-      throughSequence: 1,
-      items: [
-        {
-          kind: "text",
-          text: "alpha final answer",
-          firstSequence: 1,
-          lastSequence: 1,
-        },
-      ],
-      startedSequence: 1,
-      terminalSequence: 1,
-      stopReason: "stop",
-      failure: null,
-      cancellation: null,
-      workspacePatch: null,
-    };
     await database.transaction().execute(async (transaction) => {
       await transaction
         .updateTable("commands")
@@ -619,15 +601,19 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
         .where("id", "=", alphaSession.sessionId)
         .executeTakeFirstOrThrow();
       await transaction
-        .insertInto("conversation_turn_projections")
+        .insertInto("session_terminal_events")
         .values({
+          event_id: globalThis.crypto.randomUUID(),
           tenant_id: alpha.tenantId,
           session_id: alphaSession.sessionId,
           turn_id: alphaTurn.turnId,
+          agent_id: "root",
+          command_id: alphaTurn.commandId,
+          seq: 1,
           schema_version: 1,
-          through_seq: 1,
-          source_event_count: 1,
-          transcript,
+          type: "turn.completed",
+          payload: { stopReason: "stop" },
+          occurred_at: NOW,
         })
         .executeTakeFirstOrThrow();
       await transaction
@@ -653,6 +639,7 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
             type: "message",
             custom_type: null,
             timestamp_ms: NOW.valueOf(),
+            turn_id: alphaTurn.turnId,
             payload: {
               id: userEntryId,
               type: "message",
@@ -668,6 +655,7 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
             type: "message",
             custom_type: null,
             timestamp_ms: NOW.valueOf() + 1,
+            turn_id: alphaTurn.turnId,
             payload: {
               id: assistantEntryId,
               type: "message",
@@ -709,14 +697,14 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
             session_id: alphaSession.sessionId,
             seq: 1,
             kind: "entry",
-            payload: { entry: { id: userEntryId, type: "message" } },
+            payload: { entryId: userEntryId },
           },
           {
             tenant_id: alpha.tenantId,
             session_id: alphaSession.sessionId,
             seq: 2,
             kind: "entry",
-            payload: { entry: { id: assistantEntryId, type: "message" } },
+            payload: { entryId: assistantEntryId },
           },
         ])
         .execute();
@@ -958,7 +946,7 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
             session_id: alphaSession.sessionId,
             seq: entry.seq,
             kind: "entry",
-            payload: { entry: { id: entry.id, type: "message" } },
+            payload: { entryId: entry.id },
           })),
         )
         .execute();

@@ -247,7 +247,7 @@ services:
         --appendonly,
         "yes",
         --appendfsync,
-        always,
+        everysec,
         --maxmemory,
         "${PI_CLOUD_LIVE_EVENT_MAXMEMORY:-320mb}",
         --maxmemory-policy,
@@ -610,7 +610,6 @@ services:
       PI_CLOUD_SUBAGENT_MAXIMUM_CONCURRENT: ${PI_CLOUD_SUBAGENT_MAXIMUM_CONCURRENT:-3}
       PI_CLOUD_TRUSTED_WORKSPACE_DIRECTORY: /workspace
       PI_CLOUD_BOOT_STATE_DIRECTORY: /var/lib/pi-cloud/boot-volume/state
-      PI_CLOUD_EVENT_SPOOL_DIRECTORY: /var/lib/pi-cloud/spool-volume/state
       PI_CLOUD_CHECKPOINT_READ_CACHE_TTL_MS: "600000"
       PI_CLOUD_CHECKPOINT_READ_CACHE_MAXIMUM_ENTRIES: "512"
       PI_CLOUD_CHECKPOINT_READ_CACHE_MAXIMUM_BYTES: "33554432"
@@ -635,7 +634,6 @@ services:
       PI_CLOUD_OTLP_TRACES_ENDPOINT: ${PI_CLOUD_OTLP_TRACES_ENDPOINT:-}
     volumes:
       - supervisor-boot:/var/lib/pi-cloud/boot-volume
-      - supervisor-event-wal:/var/lib/pi-cloud/spool-volume
       - type: bind
         source: ${PI_CLOUD_RUNTIME_DIRECTORY:?run npm run production:init first}/secrets/database-url
         target: /run/pi-cloud-secrets/database-url
@@ -709,7 +707,6 @@ services:
       PI_CLOUD_SUPERVISOR_MANAGEMENT_ADVERTISED_URL: http://${PI_CLOUD_SUPERVISOR_ID_PREFIX:-pi-cloud-worker-}2:4100
     volumes:
       - supervisor-1-boot:/var/lib/pi-cloud/boot-volume
-      - supervisor-1-event-wal:/var/lib/pi-cloud/spool-volume
     networks:
       management:
         aliases: !override
@@ -729,15 +726,13 @@ services:
     command:
       - |
         owner=${PI_CLOUD_APPLICATION_UID:-1000}:${PI_CLOUD_APPLICATION_GID:-1000}
-        chown -R "$${owner}" /var/lib/pi-cloud/boot-volume /var/lib/pi-cloud/spool-volume /var/lib/pi-cloud/boot-volume-1 /var/lib/pi-cloud/spool-volume-1
-        find /var/lib/pi-cloud/boot-volume /var/lib/pi-cloud/spool-volume /var/lib/pi-cloud/boot-volume-1 /var/lib/pi-cloud/spool-volume-1 -type d -exec chmod 0700 {} +
-        find /var/lib/pi-cloud/boot-volume /var/lib/pi-cloud/spool-volume /var/lib/pi-cloud/boot-volume-1 /var/lib/pi-cloud/spool-volume-1 -type f -exec chmod 0600 {} +
+        chown -R "$${owner}" /var/lib/pi-cloud/boot-volume /var/lib/pi-cloud/boot-volume-1
+        find /var/lib/pi-cloud/boot-volume /var/lib/pi-cloud/boot-volume-1 -type d -exec chmod 0700 {} +
+        find /var/lib/pi-cloud/boot-volume /var/lib/pi-cloud/boot-volume-1 -type f -exec chmod 0600 {} +
     user: "0:0"
     volumes:
       - supervisor-boot:/var/lib/pi-cloud/boot-volume
-      - supervisor-event-wal:/var/lib/pi-cloud/spool-volume
       - supervisor-1-boot:/var/lib/pi-cloud/boot-volume-1
-      - supervisor-1-event-wal:/var/lib/pi-cloud/spool-volume-1
     network_mode: none
     read_only: true
     init: true
@@ -1222,9 +1217,7 @@ volumes:
   kafka-data: {}
   valkey-data: {}
   supervisor-boot: {}
-  supervisor-event-wal: {}
   supervisor-1-boot: {}
-  supervisor-1-event-wal: {}
   prometheus-data: {}
   grafana-data: {}
   jaeger-data: {}

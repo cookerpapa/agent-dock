@@ -7,11 +7,9 @@ import {
   type CommandCommitMessage,
   type CommandReleaseMessage,
   type CommandResultMessage,
-  type EventPublishMessage,
   type SteerTurnCommandMessage,
   type SupervisorToControlMessage,
 } from "@pi-cloud/protocol";
-import type { DurableEventIngestor } from "@pi-cloud/runtime-core/durable-event-store";
 
 export { TWO_PHASE_COMMAND_CAPABILITY };
 
@@ -28,7 +26,6 @@ export type WorkerControlConnection = {
   connectionId: string;
   capabilities: readonly string[];
   send(message: unknown): Promise<void>;
-  assertEventAuthority(message: EventPublishMessage): Promise<void>;
 };
 
 export interface RemoteWorkerControlTransport {
@@ -48,11 +45,6 @@ export interface RemoteWorkerControlTransport {
 }
 
 export type WorkerControlChannelRouterOptions = {
-  eventIngestor: DurableEventIngestor;
-  onEvent?: (
-    message: EventPublishMessage,
-    connection: WorkerControlConnection,
-  ) => Promise<void> | void;
   commandAckTimeoutMs?: number;
   commandResultTimeoutMs?: number;
   maxPendingCommands?: number;
@@ -148,19 +140,13 @@ function transportError(
 }
 
 export class WorkerControlChannelRouter implements RemoteWorkerControlTransport {
-  readonly #eventIngestor: DurableEventIngestor;
-  readonly #onEvent:
-    | ((message: EventPublishMessage, connection: WorkerControlConnection) => Promise<void> | void)
-    | undefined;
   readonly #commandAckTimeoutMs: number;
   readonly #commandResultTimeoutMs: number;
   readonly #maxPendingCommands: number;
   readonly #bySandbox = new Map<string, ConnectionState>();
   readonly #byConnection = new WeakMap<WorkerControlConnection, ConnectionState>();
 
-  constructor(options: WorkerControlChannelRouterOptions) {
-    this.#eventIngestor = options.eventIngestor;
-    this.#onEvent = options.onEvent;
+  constructor(options: WorkerControlChannelRouterOptions = {}) {
     this.#commandAckTimeoutMs = positiveInteger(
       options.commandAckTimeoutMs ?? DEFAULT_COMMAND_ACK_TIMEOUT_MS,
       "commandAckTimeoutMs",
@@ -243,49 +229,6 @@ export class WorkerControlChannelRouter implements RemoteWorkerControlTransport 
     }
     if (message.type === "command.result") {
       this.#acceptResult(state, message);
-      return true;
-    }
-    if (message.type === "event.publish" || message.type === "event.publish_batch") {
-      const publications: EventPublishMessage[] =
-        message.type === "event.publish"
-          ? [message]
-          : message.payload.events.map((event) => ({
-              protocolVersion: 1,
-              messageId: message.messageId,
-              sentAt: message.sentAt,
-              type: "event.publish",
-              payload: {
-                leaseId: message.payload.leaseId,
-                fencingToken: message.payload.fencingToken,
-                ...(message.payload.commandId === undefined
-                  ? {}
-                  : { commandId: message.payload.commandId }),
-                event,
-              },
-            }));
-      const lastEvent =
-        message.type === "event.publish" ? message.payload.event : message.payload.events.at(-1)!;
-      await connection.assertEventAuthority(publications[0]!);
-      const acknowledgement = await this.#eventIngestor.ingest(message);
-      const parsed = parseControlToSupervisorMessage(acknowledgement);
-      if (
-        parsed.type !== "event.ack" ||
-        parsed.payload.sessionId !== lastEvent.sessionId ||
-        parsed.payload.leaseId !== message.payload.leaseId ||
-        parsed.payload.fencingToken !== message.payload.fencingToken ||
-        parsed.payload.acknowledgedThroughSeq !== lastEvent.seq
-      ) {
-        throw transportError(
-          "event_ack_mismatch",
-          "Durable event acknowledgement did not match its publication",
-          false,
-          true,
-        );
-      }
-      for (const publication of publications) {
-        await this.#onEvent?.(publication, connection);
-      }
-      await connection.send(parsed);
       return true;
     }
     return false;

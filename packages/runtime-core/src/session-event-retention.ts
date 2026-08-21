@@ -81,17 +81,26 @@ export class SessionLiveStreamCompactionService {
     const claimUntil = new Date(now.valueOf() + this.#claimMs);
     const job = await this.#database.transaction().execute(async (transaction) => {
       const row = await transaction
-        .selectFrom("session_live_stream_compactions")
-        .select(["id", "tenant_id", "session_id", "turn_id", "through_seq", "attempts"])
-        .where("state", "=", "pending")
-        .where("available_at", "<=", now)
+        .selectFrom("session_live_stream_compactions as compaction")
+        .innerJoin("session_event_cursors as cursor", "cursor.session_id", "compaction.session_id")
+        .select([
+          "compaction.id as id",
+          "compaction.tenant_id as tenant_id",
+          "compaction.session_id as session_id",
+          "compaction.turn_id as turn_id",
+          "compaction.through_seq as through_seq",
+          "compaction.attempts as attempts",
+        ])
+        .where("compaction.state", "=", "pending")
+        .where("compaction.available_at", "<=", now)
+        .whereRef("cursor.last_projected_seq", ">=", "compaction.through_seq")
         .where((expression) =>
           expression.or([
-            expression("claim_until", "is", null),
-            expression("claim_until", "<=", now),
+            expression("compaction.claim_until", "is", null),
+            expression("compaction.claim_until", "<=", now),
           ]),
         )
-        .orderBy("available_at", "asc")
+        .orderBy("compaction.available_at", "asc")
         .forUpdate()
         .skipLocked()
         .limit(1)
@@ -141,7 +150,7 @@ export class SessionLiveStreamCompactionService {
             true,
           );
         }
-        // The canonical transcript and terminal event have already committed.
+        // Canonical Pi entries and the terminal event have already committed.
         // Advancing this floor makes old Last-Event-ID values fail explicitly
         // instead of returning a misleading partial Turn.
         await transaction

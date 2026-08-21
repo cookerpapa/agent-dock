@@ -66,8 +66,8 @@ Control Plane ── transaction ──► PostgreSQL Run queue
                                CubeSandbox KVM
                                persistent /workspace
 
-Worker events ── durable batch ──► Kafka ── projection ──► Valkey ──► SSE
-terminal message/Run state ───────────────────────────────► PostgreSQL
+Worker events ── Host group commit ──► Kafka ── projection ──► Valkey ──► SSE
+complete Pi messages / Run terminal state ───────────────────────────► PostgreSQL
 ```
 
 The Control Plane authenticates and commits an idempotent command before
@@ -155,7 +155,12 @@ authorization boundary.
 - arbitrary shell operations are not blindly replayed after an ambiguous loss;
 - interruption and Sandbox reset facts survive Pi compaction and Worker changes;
 - browser-visible live bytes cross Kafka durability before SSE exposure;
-- terminal conversation state is compacted into canonical PostgreSQL messages.
+- Pi `message_end` writes complete SessionStorage state independently of the
+  Kafka/Valkey delivery path;
+- failed/cancelled visible prefixes remain in Pi context as bounded
+  interruption facts;
+- Pi Session entries are the only stored complete-message bodies; the ordered
+  Pi log contains references rather than duplicate message JSON.
 
 ## Security boundary
 

@@ -1,34 +1,3 @@
-export {
-  BatchedEventPublisher,
-  type BatchedEventPublisherOptions,
-  type DurableEventBarrierReceipt,
-  type SupervisorEventPublication,
-} from "./batched-event-publisher.ts";
-
-export {
-  EventDeliveryRejectedError,
-  EventSpoolError,
-  InMemoryEventSpool,
-  type EventSpoolAckResult,
-  type EventSpoolAppendResult,
-  type InMemoryEventSpoolOptions,
-  type SupervisorEventSpool,
-  type SupervisorEventSpoolFactory,
-  type SupervisorEventSpoolRecovery,
-  type SupervisorEventSpoolRecoveryResult,
-} from "./in-memory-event-spool.ts";
-
-export {
-  DEFAULT_WAL_EVENT_SPOOL_BYTES,
-  MAX_WAL_EVENT_SPOOL_FILES,
-  MAX_WAL_EVENT_SPOOL_MESSAGE_BYTES,
-  WalEventSpool,
-  WalEventSpoolStore,
-  type WalEventSpoolOpenOptions,
-  type WalEventSpoolReplayResult,
-  type WalEventSpoolStoreOptions,
-} from "./wal-event-spool.ts";
-
 export { PiAgentEventAdapter, type PiAgentEventAdapterOutcome } from "./pi-agent-event-adapter.ts";
 
 export {

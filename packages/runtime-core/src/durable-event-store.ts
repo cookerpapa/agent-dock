@@ -736,6 +736,7 @@ export class DurableEventStore
       .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
       .select([
         "cursor.last_projected_seq as highWaterMark",
+        "cursor.last_persisted_seq as persistedThrough",
         "cursor.replay_floor_seq as replayFloor",
       ])
       .where("session_row.tenant_id", "=", tenantId)
@@ -745,6 +746,7 @@ export class DurableEventStore
       throw new DurableEventStoreError("not_found", "Session event stream was not found");
     }
     const highWaterMark = safeInteger(cursor.highWaterMark, "session event high-water mark");
+    const persistedThrough = safeInteger(cursor.persistedThrough, "persisted event sequence");
     const replayFloor = safeInteger(cursor.replayFloor, "session event replay floor");
     if (afterSequence < replayFloor) {
       throw new DurableEventStoreError(
@@ -752,20 +754,17 @@ export class DurableEventStore
         "Last-Event-ID is older than the retained hot event window; reload the conversation",
       );
     }
-    if (afterSequence > highWaterMark) {
+    if (afterSequence > persistedThrough) {
       throw new DurableEventStoreError(
         "cursor_ahead",
-        "Last-Event-ID is ahead of the durable session event stream",
+        "Last-Event-ID is ahead of the accepted session event stream",
       );
     }
     return {
-      events: await this.readReplayPage(
-        tenantId,
-        sessionId,
-        afterSequence,
-        highWaterMark,
-        pageSize,
-      ),
+      events:
+        afterSequence >= highWaterMark
+          ? []
+          : await this.readReplayPage(tenantId, sessionId, afterSequence, highWaterMark, pageSize),
       highWaterMark,
     };
   }
@@ -852,17 +851,56 @@ export class DurableEventStore
       }
       return page;
     }
-    const rows = await this.#database
-      .selectFrom("session_events")
-      .select(eventSelect())
-      .where("tenant_id", "=", tenantId)
-      .where("session_id", "=", sessionId)
-      .where("seq", ">", String(afterSequence))
-      .where("seq", "<=", String(throughSequence))
-      .orderBy("seq", "asc")
-      .limit(pageSize)
-      .execute();
-    return rows.map((row) => eventFromRow(row));
+    const [rows, terminalRows] = await Promise.all([
+      this.#database
+        .selectFrom("session_events")
+        .select(eventSelect())
+        .where("tenant_id", "=", tenantId)
+        .where("session_id", "=", sessionId)
+        .where("seq", ">", String(afterSequence))
+        .where("seq", "<=", String(throughSequence))
+        .orderBy("seq", "asc")
+        .limit(pageSize)
+        .execute(),
+      this.#database
+        .selectFrom("session_terminal_events")
+        .select([
+          "event_id",
+          "session_id",
+          "turn_id",
+          "agent_id",
+          "seq",
+          "schema_version",
+          "type",
+          "payload",
+          "occurred_at",
+        ])
+        .where("tenant_id", "=", tenantId)
+        .where("session_id", "=", sessionId)
+        .where("seq", ">", String(afterSequence))
+        .where("seq", "<=", String(throughSequence))
+        .orderBy("seq", "asc")
+        .limit(pageSize)
+        .execute(),
+    ]);
+    return [
+      ...rows.map((row) => eventFromRow(row)),
+      ...terminalRows.map((row) =>
+        parsePiCloudEvent({
+          schemaVersion: row.schema_version,
+          eventId: row.event_id,
+          sessionId: row.session_id,
+          turnId: row.turn_id,
+          agentId: row.agent_id,
+          seq: safeInteger(row.seq, "terminal event sequence"),
+          occurredAt: isoTimestamp(row.occurred_at),
+          type: row.type,
+          payload: row.payload,
+        }),
+      ),
+    ]
+      .sort((left, right) => left.seq - right.seq)
+      .slice(0, pageSize);
   }
 
   async project(envelope: WorkerEventLogEnvelope, position: WorkerEventLogPosition): Promise<void> {
@@ -1038,6 +1076,16 @@ export class DurableEventStore
           await this.#recordContextCompaction(transaction, envelope.tenantId, message);
         }
         throughSequence = newMessages.at(-1)!.payload.event.seq;
+        const terminal = await transaction
+          .selectFrom("session_terminal_events")
+          .select("seq")
+          .where("tenant_id", "=", envelope.tenantId)
+          .where("session_id", "=", sessionId)
+          .where("seq", "=", String(throughSequence + 1))
+          .executeTakeFirst();
+        if (terminal !== undefined) {
+          throughSequence = safeInteger(terminal.seq, "terminal projection sequence");
+        }
         const update = await transaction
           .updateTable("session_event_cursors")
           .set({ last_projected_seq: throughSequence, updated_at: now })

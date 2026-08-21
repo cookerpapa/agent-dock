@@ -1,6 +1,5 @@
 import type {
   EventAckMessage,
-  EventPublishBatchMessage,
   EventPublishMessage,
   CancelTurnCommandMessage,
   ExecuteTurnCommandMessage,
@@ -10,12 +9,8 @@ import {
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE,
   DEFAULT_PROJECT_ENVIRONMENT_RECIPE_SHA256,
 } from "@pi-cloud/protocol";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  WalEventSpoolStore,
   AgentRunSupervisor,
   PiTurnCancelledError,
   type SupervisorTurnRunner,
@@ -265,7 +260,7 @@ describe("AgentRunSupervisor", () => {
     await expect(prepared.run()).rejects.toThrow("does not match its assignment");
   });
 
-  it("retains the spooled event when the control-plane ACK is invalid", async () => {
+  it("rejects an acknowledgement that does not match the published event", async () => {
     const publishingRunner: SupervisorTurnRunner = {
       async run(value, publishEvent) {
         await publishEvent({
@@ -300,101 +295,16 @@ describe("AgentRunSupervisor", () => {
       sentAt: "2026-07-18T08:00:00.000Z",
       type: "event.ack",
       payload: {
-        sessionId:
-          message.type === "event.publish"
-            ? message.payload.event.sessionId
-            : message.payload.events.at(-1)!.sessionId,
+        sessionId: message.payload.event.sessionId,
         leaseId: message.payload.leaseId,
         fencingToken: message.payload.fencingToken,
         acknowledgedThroughSeq: 2,
       },
     }));
 
-    await expect(prepared.run()).rejects.toThrow("batched event delivery could not be drained");
-  });
-
-  it("redelivers a locally durable event through a fresh spool store after the ACK path crashes", async () => {
-    const root = await mkdtemp(resolve(tmpdir(), "pi-cloud-agent-runner-spool-"));
-    try {
-      const durableStore = new WalEventSpoolStore({ rootDirectory: root });
-      const event: EventPublishMessage = {
-        protocolVersion: 1,
-        messageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        sentAt: "2026-07-18T08:00:00.000Z",
-        type: "event.publish",
-        payload: {
-          leaseId: IDS.lease,
-          fencingToken: 1,
-          commandId: IDS.command,
-          event: {
-            schemaVersion: 1,
-            eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-            sessionId: "session-1",
-            turnId: "turn-1",
-            agentId: "root",
-            seq: 1,
-            occurredAt: "2026-07-18T08:00:00.000Z",
-            type: "turn.started",
-            payload: { inputKind: "prompt" },
-          },
-        },
-      };
-      const publishingRunner: SupervisorTurnRunner = {
-        async run(_value, publishEvent) {
-          await publishEvent(event);
-          return { stopReason: "stop" };
-        },
-      };
-      let committed: EventPublishMessage | EventPublishBatchMessage | undefined;
-      const supervisor = new AgentRunSupervisor({
-        runner: publishingRunner,
-        eventSpoolFactory: (options) => durableStore.open(options),
-      });
-      const prepared = supervisor.prepare(command(), (message) => {
-        committed = message;
-        throw new Error("simulated connection loss after durable commit");
-      });
-
-      await expect(prepared.run()).rejects.toThrow("batched event delivery could not be drained");
-      expect(committed).toMatchObject({
-        type: "event.publish_batch",
-        payload: { events: [event.payload.event] },
-      });
-
-      const replayed: EventPublishMessage[] = [];
-      const restartedStore = new WalEventSpoolStore({ rootDirectory: root });
-      const restartedSupervisor = new AgentRunSupervisor({
-        runner: new RecordingRunner(),
-        eventSpoolFactory: (options) => restartedStore.open(options),
-        eventSpoolRecovery: restartedStore,
-      });
-      await expect(
-        restartedSupervisor.recoverPendingEvents((message) => {
-          replayed.push(message);
-          return {
-            protocolVersion: 1,
-            messageId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-            sentAt: "2026-07-18T08:00:01.000Z",
-            type: "event.ack",
-            payload: {
-              sessionId: message.payload.event.sessionId,
-              leaseId: message.payload.leaseId,
-              fencingToken: message.payload.fencingToken,
-              acknowledgedThroughSeq: message.payload.event.seq,
-            },
-          };
-        }),
-      ).resolves.toEqual({
-        scannedSpools: 1,
-        replayedSpools: 1,
-        replayedEvents: 1,
-        quarantinedSpools: 0,
-        quarantinedEvents: 0,
-      });
-      expect(replayed).toEqual([event]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+    await expect(prepared.run()).rejects.toThrow(
+      "acknowledgement did not match the published event",
+    );
   });
 
   it("prepares cancellation without side effects, then aborts the exact running assignment", async () => {

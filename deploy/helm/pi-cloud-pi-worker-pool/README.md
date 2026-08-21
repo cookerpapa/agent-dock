@@ -6,7 +6,8 @@ latency hint; PostgreSQL remains the queue and Run/Attempt authority.
 
 Workers never execute model-generated code. `read/write/edit/bash` cross the
 Tool Broker and execute in CubeSandbox. A Worker PVC contains only its boot
-ledger and unacknowledged event spool; it is not the conversation authority.
+ledger; Pi SessionStorage in PostgreSQL is the conversation authority and Kafka
+is the browser-visible live-event durability boundary.
 
 ## Required Secret
 

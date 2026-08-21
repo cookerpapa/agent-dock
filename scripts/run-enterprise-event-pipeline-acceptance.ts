@@ -12,10 +12,7 @@ import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
 import { PostgresEventProjectionBarrier } from "@pi-cloud/runtime-core/event-projection-barrier";
 import { HttpDurableEventIngestor } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
 import { commitTerminalTurnEvent } from "@pi-cloud/runtime-core/terminal-turn-event";
-import {
-  HttpTerminalTurnProjectionSource,
-  LiveTerminalTurnProjectionSource,
-} from "@pi-cloud/runtime-core/terminal-turn-projection";
+import { LiveTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 import { ValkeyLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
 import {
   KafkaWorkerEventLog,
@@ -358,6 +355,35 @@ try {
   if (lagged.last_persisted_seq !== "4" || lagged.last_projected_seq !== "2") {
     throw new Error("Kafka durability/projection lag boundary was not observable");
   }
+  const terminalEventId = randomUUID();
+  const terminalNow = new Date();
+  const terminalBody = {
+    type: "turn.completed" as const,
+    payload: { stopReason: "acceptance_complete" },
+  };
+  const terminal = await database.transaction().execute((transaction) =>
+    commitTerminalTurnEvent(transaction, {
+      tenantId: ids.tenant,
+      sessionId: session.sessionId,
+      turnId: accepted.turnId,
+      commandId: accepted.commandId,
+      agentId: "root",
+      leaseId,
+      fencingToken: 1,
+      body: terminalBody,
+      now: terminalNow,
+      eventId: terminalEventId,
+    }),
+  );
+  if (terminal.seq !== 5) throw new Error("Terminal event sequence was not contiguous");
+  const terminalLag = await database
+    .selectFrom("session_event_cursors")
+    .select(["last_persisted_seq", "last_projected_seq"])
+    .where("session_id", "=", session.sessionId)
+    .executeTakeFirstOrThrow();
+  if (terminalLag.last_persisted_seq !== "5" || terminalLag.last_projected_seq !== "2") {
+    throw new Error("Terminal settlement unexpectedly waited for the live projector");
+  }
   projector = new KafkaWorkerEventProjector({
     brokers,
     clientId: "pi-cloud-enterprise-projector-restarted",
@@ -371,41 +397,6 @@ try {
     ids.tenant,
     session.sessionId,
   );
-  const terminalEventId = randomUUID();
-  const terminalNow = new Date();
-  const terminalBody = {
-    type: "turn.completed" as const,
-    payload: { stopReason: "acceptance_complete" },
-  };
-  const preparedProjection = await new HttpTerminalTurnProjectionSource({
-    baseUrl: address,
-    serviceToken,
-  }).prepare({
-    tenantId: ids.tenant,
-    sessionId: session.sessionId,
-    turnId: accepted.turnId,
-    commandId: accepted.commandId,
-    agentId: "root",
-    body: terminalBody,
-    eventId: terminalEventId,
-    occurredAt: terminalNow.toISOString(),
-  });
-  const terminal = await database.transaction().execute((transaction) =>
-    commitTerminalTurnEvent(transaction, {
-      tenantId: ids.tenant,
-      sessionId: session.sessionId,
-      turnId: accepted.turnId,
-      commandId: accepted.commandId,
-      agentId: "root",
-      leaseId,
-      fencingToken: 1,
-      body: terminalBody,
-      now: terminalNow,
-      eventId: terminalEventId,
-      preparedProjection,
-    }),
-  );
-  if (terminal.seq !== 5) throw new Error("Terminal projection barrier was not contiguous");
   const replay = await store.openReplayWindow(ids.tenant, session.sessionId, 0);
   const projectionOffsets = await database
     .selectFrom("worker_event_projection_offsets")
@@ -427,7 +418,7 @@ try {
       kafkaFirstDurability: true,
       duplicateProjectionIsIdempotent: true,
       projectorRestartRecovered: true,
-      terminalBarrierContiguous: true,
+      terminalCommitIndependent: true,
       postgresPayloadOutboxAbsent: true,
       postgresRawStreamingRows: Number(rawPostgresCount.count),
       projectedEventCount: replay.events.length,
@@ -456,7 +447,7 @@ try {
       `- Invalid service token rejected: yes\n` +
       `- Duplicate projection rows: 0\n` +
       `- Projector stop/restart recovery: passed\n` +
-      `- Terminal projection barrier: passed\n` +
+      `- Terminal commit independent of live projection: passed\n` +
       `- PostgreSQL payload Outbox present: no\n\n` +
       `- PostgreSQL raw streaming rows: ${String(report.assertions.postgresRawStreamingRows)}\n\n` +
       `This is a single-node functional acceptance, not a multi-broker HA, failover, or capacity claim.\n`,

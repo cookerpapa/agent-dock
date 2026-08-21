@@ -96,12 +96,12 @@ async function startGateway(options: {
         inventory: emptyInventory(),
         clock,
       }),
-    clock,
     heartbeatIntervalMs: 250,
     heartbeatTimeoutMs: 2_000,
     leaseDurationMs: 3_000,
     retirementClaimDurationMs: 5_000,
     retirementRetryDelayMs: 100,
+    clock,
   });
   const gateway = new SupervisorWebSocketGateway({
     manager,
@@ -109,7 +109,6 @@ async function startGateway(options: {
       token: options.token ?? TOKEN,
       identity: options.identity,
     }),
-    clock,
     maxPayloadBytes: options.maxPayloadBytes ?? 1024 * 1024,
     maxPendingFrames: 4,
     registrationTimeoutMs: options.registrationTimeoutMs ?? 500,

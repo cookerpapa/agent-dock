@@ -17,18 +17,26 @@
       "invariant": "A released or recovered old worker cannot reacquire an obsolete fence."
     },
     {
-      "id": "event-ack-loss",
-      "workspace": "@pi-cloud/sandbox-supervisor",
-      "file": "test/wal-event-spool.test.ts",
-      "test": "replays the exact event after a simulated commit-with-lost-ACK window",
-      "invariant": "A lost acknowledgement causes safe replay rather than event loss."
+      "id": "message-stream-independence",
+      "workspace": "@pi-cloud/pi-session-postgres",
+      "file": "test/cloud-agent-runtime.test.ts",
+      "test": "commits a complete assistant message independently of public event delivery",
+      "invariant": "A streaming-path failure cannot roll back a complete Pi message already committed to SessionStorage."
     },
     {
-      "id": "worker-process-sigkill-after-wal-sync",
-      "workspace": "@pi-cloud/sandbox-supervisor",
-      "file": "test/worker-process-fault.test.ts",
-      "test": "recovers a browser-visible event whose producing Worker was SIGKILLed after WAL fsync",
-      "invariant": "A real Worker process death after local WAL sync cannot erase the durable delivery suffix."
+      "id": "interrupted-visible-prefix",
+      "workspace": "@pi-cloud/pi-session-postgres",
+      "file": "test/cloud-agent-runtime.test.ts",
+      "test": "keeps a failed visible assistant prefix in the next native Pi context",
+      "invariant": "A browser-visible failed prefix remains model-visible after Worker replacement."
+    },
+    {
+      "id": "terminal-stream-independence",
+      "workspace": "@pi-cloud/control-plane",
+      "file": "test/control-plane-api.test.ts",
+      "test": "settles a completed backend execution without consulting the live projection",
+      "setupTests": ["creates a project and workspace atomically, then creates a cold session"],
+      "invariant": "A successful Run terminal commit does not read or wait for Kafka/Valkey projection state."
     },
     {
       "id": "control-plane-process-sigkill",
@@ -36,20 +44,6 @@
       "file": "test/control-channel-process-fault.test.ts",
       "test": "keeps an active assignment alive while the Control Plane process is killed and replaced",
       "invariant": "A Control Plane process replacement does not revoke a healthy fenced Agent Loop."
-    },
-    {
-      "id": "control-plane-recovery-ack-loss",
-      "workspace": "@pi-cloud/sandbox-supervisor",
-      "file": "test/control-channel-process-fault.test.ts",
-      "test": "reconnects when an event recovery ACK is lost with the Control Plane process",
-      "invariant": "A Control Plane death with an in-flight recovery ACK cannot wedge Worker reconnection or discard the WAL suffix."
-    },
-    {
-      "id": "corrupt-event-spool",
-      "workspace": "@pi-cloud/sandbox-supervisor",
-      "file": "test/wal-event-spool.test.ts",
-      "test": "fails closed when a persisted event is corrupted or a sequence file is missing",
-      "invariant": "Corrupt durable events are rejected rather than silently skipped."
     },
     {
       "id": "checkpoint-corruption-and-cas",

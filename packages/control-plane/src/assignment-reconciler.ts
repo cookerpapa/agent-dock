@@ -673,7 +673,6 @@ export class AssignmentReconciler {
       },
     } as const;
     let preparedProjection: PreparedTerminalTurnProjection | undefined;
-    let terminalOnlyProjection = false;
     try {
       preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
         tenantId: session.tenant_id,
@@ -686,7 +685,8 @@ export class AssignmentReconciler {
         occurredAt: now.toISOString(),
       });
     } catch {
-      terminalOnlyProjection = this.#terminalTurnProjectionSource !== undefined;
+      // A lost Worker must still settle even when its optional stream prefix
+      // cannot be reconstructed immediately.
     }
     await commitTerminalTurnEvent(transaction, {
       tenantId: session.tenant_id,
@@ -700,7 +700,6 @@ export class AssignmentReconciler {
       now,
       eventId: terminalEventId,
       ...(preparedProjection === undefined ? {} : { preparedProjection }),
-      ...(terminalOnlyProjection ? { terminalOnlyProjection: true } : {}),
       ...(this.#eventNotificationPublisher === undefined
         ? {}
         : { notificationPublisher: this.#eventNotificationPublisher }),

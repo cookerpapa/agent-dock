@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "measuredAt": "2026-08-10T16:41:37.745Z",
+  "measuredAt": "2026-08-21T13:28:37.774Z",
   "kafka": {
-    "brokers": ["127.0.0.1:19092"],
-    "topic": "pi-cloud-enterprise-acceptance-ce0de2bd-6d86-4e3f-b5c3-39b888ceaac3",
-    "groupId": "pi-cloud-enterprise-projector-3a6a97c2-3ed7-4481-b1f9-d1f4df1beb64"
+    "brokers": ["kafka:9092"],
+    "topic": "pi-cloud-enterprise-acceptance-f58fb810-78c0-4497-a0cb-a57417ab2f8e",
+    "groupId": "pi-cloud-enterprise-projector-dca6b334-5ee7-403d-9688-a9d0d7f10836"
   },
   "postgres": {
     "realServer": true
@@ -15,14 +15,14 @@
     "kafkaFirstDurability": true,
     "duplicateProjectionIsIdempotent": true,
     "projectorRestartRecovered": true,
-    "terminalBarrierContiguous": true,
+    "terminalCommitIndependent": true,
     "postgresPayloadOutboxAbsent": true,
     "postgresRawStreamingRows": 0,
     "projectedEventCount": 5,
     "projectionPartitionCount": 1
   },
   "latencyMs": {
-    "coldFirstBatchAckAndProjection": 1247.66
+    "coldFirstBatchAckAndProjection": 645.25
   },
   "scope": [
     "real PostgreSQL server and real single Kafka broker",

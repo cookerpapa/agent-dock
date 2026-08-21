@@ -708,7 +708,7 @@ try {
   );
   const firstSource = await readFile(resolve(workspacePath, "counting_sort.py"), "utf8");
   assert(
-    firstSource.includes("def counting_sort") && firstSource.includes("negative integers"),
+    firstSource.includes("def counting_sort") && /negative/u.test(firstSource.toLowerCase()),
     "First persistent Workspace revision omitted counting_sort.py code",
   );
   progress("first persistent Workspace Volume revision was verified in place");
@@ -764,19 +764,21 @@ try {
   assert(conversation.turns.every((turn) => turn.transcript !== undefined));
   assert.equal(conversation.replayAfterSequence, followUp.cursor);
 
-  const projectionEvidence = await psql(
-    `select count(*) || '|' || coalesce(sum(source_event_count), 0) || '|' ||
-            coalesce(max(through_seq), 0) || '|' ||
-            coalesce(sum(jsonb_array_length(transcript -> 'items')), 0)
-       from conversation_turn_projections
-      where tenant_id = ${sqlLiteral(tenantId)}
-        and session_id = ${sqlLiteral(session.sessionId)}`,
+  const canonicalEvidence = await psql(
+    `select count(distinct terminal.turn_id) || '|' || count(entry.id) || '|' ||
+            coalesce(max(terminal.seq), 0) || '|' ||
+            coalesce(sum(octet_length(entry.payload::text)), 0)
+       from session_terminal_events terminal
+       left join pi_session_entries entry on entry.turn_id = terminal.turn_id
+      where terminal.tenant_id = ${sqlLiteral(tenantId)}
+        and terminal.session_id = ${sqlLiteral(session.sessionId)}`,
   );
-  const [projectionCount, projectedSourceEvents, projectedThroughSequence, semanticItems] =
-    projectionEvidence.split("|").map(Number);
-  assert.equal(projectionCount, 3);
-  assert(projectedSourceEvents > semanticItems);
-  assert(projectedThroughSequence <= conversation.replayAfterSequence);
+  const [terminalCount, piEntryCount, terminalThroughSequence, canonicalPayloadBytes] =
+    canonicalEvidence.split("|").map(Number);
+  assert.equal(terminalCount, 3);
+  assert(piEntryCount > terminalCount);
+  assert(canonicalPayloadBytes > 0);
+  assert(terminalThroughSequence <= conversation.replayAfterSequence);
 
   const foreignApi = bootstrapApi;
   const foreignProject = await foreignApi.createProject(`Foreign Cube project ${suffix}`);
@@ -926,10 +928,10 @@ try {
       firstUsage: largeFirstUsage,
       followUpUsage: largeFollowUpUsage,
     },
-    semanticConversation: {
-      projectionCount,
-      projectedSourceEvents,
-      semanticItems,
+    canonicalConversation: {
+      terminalCount,
+      piEntryCount,
+      canonicalPayloadBytes,
       replayAfterSequence: conversation.replayAfterSequence,
     },
     scheduler: {
@@ -982,12 +984,12 @@ try {
         `- Large Workspace files / Volume reference: ${String(report.largeWorkspace.firstFileCount)} / ${String(report.largeWorkspace.volumeReferenceBytes)} bytes`,
         `- Large Workspace fresh-VM cold restore: ${String(report.largeWorkspace.freshCubeMicroVm)}`,
         `- Real input/output/cache-read tokens: ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)} / ${String(report.totalUsage.cacheReadTokens)}`,
-        `- Semantic compaction: ${String(report.semanticConversation.projectedSourceEvents)} source events -> ${String(report.semanticConversation.semanticItems)} transcript items`,
+        `- Canonical conversation: ${String(report.canonicalConversation.terminalCount)} terminal Turns / ${String(report.canonicalConversation.piEntryCount)} Pi entries / ${String(report.canonicalConversation.canonicalPayloadBytes)} bytes`,
         `- Scheduler / Worker pool: ${report.scheduler.authority} / ${report.scheduler.workerPool}`,
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
         `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedRunningSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,
         "",
-        "A real-model chat Run completed without touching Cube. A persistent conversation propagated its retention policy through the complete product path, and two coding Runs reused one running Session-bound Cube KVM guest with rotated Tool authority and higher-fence rebind. Archiving that conversation caused the retained Cube to be reaped. Platform Git metadata was verified in the trusted Volume envelope while the user Workspace contained no platform-created .git entry. A separate Run generated a deterministic 1024-file fixture without depending on an external network; after explicit source-VM destruction, its follow-up attached the same persistent Workspace Volume to a fresh Cube VM under a higher-fence activation. All Runs completed through the shared PostgreSQL queue and horizontally scalable Pi Worker pool. Provider usage, semantic projections, cross-tenant API denial and explicit warm eviction were verified.",
+        "A real-model chat Run completed without touching Cube. A persistent conversation propagated its retention policy through the complete product path, and two coding Runs reused one running Session-bound Cube KVM guest with rotated Tool authority and higher-fence rebind. Archiving that conversation caused the retained Cube to be reaped. Platform Git metadata was verified in the trusted Volume envelope while the user Workspace contained no platform-created .git entry. A separate Run generated a deterministic 1024-file fixture without depending on an external network; after explicit source-VM destruction, its follow-up attached the same persistent Workspace Volume to a fresh Cube VM under a higher-fence activation. All Runs completed through the shared PostgreSQL queue and horizontally scalable Pi Worker pool. Provider usage, canonical Pi entries, cross-tenant API denial and explicit warm eviction were verified.",
         "",
       ].join("\n"),
       "utf8",

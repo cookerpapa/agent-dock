@@ -13,7 +13,6 @@ import type {
 } from "@pi-cloud/protocol";
 import { parseControlToSupervisorMessage } from "@pi-cloud/protocol";
 import {
-  WalEventSpoolStore,
   AgentRunSupervisor,
   PiTurnCancelledError,
   PiTurnError,
@@ -22,9 +21,6 @@ import {
 } from "@pi-cloud/sandbox-supervisor";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql, TableNode, type Kysely, type KyselyPlugin } from "kysely";
 import {
@@ -49,7 +45,6 @@ import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
 import type { WorkerEventLogBatch } from "@pi-cloud/runtime-core/worker-event-log";
 import { commitTerminalTurnEvent } from "@pi-cloud/runtime-core/terminal-turn-event";
 import { MemoryLiveSessionEventStore } from "@pi-cloud/runtime-core/live-session-event-store";
-import { LiveTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 
 const IDS = {
   tenant: "00000000-0000-4000-8000-000000000001",
@@ -61,8 +56,6 @@ const IDS = {
   phaseSandboxBoot: "60000000-0000-4000-8000-000000000012",
   cancellationSandbox: "50000000-0000-4000-8000-000000000002",
   cancellationSandboxBoot: "60000000-0000-4000-8000-000000000002",
-  spoolSandbox: "50000000-0000-4000-8000-000000000004",
-  spoolSandboxBoot: "60000000-0000-4000-8000-000000000004",
   reconciliationSandbox: "50000000-0000-4000-8000-000000000005",
   reconciliationSandboxBoot: "60000000-0000-4000-8000-000000000005",
   requeueSandbox: "50000000-0000-4000-8000-000000000006",
@@ -2128,30 +2121,6 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(
       await externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 0),
     ).toEqual({ events: [], highWaterMark: 0 });
-    await expect(
-      database.transaction().execute((transaction) =>
-        commitTerminalTurnEvent(transaction, {
-          tenantId: IDS.tenant,
-          sessionId: assigned.assignedSession.sessionId,
-          turnId: assigned.accepted.turnId,
-          commandId: assigned.accepted.commandId,
-          agentId: "root",
-          leaseId: assigned.runtime.leaseId,
-          fencingToken: assigned.runtime.fencingToken,
-          body: {
-            type: "turn.failed",
-            payload: {
-              code: "projection_lag_test",
-              message: "Projection lag must prevent terminal commit",
-              retryable: false,
-            },
-          },
-          now: new Date(),
-          eventId: globalThis.crypto.randomUUID(),
-        }),
-      ),
-    ).rejects.toThrow("Terminal event stream is not contiguous");
-
     expect(appended).toHaveLength(1);
     const envelope = {
       schemaVersion: 1 as const,
@@ -2250,6 +2219,36 @@ describe.sequential("single-user durable turn intake API", () => {
       payload: { acknowledgedThroughSeq: 3 },
     });
     expect(retried).toHaveLength(1);
+    await expect(
+      externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 2),
+    ).resolves.toEqual({ highWaterMark: 2, events: [] });
+    const terminalEventId = globalThis.crypto.randomUUID();
+    const terminalNow = new Date();
+    const terminalBody = {
+      type: "turn.completed" as const,
+      payload: { stopReason: "external_event_test_complete" },
+    };
+    await database.transaction().execute((transaction) =>
+      commitTerminalTurnEvent(transaction, {
+        tenantId: IDS.tenant,
+        sessionId: assigned.assignedSession.sessionId,
+        turnId: assigned.accepted.turnId,
+        commandId: assigned.accepted.commandId,
+        agentId: "root",
+        leaseId: assigned.runtime.leaseId,
+        fencingToken: assigned.runtime.fencingToken,
+        body: terminalBody,
+        now: terminalNow,
+        eventId: terminalEventId,
+      }),
+    );
+    await expect(
+      database
+        .selectFrom("session_event_cursors")
+        .select(["last_persisted_seq", "last_projected_seq"])
+        .where("session_id", "=", assigned.assignedSession.sessionId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ last_persisted_seq: "4", last_projected_seq: "2" });
     await retryStore.project(
       {
         schemaVersion: 1,
@@ -2266,60 +2265,11 @@ describe.sequential("single-user durable turn intake API", () => {
     await expect(
       externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 2),
     ).resolves.toMatchObject({
-      highWaterMark: 3,
-      events: [{ seq: 3, type: "assistant.text.delta", payload: { text: "after retry" } }],
-    });
-    const terminalEventId = globalThis.crypto.randomUUID();
-    const terminalNow = new Date();
-    const terminalBody = {
-      type: "turn.completed" as const,
-      payload: { stopReason: "external_event_test_complete" },
-    };
-    const preparedProjection = await new LiveTerminalTurnProjectionSource({
-      database,
-      liveEvents: liveEventStore,
-    }).prepare({
-      tenantId: IDS.tenant,
-      sessionId: assigned.assignedSession.sessionId,
-      turnId: assigned.accepted.turnId,
-      commandId: assigned.accepted.commandId,
-      agentId: "root",
-      body: terminalBody,
-      eventId: terminalEventId,
-      occurredAt: terminalNow.toISOString(),
-    });
-    await database.transaction().execute((transaction) =>
-      commitTerminalTurnEvent(transaction, {
-        tenantId: IDS.tenant,
-        sessionId: assigned.assignedSession.sessionId,
-        turnId: assigned.accepted.turnId,
-        commandId: assigned.accepted.commandId,
-        agentId: "root",
-        leaseId: assigned.runtime.leaseId,
-        fencingToken: assigned.runtime.fencingToken,
-        body: terminalBody,
-        now: terminalNow,
-        eventId: terminalEventId,
-        preparedProjection,
-      }),
-    );
-    await expect(
-      externalStore.openReplayWindow(IDS.tenant, assigned.assignedSession.sessionId, 3),
-    ).resolves.toMatchObject({
       highWaterMark: 4,
-      events: [{ seq: 4, type: "turn.completed" }],
-    });
-    expect(
-      await database
-        .selectFrom("conversation_turn_projections")
-        .select("transcript")
-        .where("turn_id", "=", assigned.accepted.turnId)
-        .executeTakeFirstOrThrow(),
-    ).toMatchObject({
-      transcript: {
-        throughSequence: 4,
-        items: [{ kind: "text", text: "hello from Kafkaafter retry" }],
-      },
+      events: [
+        { seq: 3, type: "assistant.text.delta", payload: { text: "after retry" } },
+        { seq: 4, type: "turn.completed" },
+      ],
     });
     expect(
       await database
@@ -2565,6 +2515,11 @@ describe.sequential("single-user durable turn intake API", () => {
     const dispatcher = new RunCommandExecutor({
       database,
       backend: new DeterministicExecutionBackend([{ kind: "complete", stopReason: "stop" }]),
+      terminalTurnProjectionSource: {
+        async prepare() {
+          throw new Error("successful settlement must not inspect the live stream");
+        },
+      },
     });
 
     await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toEqual({
@@ -2649,22 +2604,6 @@ describe.sequential("single-user durable turn intake API", () => {
         .where("turn_id", "=", accepted.turnId)
         .executeTakeFirstOrThrow(),
     ).resolves.toEqual({ type: "turn.failed", turn_id: accepted.turnId });
-    await expect(
-      database
-        .selectFrom("conversation_turn_projections")
-        .select(["source_event_count", "transcript"])
-        .where("turn_id", "=", accepted.turnId)
-        .executeTakeFirstOrThrow(),
-    ).resolves.toMatchObject({
-      source_event_count: 1,
-      transcript: {
-        failure: {
-          code: "model_timeout",
-          message: "Model request timed out",
-          retryable: true,
-        },
-      },
-    });
   });
 
   it("renews a running assignment beyond its initial lease deadline", async () => {
@@ -3081,146 +3020,6 @@ describe.sequential("single-user durable turn intake API", () => {
     ).toEqual({ state: "failed", active_sessions: 1 });
   });
 
-  it("replays an ACK-lost event from a fresh supervisor spool without duplicating PostgreSQL", async () => {
-    const spoolRoot = await mkdtemp(resolve(tmpdir(), "pi-cloud-durable-event-spool-"));
-    try {
-      const sessionResponse = await http.inject({
-        method: "POST",
-        url: `/v1/projects/${project.projectId}/sessions`,
-        payload: { workspaceId: project.workspaceId, title: "Test conversation" },
-      });
-      expect(sessionResponse.statusCode).toBe(201);
-      const replaySession = sessionResponse.json() as SessionResource;
-      const turnResponse = await http.inject({
-        method: "POST",
-        url: `/v1/sessions/${replaySession.sessionId}/turns`,
-        headers: { "idempotency-key": "durable-spool-ack-loss" },
-        payload: { prompt: "Publish one event, then lose its ACK." },
-      });
-      expect(turnResponse.statusCode).toBe(202);
-      const accepted = turnResponse.json() as AcceptedTurnResource;
-      await database
-        .insertInto("sandboxes")
-        .values({
-          id: IDS.spoolSandbox,
-          supervisor_id: "local-durable-spool-test",
-          boot_id: IDS.spoolSandboxBoot,
-          state: "ready",
-          max_concurrent_sessions: 1,
-          active_sessions: 0,
-        })
-        .executeTakeFirstOrThrow();
-
-      const leaseCoordinator = new SessionLeaseCoordinator({
-        database,
-        sandboxId: IDS.spoolSandbox,
-        leaseDurationMs: 120_000,
-      });
-      const firstStore = new WalEventSpoolStore({ rootDirectory: spoolRoot });
-      const supervisor = new AgentRunSupervisor({
-        runner: {
-          async run(command, publishEvent) {
-            const event: EventPublishMessage = {
-              protocolVersion: 1,
-              messageId: globalThis.crypto.randomUUID(),
-              sentAt: new Date().toISOString(),
-              type: "event.publish",
-              payload: {
-                commandId: command.payload.commandId,
-                leaseId: command.payload.leaseId,
-                fencingToken: command.payload.fencingToken,
-                event: {
-                  schemaVersion: 1,
-                  eventId: globalThis.crypto.randomUUID(),
-                  sessionId: command.payload.sessionId,
-                  turnId: command.payload.turnId,
-                  agentId: command.payload.agentId,
-                  seq: command.payload.nextEventSeq,
-                  occurredAt: new Date().toISOString(),
-                  type: "turn.started",
-                  payload: { inputKind: command.payload.input.kind },
-                },
-              },
-            };
-            await publishEvent(event);
-            return { stopReason: "stop" };
-          },
-        },
-        eventSpoolFactory: (options) => firstStore.open(options),
-      });
-      const backend = new AgentRunExecutionBackend({
-        supervisor,
-        leaseCoordinator,
-        eventIngestor: durableEventStore,
-        onEvent() {
-          throw new Error("simulated ACK connection loss after PostgreSQL commit");
-        },
-      });
-      const dispatcher = new RunCommandExecutor({
-        database,
-        backend,
-        leaseManager: leaseCoordinator,
-      });
-
-      await expect(
-        dispatchNextTestCommand(database, dispatcher, IDS.tenant),
-      ).resolves.toMatchObject({
-        status: "failed",
-        commandId: accepted.commandId,
-        phase: "after_start",
-        failureCode: "invalid_event_delivery",
-      });
-      const persistedBeforeReplay = await database
-        .selectFrom("session_events")
-        .select(["event_id", "seq", "type"])
-        .where("session_id", "=", replaySession.sessionId)
-        .execute();
-      expect(persistedBeforeReplay).toHaveLength(2);
-      expect(persistedBeforeReplay[0]).toMatchObject({ seq: "1", type: "turn.started" });
-      expect(persistedBeforeReplay[1]).toMatchObject({ seq: "2", type: "turn.failed" });
-
-      const restartedStore = new WalEventSpoolStore({ rootDirectory: spoolRoot });
-      const restartedSupervisor = new AgentRunSupervisor({
-        runner: {
-          async run() {
-            throw new Error("Recovery must not start a new runner");
-          },
-        },
-        eventSpoolFactory: (options) => restartedStore.open(options),
-        eventSpoolRecovery: restartedStore,
-      });
-      await expect(
-        restartedSupervisor.recoverPendingEvents((message) => durableEventStore.ingest(message)),
-      ).resolves.toEqual({
-        scannedSpools: 1,
-        replayedSpools: 1,
-        replayedEvents: 1,
-        quarantinedSpools: 0,
-        quarantinedEvents: 0,
-      });
-      expect(
-        await database
-          .selectFrom("session_events")
-          .select((expression) => expression.fn.countAll<string>().as("count"))
-          .where("session_id", "=", replaySession.sessionId)
-          .executeTakeFirstOrThrow(),
-      ).toEqual({ count: "2" });
-      await expect(
-        new WalEventSpoolStore({ rootDirectory: spoolRoot }).redeliverPending(() => {
-          throw new Error("A drained spool must not publish");
-        }),
-      ).resolves.toEqual({
-        scannedSpools: 1,
-        replayedSpools: 0,
-        replayedEvents: 0,
-        quarantinedSpools: 0,
-        quarantinedEvents: 0,
-      });
-    } finally {
-      await rm(spoolRoot, { recursive: true, force: true });
-    }
-  });
-
   it("rolls back the turn and command if the outbox write fails", async () => {
     const mailboxBeforeFailure = await database
       .selectFrom("sessions")
@@ -3273,7 +3072,7 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(mailboxAfterFailure).toEqual(mailboxBeforeFailure);
   });
 
-  it("settles a completed backend execution when the external event projection cannot catch up", async () => {
+  it("settles a completed backend execution without consulting the live projection", async () => {
     const accepted = await acceptTurn(
       "event-projection-boundary-failure",
       "finish the agent loop while the live projection is unavailable",
@@ -3281,25 +3080,17 @@ describe.sequential("single-user durable turn intake API", () => {
     const dispatcher = new RunCommandExecutor({
       database,
       backend: new DeterministicExecutionBackend([{ kind: "complete", stopReason: "stop" }]),
-      eventProjectionBarrier: {
-        async waitForSession() {
-          throw new Error("simulated event projection outage");
-        },
-      },
     });
 
     await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toMatchObject({
-      status: "failed",
+      status: "completed",
       commandId: accepted.commandId,
-      phase: "after_start",
-      failureCode: "event_projection_unavailable",
     });
     expect(await readTurnExecution(accepted)).toMatchObject({
-      commandState: "failed",
-      turnState: "failed",
+      commandState: "completed",
+      turnState: "completed",
       sessionState: "idle",
-      commandFailureCode: "event_projection_unavailable",
-      turnFailureCode: "event_projection_unavailable",
+      stopReason: "stop",
     });
   });
 
@@ -3367,7 +3158,7 @@ describe.sequential("single-user durable turn intake API", () => {
     ).toEqual({ count: "0" });
     expect(
       await database
-        .selectFrom("conversation_turn_projections")
+        .selectFrom("session_terminal_events")
         .select((expression) => expression.fn.countAll<string>().as("count"))
         .where("turn_id", "=", accepted.turnId)
         .executeTakeFirstOrThrow(),

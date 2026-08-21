@@ -1,6 +1,6 @@
 # Enterprise event-pipeline acceptance
 
-- Measured: 2026-08-10T16:41:37.745Z
+- Measured: 2026-08-21T13:28:37.774Z
 - PostgreSQL: real server
 - Kafka: real single broker
 - Valkey: real server
@@ -8,7 +8,7 @@
 - Invalid service token rejected: yes
 - Duplicate projection rows: 0
 - Projector stop/restart recovery: passed
-- Terminal projection barrier: passed
+- Terminal commit independent of live projection: passed
 - PostgreSQL payload Outbox present: no
 
 - PostgreSQL raw streaming rows: 0

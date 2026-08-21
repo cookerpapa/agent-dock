@@ -75,6 +75,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_TURN_TIMEOUT_MS = 30_000;
 const TEXT_DELTA_COALESCE_WINDOW_MS = 50;
 const TEXT_DELTA_COALESCE_BYTES = 2 * 1_024;
+const MAXIMUM_PENDING_PUBLIC_EVENTS = 512;
 const BASE_SYSTEM_PROMPT = [
   "You are a coding agent working in a remote, isolated project workspace.",
   "Use the provided read, write, edit, and bash tools to inspect and change the project.",
@@ -312,6 +313,7 @@ export class PiCloudTurnRunner {
       let pendingTextTimer: NodeJS.Timeout | undefined;
       let emitNextTextImmediately = true;
       let eventChain = Promise.resolve();
+      let pendingPublicEvents = 0;
       let fatalError: Error | undefined;
 
       const eventMessage = (event: PiCloudEvent): EventPublishMessage => {
@@ -380,12 +382,16 @@ export class PiCloudTurnRunner {
       };
 
       const enqueue = (event: CloudAgentRuntimeEvent): void => {
+        pendingPublicEvents += 1;
         eventChain = eventChain
           .then(async () => {
             await publishMapped(this.#adapterEvent(event));
           })
           .catch((error: unknown) => {
             fatalError ??= error instanceof Error ? error : new Error(String(error));
+          })
+          .finally(() => {
+            pendingPublicEvents -= 1;
           });
       };
       const flushPendingText = (): void => {
@@ -493,7 +499,12 @@ export class PiCloudTurnRunner {
           // Semantic boundaries must be durable before Pi advances. Text deltas
           // remain coalesced and asynchronous, but the next non-delta boundary
           // drains every preceding delta in order.
-          if (streamedTextDelta(event) === undefined) await eventChain;
+          if (
+            streamedTextDelta(event) === undefined ||
+            pendingPublicEvents >= MAXIMUM_PENDING_PUBLIC_EVENTS
+          ) {
+            await eventChain;
+          }
           if (fatalError !== undefined) throw fatalError;
         },
         ...(this.#options.prepareFollowUp === undefined

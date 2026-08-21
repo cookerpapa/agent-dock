@@ -209,7 +209,6 @@ describe("PiWorkerRuntime", () => {
       toolBrokerRequestTimeoutMs: 300_000,
       trustedWorkspaceDirectory: root,
       bootStateDirectory: join(root, "boot"),
-      eventSpoolDirectory: join(root, "spool"),
       checkpointReadCacheTtlMs: 600_000,
       checkpointReadCacheMaximumEntries: 512,
       checkpointReadCacheMaximumBytes: 32 * 1_024 * 1_024,

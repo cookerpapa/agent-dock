@@ -18,6 +18,7 @@ import {
 export type PostgresPiSessionRepositoryOptions = {
   database: Kysely<Database>;
   tenantId: string;
+  turnId?: string;
   authority?: ExecutionAuthority;
   entryPayloadCache?: PostgresPiSessionEntryPayloadCache;
 };
@@ -51,12 +52,14 @@ export class PostgresPiSessionRepository implements SessionRepo<
 > {
   readonly #database: Kysely<Database>;
   readonly #tenantId: string;
+  readonly #turnId: string | undefined;
   readonly #authority: ExecutionAuthority | undefined;
   readonly #entryPayloadCache: PostgresPiSessionEntryPayloadCache | undefined;
 
   constructor(options: PostgresPiSessionRepositoryOptions) {
     this.#database = options.database;
     this.#tenantId = options.tenantId;
+    this.#turnId = options.turnId;
     this.#authority = options.authority;
     this.#entryPayloadCache = options.entryPayloadCache;
   }
@@ -68,6 +71,7 @@ export class PostgresPiSessionRepository implements SessionRepo<
       database: this.#database,
       tenantId: this.#tenantId,
       sessionId: options.id ?? uuidv7(),
+      ...(this.#turnId === undefined ? {} : { turnId: this.#turnId }),
       ...(options.parentSessionId === undefined
         ? {}
         : { parentSessionId: options.parentSessionId }),
@@ -161,6 +165,7 @@ export class PostgresPiSessionRepository implements SessionRepo<
       database: this.#database,
       tenantId: this.#tenantId,
       sessionId,
+      ...(this.#turnId === undefined ? {} : { turnId: this.#turnId }),
       ...(this.#authority === undefined ? {} : { authority: this.#authority }),
       ...(this.#entryPayloadCache === undefined
         ? {}

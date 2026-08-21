@@ -31,7 +31,6 @@ export type SupervisorHostConfig = {
   toolBrokerRequestTimeoutMs: number;
   trustedWorkspaceDirectory: string;
   bootStateDirectory: string;
-  eventSpoolDirectory: string;
   checkpointReadCacheTtlMs: number;
   checkpointReadCacheMaximumEntries: number;
   checkpointReadCacheMaximumBytes: number;
@@ -417,7 +416,6 @@ export async function loadSupervisorHostConfig(
     toolBrokerRequestTimeoutMs,
     trustedWorkspaceDirectory: required(environment, "PI_CLOUD_TRUSTED_WORKSPACE_DIRECTORY"),
     bootStateDirectory: required(environment, "PI_CLOUD_BOOT_STATE_DIRECTORY"),
-    eventSpoolDirectory: required(environment, "PI_CLOUD_EVENT_SPOOL_DIRECTORY"),
     checkpointReadCacheTtlMs: integerValue(
       environment,
       "PI_CLOUD_CHECKPOINT_READ_CACHE_TTL_MS",

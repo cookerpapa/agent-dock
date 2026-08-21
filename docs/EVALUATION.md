@@ -11,7 +11,6 @@ current architecture ADR.
 ```bash
 npm run check
 npm run eval:faults
-npm run benchmark:event-spool
 ```
 
 The ordinary test suite covers queue claims, Session ordering, leases/fences,
@@ -24,9 +23,9 @@ in the current tree. The suite is deterministic fault injection, not a
 multi-node chaos claim. The latest current-topology run is recorded in the
 [fault evaluation report](reports/fault-eval-latest.md).
 
-The Worker event benchmark verifies the append-only local WAL, restart replay,
-checksum/gap rejection and cumulative acknowledgement. See
-[the WAL report](reports/event-spool-wal-optimization-2026-07-30.md).
+The stream-independence and interrupted-prefix fault cases verify that a public
+stream outage cannot roll back a complete Pi message, while a visible failed
+prefix still survives Worker replacement.
 
 ## Live-event durability
 
@@ -38,14 +37,17 @@ npm run eval:enterprise-events
 The production stream is:
 
 ```text
-Worker WAL -> Event Gateway -> Kafka -> Valkey projection -> resumable SSE
+Pi text coalescer -> Host group commit -> Event Gateway -> Kafka
+                   -> Valkey projection -> resumable SSE
 ```
 
-Kafka acknowledgement precedes visibility. PostgreSQL stores projection
-watermarks, terminal canonical Turns and Run state, not raw token deltas. The
+Kafka acknowledgement precedes visibility. PostgreSQL stores Pi-native complete
+messages, projection watermarks, terminal events and Run state, not raw token
+deltas or a second reconstructed transcript. The
 transport acceptance checks per-Session ordering; the enterprise functional
 check adds real PostgreSQL, authenticated ingest, duplicate delivery,
-projector restart, terminal projection and zero raw-stream rows in PostgreSQL.
+projector restart, lagging terminal-watermark promotion and zero raw-stream rows
+in PostgreSQL.
 
 Current evidence:
 

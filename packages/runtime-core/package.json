@@ -8,6 +8,7 @@
     "./checkpoint-object-cache": "./src/checkpoint-object-cache.ts",
     "./checkpoint-runtime": "./src/checkpoint-runtime.ts",
     "./checkpoint-store": "./src/checkpoint-store.ts",
+    "./canonical-pi-conversation": "./src/canonical-pi-conversation.ts",
     "./conversation-turn-projection": "./src/conversation-turn-projection.ts",
     "./durable-event-store": "./src/durable-event-store.ts",
     "./event-projection-barrier": "./src/event-projection-barrier.ts",

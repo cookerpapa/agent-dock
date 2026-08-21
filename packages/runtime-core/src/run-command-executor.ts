@@ -27,7 +27,6 @@ import { virtualRunTraceCarrier, withSpan } from "@pi-cloud/observability";
 import type { PiCloudMetrics } from "@pi-cloud/observability";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
-import type { EventProjectionBarrier } from "./event-projection-barrier.ts";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
 import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
@@ -209,7 +208,6 @@ export type RunCommandExecutorOptions = {
   leaseManager?: TurnExecutionLeaseManager;
   metrics?: PiCloudMetrics;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
-  eventProjectionBarrier?: EventProjectionBarrier;
   terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
@@ -325,7 +323,6 @@ export class RunCommandExecutor {
   readonly #leaseManager: TurnExecutionLeaseManager | undefined;
   readonly #metrics: PiCloudMetrics | undefined;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
-  readonly #eventProjectionBarrier: EventProjectionBarrier | undefined;
   readonly #terminalTurnProjectionSource: TerminalTurnProjectionSource | undefined;
 
   constructor(options: RunCommandExecutorOptions) {
@@ -349,7 +346,6 @@ export class RunCommandExecutor {
     this.#leaseManager = options.leaseManager;
     this.#metrics = options.metrics;
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
-    this.#eventProjectionBarrier = options.eventProjectionBarrier;
     this.#terminalTurnProjectionSource = options.terminalTurnProjectionSource;
   }
 
@@ -464,34 +460,9 @@ export class RunCommandExecutor {
                 );
               }
             }
-            if (started) {
-              await this.#eventProjectionBarrier?.waitForSession(
-                claim.request.tenantId,
-                claim.request.sessionId,
-              );
-            }
             return this.#recordFailure(claim, started, normalizeFailure(error), acknowledgement);
           }
 
-          try {
-            await this.#eventProjectionBarrier?.waitForSession(
-              claim.request.tenantId,
-              claim.request.sessionId,
-            );
-          } catch {
-            return this.#recordFailure(
-              claim,
-              true,
-              normalizeFailure(
-                new TurnExecutionBackendError(
-                  "event_projection_unavailable",
-                  "Run output could not reach its durable conversation boundary",
-                  false,
-                ),
-              ),
-              acknowledgement,
-            );
-          }
           await this.#complete(claim, executionResult, acknowledgement);
           return {
             status: "completed",
@@ -1211,16 +1182,6 @@ export class RunCommandExecutor {
         ...(result.workspacePatch === undefined ? {} : { workspacePatch: result.workspacePatch }),
       },
     } as const;
-    const preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
-      tenantId: claim.request.tenantId,
-      sessionId: claim.request.sessionId,
-      turnId: claim.request.turnId,
-      commandId: claim.request.commandId,
-      agentId: "root",
-      body: terminalBody,
-      eventId: terminalEventId,
-      occurredAt: now.toISOString(),
-    });
     await this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
       if (
@@ -1321,7 +1282,6 @@ export class RunCommandExecutor {
         body: terminalBody,
         now,
         eventId: terminalEventId,
-        ...(preparedProjection === undefined ? {} : { preparedProjection }),
         ...(this.#eventNotificationPublisher === undefined
           ? {}
           : { notificationPublisher: this.#eventNotificationPublisher }),
@@ -1350,7 +1310,6 @@ export class RunCommandExecutor {
       },
     } as const;
     let preparedProjection: PreparedTerminalTurnProjection | undefined;
-    let terminalOnlyProjection = false;
     if (!shouldRetry) {
       try {
         preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
@@ -1364,9 +1323,8 @@ export class RunCommandExecutor {
           occurredAt: now.toISOString(),
         });
       } catch {
-        // The original execution failure is authoritative. A secondary live-event
-        // projection outage must not strand the Run in a non-terminal state.
-        terminalOnlyProjection = this.#terminalTurnProjectionSource !== undefined;
+        // Interrupted-prefix recovery is best effort and cannot control the
+        // authoritative Run/Session terminal transaction.
       }
     }
 
@@ -1586,7 +1544,6 @@ export class RunCommandExecutor {
         now,
         eventId: terminalEventId,
         ...(preparedProjection === undefined ? {} : { preparedProjection }),
-        ...(terminalOnlyProjection ? { terminalOnlyProjection: true } : {}),
         ...(this.#eventNotificationPublisher === undefined
           ? {}
           : { notificationPublisher: this.#eventNotificationPublisher }),

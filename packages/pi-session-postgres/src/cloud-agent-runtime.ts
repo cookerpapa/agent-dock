@@ -93,6 +93,7 @@ export type CloudAgentRunResult = Readonly<{
 }>;
 
 const INTERRUPTION_CUSTOM_TYPE = "pi-cloud.run_interrupted";
+const INTERRUPTED_ASSISTANT_PREFIX_CUSTOM_TYPE = "pi-cloud.interrupted_assistant_prefix";
 const UNKNOWN_TOOL_EFFECT_TEXT =
   "The previous Worker stopped while this Tool was active. Its side effects are unknown. " +
   "Do not replay it blindly; inspect the Workspace and environment before continuing.";
@@ -124,6 +125,12 @@ function normalizeMessage(message: AgentMessage): AgentMessage {
     return result;
   };
   return visit(message) as AgentMessage;
+}
+
+function hasVisibleAssistantPrefix(message: AssistantMessage): boolean {
+  return message.content.some(
+    (part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0,
+  );
 }
 
 function combinedSignal(first: AbortSignal | undefined, second: AbortSignal): AbortSignal {
@@ -164,6 +171,34 @@ function interruptionProjector(entry: {
       role: "custom",
       customType: INTERRUPTION_CUSTOM_TYPE,
       content,
+      display: false,
+      timestamp: entry.timestamp,
+    } as AgentMessage,
+  ];
+}
+
+function interruptedAssistantPrefixProjector(entry: {
+  customType: string;
+  data?: unknown;
+  timestamp: number;
+}): AgentMessage[] | undefined {
+  if (
+    entry.customType !== INTERRUPTED_ASSISTANT_PREFIX_CUSTOM_TYPE ||
+    !isObject(entry.data) ||
+    typeof entry.data.text !== "string" ||
+    entry.data.text.length === 0
+  ) {
+    return undefined;
+  }
+  return [
+    {
+      role: "custom",
+      customType: INTERRUPTED_ASSISTANT_PREFIX_CUSTOM_TYPE,
+      content: [
+        "<interrupted_assistant_output>",
+        entry.data.text,
+        "</interrupted_assistant_output>",
+      ].join("\n"),
       display: false,
       timestamp: entry.timestamp,
     } as AgentMessage,
@@ -243,6 +278,7 @@ export class CloudAgentRuntime {
       const resultEntryIds = new Map<string, string>();
       let assistantEntryId: string | undefined;
       let pendingAssistantEntryId: string | undefined;
+      let deferredAssistantEntryId: string | undefined;
       let assistantAttempt = 0;
       let toolIndex = 0;
 
@@ -333,6 +369,7 @@ export class CloudAgentRuntime {
           }
           if (message.role === "assistant") {
             assistantEntryId = durableMessage ? entryId : undefined;
+            deferredAssistantEntryId = durableMessage ? undefined : entryId;
             finalMessage = message;
             toolIndex = 0;
           }
@@ -405,6 +442,22 @@ export class CloudAgentRuntime {
             ? "failed"
             : "completed";
       if (kind !== "completed") {
+        if (
+          deferredAssistantEntryId !== undefined &&
+          hasVisibleAssistantPrefix(finalMessage) &&
+          (await session.getEntry(deferredAssistantEntryId)) === undefined
+        ) {
+          await session.appendEntry(
+            { id: deferredAssistantEntryId, type: "message", message: finalMessage },
+            lane,
+          );
+          await this.#recordUsage(
+            operationId,
+            deferredAssistantEntryId,
+            finalMessage,
+            assistantAttempt,
+          );
+        }
         await session.appendCustomEntry(INTERRUPTION_CUSTOM_TYPE, {
           content: recoveryMarker(
             kind === "failed"
@@ -490,6 +543,7 @@ export class CloudAgentRuntime {
     ).reverse();
     const entryProjectors = {
       [INTERRUPTION_CUSTOM_TYPE]: interruptionProjector,
+      [INTERRUPTED_ASSISTANT_PREFIX_CUSTOM_TYPE]: interruptedAssistantPrefixProjector,
       ...(this.#options.entryProjectors ?? {}),
     } as Readonly<Record<string, CustomEntryContextMessageProjector>>;
     return buildSessionContext(path, { entryProjectors }).messages;

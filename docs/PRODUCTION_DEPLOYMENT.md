@@ -42,8 +42,10 @@ npm run production:backup
 npm run production:restore
 ```
 
-Backups contain PostgreSQL, the generated runtime configuration, Worker WAL/PVC
-state and the local persistent Workspace Volume directory. On distributed
+Offline backups contain PostgreSQL, retained Kafka events, the Valkey hot view,
+the generated runtime configuration, Worker boot ledgers and the local
+persistent Workspace Volume directory. Kafka remains the recovery source for
+the rebuildable Valkey view. On distributed
 storage, use the storage backend's snapshot/backup mechanism in addition to the
 PostgreSQL backup.
 

@@ -164,6 +164,75 @@ describe.sequential("CloudAgentRuntime", () => {
     expect(await storage.findOpenOperations("main", { limit: 2 })).toEqual([]);
   });
 
+  it("commits a complete assistant message independently of public event delivery", async () => {
+    const storage = await createStorage();
+    const runtime = new CloudAgentRuntime({
+      session: storage.asSession(),
+      authority: new TestAuthority(),
+      model: getModel("openai", "gpt-4o-mini"),
+      systemPrompt: "test",
+      streamFn: scriptedStream(["durable answer"]),
+      compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
+      async onEvent(event) {
+        if (event.type !== "message_end" || event.message.role !== "assistant") return;
+        throw new Error("public stream unavailable after message commit");
+      },
+    });
+
+    await expect(runtime.run("keep message persistence independent")).rejects.toThrow(
+      "public stream unavailable after message commit",
+    );
+    expect(await storage.findEntries({ type: "message" })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: expect.objectContaining({
+            role: "assistant",
+            content: [{ type: "text", text: "durable answer" }],
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("keeps a failed visible assistant prefix in the next native Pi context", async () => {
+    const storage = await createStorage();
+    const failedRuntime = new CloudAgentRuntime({
+      session: storage.asSession(),
+      authority: new TestAuthority(),
+      model: getModel("openai", "gpt-4o-mini"),
+      systemPrompt: "test",
+      streamFn: () => {
+        const stream = new MockAssistantStream();
+        queueMicrotask(() => {
+          stream.push({
+            type: "error",
+            reason: "error",
+            error: {
+              ...assistantError("transport failed"),
+              content: [{ type: "text", text: "visible prefix" }],
+            },
+          });
+        });
+        return stream;
+      },
+      compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
+    });
+    await expect(failedRuntime.run("start a response")).resolves.toMatchObject({ kind: "failed" });
+
+    const contexts: Context[] = [];
+    const resumed = new CloudAgentRuntime({
+      session: storage.asSession(),
+      authority: new TestAuthority(),
+      model: getModel("openai", "gpt-4o-mini"),
+      systemPrompt: "test",
+      streamFn: scriptedStream(["recovered"], contexts),
+      compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
+    });
+    await resumed.run("continue");
+    expect(JSON.stringify(contexts[0]?.messages)).toContain("visible prefix");
+    expect(JSON.stringify(contexts[0]?.messages)).toContain("<turn_aborted>");
+  });
+
   it("records Tool intent before the effect and binds it to the same authority", async () => {
     const storage = await createStorage();
     const authority = new TestAuthority();

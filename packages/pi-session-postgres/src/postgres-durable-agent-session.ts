@@ -8,6 +8,7 @@ import type { PostgresPiSessionEntryPayloadCache } from "./session-entry-payload
 export type CloudAgentExecutionScope = Readonly<{
   tenantId: string;
   sessionId: string;
+  turnId: string;
   runId: string;
   attemptId: string;
 }>;
@@ -51,6 +52,7 @@ export async function openPostgresDurableAgentSession(
     const repository = new PostgresPiSessionRepository({
       database: options.database,
       tenantId: options.scope.tenantId,
+      turnId: options.scope.turnId,
       authority,
       ...(options.entryPayloadCache === undefined
         ? {}

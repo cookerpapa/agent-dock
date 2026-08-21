@@ -1,8 +1,6 @@
 import {
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
-  type EventAckMessage,
-  type EventPublishMessage,
   type SupervisorRegisteredMessage,
 } from "@pi-cloud/protocol";
 import { describe, expect, it } from "vitest";
@@ -66,8 +64,6 @@ function close(
 
 class FakeConnection implements SupervisorWebSocketConnection {
   readonly assignmentStates: boolean[] = [];
-  recoveryCalls = 0;
-  readonly #recovery = deferred<void>();
   readonly #started = deferred<SupervisorRegisteredMessage>();
   readonly #closed = deferred<SupervisorWebSocketClientClose>();
   #connectionId: string | undefined;
@@ -80,18 +76,6 @@ class FakeConnection implements SupervisorWebSocketConnection {
 
   setAcceptingAssignments(value: boolean): void {
     this.assignmentStates.push(value);
-  }
-
-  async recoverPendingEvents() {
-    this.recoveryCalls += 1;
-    await this.#recovery.promise;
-    return {
-      scannedSpools: 1,
-      replayedSpools: 1,
-      replayedEvents: 1,
-      quarantinedSpools: 0,
-      quarantinedEvents: 0,
-    };
   }
 
   start(): Promise<SupervisorRegisteredMessage> {
@@ -130,10 +114,6 @@ class FakeConnection implements SupervisorWebSocketConnection {
     this.#started.resolve(registered(connectionId));
   }
 
-  finishRecovery(): void {
-    this.#recovery.resolve();
-  }
-
   rejectStart(error: SupervisorWebSocketClientError, result: SupervisorWebSocketClientClose): void {
     if (this.#startSettled) throw new Error("Connection start already settled");
     this.#startSettled = true;
@@ -168,17 +148,6 @@ function runtime(
     },
     revokeAllAssignments() {
       options.revokeAllAssignments?.();
-    },
-    async recoverPendingEvents(
-      _publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage>,
-    ) {
-      return {
-        scannedSpools: 0,
-        replayedSpools: 0,
-        replayedEvents: 0,
-        quarantinedSpools: 0,
-        quarantinedEvents: 0,
-      };
     },
     waitUntilAssignmentsSettled: options.waitUntilAssignmentsSettled ?? (async () => undefined),
   };
@@ -237,7 +206,6 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     harness.connections[0]!.connect(firstId);
     await waitFor(() => harness.connections[0]!.assignmentStates.length === 2);
     expect(harness.connections[0]!.assignmentStates).toEqual([false, false]);
-    expect(harness.connections[0]!.recoveryCalls).toBe(0);
     expect((await started).payload.connectionId).toBe(firstId);
     expect(harness.connections[0]!.assignmentStates).toEqual([false, false]);
 
@@ -248,7 +216,6 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     const secondId = globalThis.crypto.randomUUID();
     harness.connections[1]!.connect(secondId);
     await waitFor(() => harness.client.successfulConnections === 2);
-    expect(harness.connections[1]!.recoveryCalls).toBe(0);
     expect(harness.client.connectionId).toBe(secondId);
     expect(harness.client.successfulConnections).toBe(2);
 
@@ -305,7 +272,6 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     expect(heartbeat.payload.sessions).toEqual([]);
 
     harness.connections[0]!.connect(globalThis.crypto.randomUUID());
-    harness.connections[0]!.finishRecovery();
     await started;
     await harness.client.stop();
   });
@@ -341,7 +307,6 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     const started = harness.client.start();
     await waitFor(() => harness.connections.length === 1);
     harness.connections[0]!.connect(globalThis.crypto.randomUUID());
-    harness.connections[0]!.finishRecovery();
     await started;
     harness.connections[0]!.disconnect(close(true));
     await waitFor(() => harness.client.state === "backing_off");
@@ -363,7 +328,6 @@ describe("ReconnectingSupervisorWebSocketClient", () => {
     const started = harness.client.start();
     await waitFor(() => harness.connections.length === 1);
     harness.connections[0]!.connect(globalThis.crypto.randomUUID());
-    harness.connections[0]!.finishRecovery();
     await started;
     harness.connections[0]!.disconnect(close(false));
 

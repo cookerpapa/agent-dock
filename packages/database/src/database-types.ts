@@ -768,7 +768,7 @@ export interface SessionEventTable {
   event_id: string;
   tenant_id: string;
   session_id: string;
-  turn_id: string | null;
+  turn_id: GeneratedNullable<string>;
   agent_node_id: string | null;
   agent_id: string;
   command_id: string | null;
@@ -804,17 +804,6 @@ export interface WorkerEventProjectionOffsetTable {
   partition: number;
   last_offset: Int8;
   updated_at: GeneratedTimestamp;
-}
-
-export interface ConversationTurnProjectionTable {
-  turn_id: string;
-  tenant_id: string;
-  session_id: string;
-  schema_version: number;
-  through_seq: Int8;
-  source_event_count: number;
-  transcript: JsonObject;
-  projected_at: GeneratedTimestamp;
 }
 
 export interface SessionTerminalEventTable {
@@ -1141,6 +1130,7 @@ export interface PiSessionEntryTable {
   custom_type: string | null;
   timestamp_ms: Int8;
   payload: JsonObject;
+  turn_id: string | null;
 }
 
 export interface PiSessionEntryRefTable {
@@ -1173,6 +1163,7 @@ export interface PiSessionRecordTable {
   operation_kind: string | null;
   timestamp_ms: Int8;
   payload: JsonObject;
+  turn_id: GeneratedNullable<string>;
 }
 
 export interface PiSessionLabelTable {
@@ -1247,7 +1238,6 @@ export interface Database {
   session_event_ids: SessionEventIdTable;
   session_event_cursors: SessionEventCursorTable;
   worker_event_projection_offsets: WorkerEventProjectionOffsetTable;
-  conversation_turn_projections: ConversationTurnProjectionTable;
   conversation_fork_operations: ConversationForkOperationTable;
   session_terminal_events: SessionTerminalEventTable;
   session_live_stream_compactions: SessionLiveStreamCompactionTable;

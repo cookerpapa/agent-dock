@@ -16,7 +16,6 @@ import {
 } from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
-import type { EventProjectionBarrier } from "./event-projection-barrier.ts";
 import type {
   TurnExecutionAcknowledgement,
   TurnExecutionLeaseManager,
@@ -127,7 +126,6 @@ export type RunCancellationExecutorOptions = {
   maxAttempts?: number;
   idGenerator?: () => string;
   eventNotificationPublisher?: SessionEventNotificationPublisher;
-  eventProjectionBarrier?: EventProjectionBarrier;
   terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
@@ -222,7 +220,6 @@ export class RunCancellationExecutor {
   readonly #maxAttempts: number;
   readonly #idGenerator: () => string;
   readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
-  readonly #eventProjectionBarrier: EventProjectionBarrier | undefined;
   readonly #terminalTurnProjectionSource: TerminalTurnProjectionSource | undefined;
 
   constructor(options: RunCancellationExecutorOptions) {
@@ -241,7 +238,6 @@ export class RunCancellationExecutor {
     this.#maxAttempts = positiveInteger(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, "maxAttempts");
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#eventNotificationPublisher = options.eventNotificationPublisher;
-    this.#eventProjectionBarrier = options.eventProjectionBarrier;
     this.#terminalTurnProjectionSource = options.terminalTurnProjectionSource;
   }
 
@@ -327,19 +323,9 @@ export class RunCancellationExecutor {
         }
         throw startFailure;
       }
-      if (started) {
-        await this.#eventProjectionBarrier?.waitForSession(
-          claim.request.target.tenantId,
-          claim.request.target.sessionId,
-        );
-      }
       return this.#recordFailure(claim, started, normalizeFailure(error));
     }
 
-    await this.#eventProjectionBarrier?.waitForSession(
-      claim.request.target.tenantId,
-      claim.request.target.sessionId,
-    );
     await this.#complete(claim, acknowledgement, result);
     return {
       status: "cancelled",
@@ -685,7 +671,6 @@ export class RunCancellationExecutor {
       payload: { reason: result.reason, forced: result.forced },
     } as const;
     let preparedProjection: PreparedTerminalTurnProjection | undefined;
-    let terminalOnlyProjection = false;
     try {
       preparedProjection = await this.#terminalTurnProjectionSource?.prepare({
         tenantId: claim.request.target.tenantId,
@@ -698,7 +683,7 @@ export class RunCancellationExecutor {
         occurredAt: now.toISOString(),
       });
     } catch {
-      terminalOnlyProjection = this.#terminalTurnProjectionSource !== undefined;
+      // Stream-prefix recovery is best effort for cancellation.
     }
     await this.#database.transaction().execute(async (transaction) => {
       const rows = await this.#lockLifecycleRows(transaction, claim);
@@ -800,7 +785,6 @@ export class RunCancellationExecutor {
         now,
         eventId: terminalEventId,
         ...(preparedProjection === undefined ? {} : { preparedProjection }),
-        ...(terminalOnlyProjection ? { terminalOnlyProjection: true } : {}),
         ...(this.#eventNotificationPublisher === undefined
           ? {}
           : { notificationPublisher: this.#eventNotificationPublisher }),

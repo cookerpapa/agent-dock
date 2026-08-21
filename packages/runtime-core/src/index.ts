@@ -20,3 +20,8 @@ export * from "./session-lease-coordinator.ts";
 export * from "./structured-test-command.ts";
 export * from "./terminal-turn-event.ts";
 export * from "./terminal-turn-projection.ts";
+export {
+  INTERRUPTED_ASSISTANT_PREFIX_CUSTOM_TYPE,
+  appendInterruptedAssistantPrefix,
+  readCanonicalPiTurnTranscripts,
+} from "./canonical-pi-conversation.ts";

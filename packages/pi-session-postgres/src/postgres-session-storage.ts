@@ -29,6 +29,7 @@ export type PostgresPiSessionStorageOptions = {
   database: Kysely<Database>;
   tenantId: string;
   sessionId: string;
+  turnId?: string;
   authority?: ExecutionAuthority;
   entryPayloadCache?: PostgresPiSessionEntryPayloadCache;
 };
@@ -117,6 +118,7 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
   readonly #database: Kysely<Database>;
   readonly #tenantId: string;
   readonly #sessionId: string;
+  readonly #turnId: string | undefined;
   readonly #authority: ExecutionAuthority | undefined;
   readonly #entryPayloadCache: PostgresPiSessionEntryPayloadCache | undefined;
 
@@ -124,6 +126,7 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
     this.#database = options.database;
     this.#tenantId = options.tenantId;
     this.#sessionId = options.sessionId;
+    this.#turnId = options.turnId;
     this.#authority = options.authority;
     this.#entryPayloadCache = options.entryPayloadCache;
   }
@@ -268,6 +271,7 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
           custom_type: complete.type === "custom" ? complete.customType : null,
           timestamp_ms: timestamp,
           payload: complete as unknown as Record<string, unknown>,
+          turn_id: await this.#entryTurnId(transaction, lane),
         })
         .executeTakeFirst();
       await transaction
@@ -277,7 +281,7 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
         .where("session_id", "=", this.#sessionId)
         .where("lane", "=", lane)
         .executeTakeFirstOrThrow();
-      await this.#appendLog(transaction, seq, "entry", { entry: complete });
+      await this.#appendLog(transaction, seq, "entry", { entryId: complete.id });
       return complete;
     });
   }
@@ -316,6 +320,7 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
           : "runId" in complete && typeof complete.runId === "string"
             ? complete.runId
             : null;
+      const turnId = await this.#recordTurnId(transaction, newRecord);
       await transaction
         .insertInto("pi_session_records")
         .values({
@@ -329,9 +334,10 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
           operation_kind: complete.type === "operation_started" ? complete.intent.kind : null,
           timestamp_ms: timestamp,
           payload: complete as unknown as Record<string, unknown>,
+          turn_id: turnId,
         })
         .executeTakeFirst();
-      await this.#appendLog(transaction, seq, "record", { record: complete });
+      await this.#appendLog(transaction, seq, "record", { recordId: complete.id });
       return complete;
     });
   }
@@ -580,8 +586,24 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
       kind: LogItem["kind"];
       payload: Record<string, unknown>;
     }>`
-      select log.seq, log.kind, log.payload
+      select log.seq,
+             log.kind,
+             case log.kind
+               when 'entry' then jsonb_build_object('entry', entry.payload)
+               when 'record' then jsonb_build_object('record', record.payload)
+               else log.payload
+             end as payload
         from pi_session_log log
+        left join pi_session_entries entry
+          on log.kind = 'entry'
+         and entry.tenant_id = log.tenant_id
+         and entry.session_id = log.session_id
+         and entry.id = log.payload ->> 'entryId'
+        left join pi_session_records record
+          on log.kind = 'record'
+         and record.tenant_id = log.tenant_id
+         and record.session_id = log.session_id
+         and record.id = log.payload ->> 'recordId'
        where log.tenant_id = ${this.#tenantId}::uuid
          and log.session_id = ${this.#sessionId}::text
          and (${options.afterSeq ?? null}::bigint is null
@@ -818,6 +840,45 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
     const row = result.rows[0];
     if (row === undefined) throw new SessionError("not_found", "Pi Session was not found");
     return safeInteger(row.seq, "Pi Session sequence");
+  }
+
+  async #entryTurnId(transaction: Transaction<Database>, lane: string): Promise<string | null> {
+    const open = await sql<{ turn_id: string | null }>`
+      select started.turn_id
+        from pi_session_records started
+       where started.tenant_id = ${this.#tenantId}::uuid
+         and started.session_id = ${this.#sessionId}::text
+         and started.lane = ${lane}
+         and started.type = 'operation_started'
+         and not exists (
+           select 1
+             from pi_session_records finished
+            where finished.tenant_id = started.tenant_id
+              and finished.session_id = started.session_id
+              and finished.type = 'operation_finished'
+              and finished.run_id = started.id
+         )
+       order by started.seq desc
+       limit 1
+    `.execute(transaction);
+    return open.rows[0]?.turn_id ?? this.#turnId ?? null;
+  }
+
+  async #recordTurnId(
+    transaction: Transaction<Database>,
+    record: NewRecord<LaneRecord>,
+  ): Promise<string | null> {
+    if (record.type === "operation_started") return this.#turnId ?? null;
+    if (!("runId" in record) || typeof record.runId !== "string") return this.#turnId ?? null;
+    const operation = await transaction
+      .selectFrom("pi_session_records")
+      .select("turn_id")
+      .where("tenant_id", "=", this.#tenantId)
+      .where("session_id", "=", this.#sessionId)
+      .where("id", "=", record.runId)
+      .where("type", "=", "operation_started")
+      .executeTakeFirst();
+    return operation?.turn_id ?? this.#turnId ?? null;
   }
 
   async #appendLog(

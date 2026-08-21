@@ -7,10 +7,6 @@ import {
   type CommandCommitMessage,
   type CommandReleaseMessage,
   type CommandResultMessage,
-  type EventAckMessage,
-  type EventPublishBatchMessage,
-  type EventPublishMessage,
-  type EventRejectedMessage,
   type SteerTurnCommandMessage,
   type SupervisorHeartbeatAckMessage,
   type SupervisorHeartbeatMessage,
@@ -18,13 +14,10 @@ import {
 } from "@pi-cloud/protocol";
 import WebSocket, { type RawData } from "ws";
 import type { PreparedTurnSteer } from "./agent-run-supervisor.ts";
-import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";
-import { EventDeliveryRejectedError } from "./in-memory-event-spool.ts";
 import { PINNED_PI_CODING_AGENT_VERSION } from "./pi-turn-runtime.ts";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const DEFAULT_CLOSE_TIMEOUT_MS = 1_000;
-const DEFAULT_EVENT_ACK_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024;
 const DEFAULT_MAX_PENDING_FRAMES = 16;
 
@@ -42,9 +35,6 @@ export interface SupervisorHeartbeatRuntime {
 export interface SupervisorControlRuntime extends SupervisorHeartbeatRuntime {
   prepareSteer(value: unknown): PreparedTurnSteer;
   revokeAllAssignments(): unknown;
-  recoverPendingEvents?(
-    publishEvent: (message: EventPublishMessage) => Promise<EventAckMessage>,
-  ): Promise<SupervisorEventSpoolRecoveryResult>;
 }
 
 export type SupervisorWebSocketRegistration = {
@@ -68,7 +58,6 @@ export type SupervisorWebSocketClientOptions = {
   idGenerator?: () => string;
   connectTimeoutMs?: number;
   closeTimeoutMs?: number;
-  eventAckTimeoutMs?: number;
   maxPayloadBytes?: number;
   maxPendingFrames?: number;
   maxBufferedSendBytes?: number;
@@ -105,13 +94,6 @@ type ClientState = "idle" | "connecting" | "registered" | "failing" | "stopping"
 
 type PendingHeartbeat = {
   message: SupervisorHeartbeatMessage;
-  timeout: NodeJS.Timeout;
-};
-
-type PendingEventAcknowledgement = {
-  message: EventPublishMessage | EventPublishBatchMessage;
-  resolve: (acknowledgement: EventAckMessage) => void;
-  reject: (error: SupervisorWebSocketClientError | EventDeliveryRejectedError) => void;
   timeout: NodeJS.Timeout;
 };
 
@@ -238,7 +220,6 @@ export class SupervisorWebSocketClient {
   readonly #idGenerator: () => string;
   readonly #connectTimeoutMs: number;
   readonly #closeTimeoutMs: number;
-  readonly #eventAckTimeoutMs: number;
   readonly #maxPayloadBytes: number;
   readonly #maxPendingFrames: number;
   readonly #maxBufferedSendBytes: number;
@@ -246,7 +227,6 @@ export class SupervisorWebSocketClient {
   readonly #closedPromise: Promise<SupervisorWebSocketClientClose>;
   readonly #resolveClosed: (value: SupervisorWebSocketClientClose) => void;
   readonly #preparedCommands = new Map<string, RemotePreparedCommand>();
-  readonly #pendingEventAcknowledgements = new Map<string, PendingEventAcknowledgement>();
   readonly #commandTasks = new Set<Promise<void>>();
   #state: ClientState = "idle";
   #socket: WebSocket | undefined;
@@ -318,10 +298,6 @@ export class SupervisorWebSocketClient {
       options.closeTimeoutMs ?? DEFAULT_CLOSE_TIMEOUT_MS,
       "closeTimeoutMs",
     );
-    this.#eventAckTimeoutMs = positiveInteger(
-      options.eventAckTimeoutMs ?? DEFAULT_EVENT_ACK_TIMEOUT_MS,
-      "eventAckTimeoutMs",
-    );
     this.#maxPayloadBytes = positiveInteger(
       options.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES,
       "maxPayloadBytes",
@@ -363,46 +339,6 @@ export class SupervisorWebSocketClient {
       this.#heartbeatTimer = undefined;
     }
     this.#scheduleHeartbeat(0);
-  }
-
-  async recoverPendingEvents(): Promise<SupervisorEventSpoolRecoveryResult> {
-    if (this.#state !== "registered" || this.#registered === undefined) {
-      throw new SupervisorWebSocketClientError(
-        "invalid_client_state",
-        "Pending event recovery requires a registered Supervisor connection",
-        false,
-      );
-    }
-    if (this.#acceptingAssignments) {
-      throw new SupervisorWebSocketClientError(
-        "invalid_client_state",
-        "Pending event recovery requires assignment drain",
-        false,
-      );
-    }
-    if (this.#runtime.recoverPendingEvents === undefined) {
-      return {
-        scannedSpools: 0,
-        replayedSpools: 0,
-        replayedEvents: 0,
-        quarantinedSpools: 0,
-        quarantinedEvents: 0,
-      };
-    }
-    try {
-      return await this.#runtime.recoverPendingEvents((message) => this.#publishEvent(message));
-    } catch (error: unknown) {
-      const failure =
-        error instanceof SupervisorWebSocketClientError
-          ? error
-          : new SupervisorWebSocketClientError(
-              "event_spool_recovery_failed",
-              "Pending Supervisor events could not be recovered",
-              false,
-            );
-      this.#fail(failure.code, failure.message, failure.retryable);
-      throw failure;
-    }
   }
 
   waitUntilClosed(): Promise<SupervisorWebSocketClientClose> {
@@ -471,7 +407,7 @@ export class SupervisorWebSocketClient {
   async stop(): Promise<SupervisorWebSocketClientClose> {
     if (this.#state === "idle") {
       this.#initiatedClose = true;
-      this.#revokeRuntime("Supervisor client stopped");
+      this.#revokeRuntime();
       this.#state = "closed";
       this.#settleClosed({
         initiatedByClient: true,
@@ -494,7 +430,7 @@ export class SupervisorWebSocketClient {
     this.#startReject = undefined;
     this.#state = "stopping";
     this.#clearTimers();
-    this.#revokeRuntime("Supervisor client stopped");
+    this.#revokeRuntime();
     const socket = this.#socket;
     if (socket !== undefined && socket.readyState === WebSocket.OPEN) {
       socket.close(1_000, "client shutdown");
@@ -620,14 +556,6 @@ export class SupervisorWebSocketClient {
     if (this.#state !== "registered") return;
     if (message.type === "supervisor.heartbeat.ack") {
       this.#acceptHeartbeatAcknowledgement(message);
-      return;
-    }
-    if (message.type === "event.ack") {
-      this.#acceptEventAcknowledgement(message);
-      return;
-    }
-    if (message.type === "event.rejected") {
-      this.#acceptEventRejection(message);
       return;
     }
     if (message.type === "command.turn.steer") {
@@ -823,124 +751,6 @@ export class SupervisorWebSocketClient {
     this.#preparedCommands.delete(release.payload.commandId);
   }
 
-  async #publishEvent(
-    value: EventPublishMessage | EventPublishBatchMessage,
-  ): Promise<EventAckMessage> {
-    const message = parseSupervisorToControlMessage(value);
-    if (message.type !== "event.publish" && message.type !== "event.publish_batch") {
-      throw new SupervisorWebSocketClientError(
-        "invalid_event",
-        "Supervisor runtime produced an invalid event publication",
-        false,
-      );
-    }
-    if (this.#state !== "registered") {
-      throw new SupervisorWebSocketClientError(
-        "event_transport_unavailable",
-        "Supervisor event transport is unavailable",
-        true,
-      );
-    }
-    const lastEvent =
-      message.type === "event.publish" ? message.payload.event : message.payload.events.at(-1)!;
-    const sessionId = lastEvent.sessionId;
-    if (this.#pendingEventAcknowledgements.has(sessionId)) {
-      throw new SupervisorWebSocketClientError(
-        "event_ack_overlap",
-        "Session already has an event awaiting acknowledgement",
-        false,
-      );
-    }
-    let pending!: PendingEventAcknowledgement;
-    const acknowledgement = new Promise<EventAckMessage>((resolvePromise, rejectPromise) => {
-      const timeout = setTimeout(() => {
-        if (this.#pendingEventAcknowledgements.get(sessionId) !== pending) return;
-        this.#pendingEventAcknowledgements.delete(sessionId);
-        const error = new SupervisorWebSocketClientError(
-          "event_ack_timeout",
-          "Supervisor event acknowledgement timed out",
-          true,
-        );
-        rejectPromise(error);
-        this.#fail(error.code, error.message, error.retryable);
-      }, this.#eventAckTimeoutMs);
-      timeout.unref();
-      pending = {
-        message,
-        resolve: resolvePromise,
-        reject: rejectPromise,
-        timeout,
-      };
-      this.#pendingEventAcknowledgements.set(sessionId, pending);
-    });
-    try {
-      await this.#send(message);
-    } catch (error: unknown) {
-      if (this.#pendingEventAcknowledgements.get(sessionId) === pending) {
-        clearTimeout(pending.timeout);
-        this.#pendingEventAcknowledgements.delete(sessionId);
-        pending.reject(
-          error instanceof SupervisorWebSocketClientError
-            ? error
-            : new SupervisorWebSocketClientError(
-                "event_send_failed",
-                "Supervisor event could not be sent",
-                true,
-              ),
-        );
-      }
-    }
-    return acknowledgement;
-  }
-
-  #acceptEventAcknowledgement(message: EventAckMessage): void {
-    const pending = this.#pendingEventAcknowledgements.get(message.payload.sessionId);
-    const lastEvent =
-      pending?.message.type === "event.publish"
-        ? pending.message.payload.event
-        : pending?.message.payload.events.at(-1);
-    if (
-      pending === undefined ||
-      lastEvent === undefined ||
-      message.payload.leaseId !== pending.message.payload.leaseId ||
-      message.payload.fencingToken !== pending.message.payload.fencingToken ||
-      message.payload.acknowledgedThroughSeq !== lastEvent.seq
-    ) {
-      throw new SupervisorWebSocketClientError(
-        "event_ack_mismatch",
-        "Supervisor event acknowledgement identity did not match",
-        false,
-      );
-    }
-    clearTimeout(pending.timeout);
-    this.#pendingEventAcknowledgements.delete(message.payload.sessionId);
-    pending.resolve(message);
-  }
-
-  #acceptEventRejection(message: EventRejectedMessage): void {
-    const pending = this.#pendingEventAcknowledgements.get(message.payload.sessionId);
-    const lastEvent =
-      pending?.message.type === "event.publish"
-        ? pending.message.payload.event
-        : pending?.message.payload.events.at(-1);
-    if (
-      pending === undefined ||
-      lastEvent === undefined ||
-      message.payload.leaseId !== pending.message.payload.leaseId ||
-      message.payload.fencingToken !== pending.message.payload.fencingToken ||
-      message.payload.rejectedSeq !== lastEvent.seq
-    ) {
-      throw new SupervisorWebSocketClientError(
-        "event_rejection_mismatch",
-        "Supervisor event rejection identity did not match",
-        false,
-      );
-    }
-    clearTimeout(pending.timeout);
-    this.#pendingEventAcknowledgements.delete(message.payload.sessionId);
-    pending.reject(new EventDeliveryRejectedError(message));
-  }
-
   #scheduleHeartbeat(delayMs: number): void {
     if (this.#state !== "registered") return;
     if (this.#heartbeatTimer !== undefined) clearTimeout(this.#heartbeatTimer);
@@ -1044,9 +854,9 @@ export class SupervisorWebSocketClient {
     this.#startReject = undefined;
     this.#state = "failing";
     this.#clearTimers();
-    this.#invalidateTransport(safeMessage);
+    this.#invalidateTransport();
     if (!retryable || this.#revokeRuntimeOnRetryableDisconnect) {
-      this.#revokeRuntime(safeMessage);
+      this.#revokeRuntime();
     }
     const socket = this.#socket;
     if (socket !== undefined && socket.readyState === WebSocket.OPEN) {
@@ -1074,9 +884,9 @@ export class SupervisorWebSocketClient {
       this.#startReject = undefined;
     }
     this.#clearTimers();
-    this.#invalidateTransport("Supervisor connection closed");
+    this.#invalidateTransport();
     if (this.#initiatedClose || !retryable || this.#revokeRuntimeOnRetryableDisconnect) {
-      this.#revokeRuntime("Supervisor connection closed");
+      this.#revokeRuntime();
     }
     this.#state = "closed";
     this.#settleClosed({
@@ -1088,26 +898,16 @@ export class SupervisorWebSocketClient {
     });
   }
 
-  #revokeRuntime(message: string): void {
+  #revokeRuntime(): void {
     if (this.#runtimeRevoked) return;
     this.#runtimeRevoked = true;
-    this.#invalidateTransport(message);
+    this.#invalidateTransport();
     this.#runtime.revokeAllAssignments();
   }
 
-  #invalidateTransport(message: string): void {
+  #invalidateTransport(): void {
     if (this.#transportInvalidated) return;
     this.#transportInvalidated = true;
-    const error = new SupervisorWebSocketClientError(
-      "event_transport_closed",
-      message.slice(0, 4_096) || "Supervisor event transport closed",
-      true,
-    );
-    for (const pending of this.#pendingEventAcknowledgements.values()) {
-      clearTimeout(pending.timeout);
-      pending.reject(error);
-    }
-    this.#pendingEventAcknowledgements.clear();
     for (const entry of this.#preparedCommands.values()) {
       if (!entry.committed) entry.prepared.releaseBeforeStart();
     }

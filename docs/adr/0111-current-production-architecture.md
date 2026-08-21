@@ -73,12 +73,23 @@ execution path and failure semantics.
 
 ### Event and recovery semantics
 
-- Worker events enter an append-only local WAL and are sent in ordered batches.
-  The browser sees only the contiguous prefix acknowledged by Kafka and
-  projected into Valkey.
-- Settlement stores one complete canonical Turn in PostgreSQL; live deltas age
-  out according to Kafka/Valkey retention and are not duplicated permanently in
-  the business database.
+- Adjacent text fragments are coalesced once; one bounded Host-level queue
+  groups independent Sessions for authenticated transport. There is no Worker
+  disk WAL. A Worker crash may discard only a suffix that Kafka never
+  acknowledged and the browser therefore never observed.
+- Pi SessionStorage and the browser stream are independent projections.
+  `message_end` appends a complete Pi message without waiting for Kafka or
+  Valkey; Kafka acknowledgement controls only whether a delta may become
+  browser-visible. Pi's ordered log stores stable identifiers and hydrates the
+  canonical entries/records on read.
+- The browser sees only the contiguous prefix acknowledged by Kafka and
+  projected into Valkey. Failed or cancelled visible text is settled into a
+  bounded hidden Pi entry, so Worker replacement preserves both UI history and
+  subsequent model context.
+- Settlement stores the terminal event and metadata in PostgreSQL without
+  waiting for Valkey or reading a transcript back from it. A lagging projector
+  later promotes that terminal sequence after it projects the preceding Kafka
+  range. Live deltas age out; no second complete transcript is materialized.
 - Queue delivery and event batches are at least once with idempotent/fenced
   commits. Arbitrary shell starts are not exactly once. An ambiguous Tool result
   becomes `UNKNOWN` and is never blindly replayed.
@@ -104,6 +115,11 @@ execution path and failure semantics.
 - A lost Worker or Cube can preserve committed conversation and Workspace files,
   but not an in-memory process world.
 - Streaming durability does not impose per-token PostgreSQL rows.
+- Removing the local WAL deliberately weakens "model generated" durability,
+  but not "user observed" durability: unacknowledged bytes are invisible.
+- Normal message persistence never sends a control signal to the live-stream
+  projection. Stream inspection is reserved for exceptional hard-interruption
+  reconciliation when no Pi `message_end` exists.
 - Removing a scheduler, cache or warm runtime cannot change correctness as long
   as the three durable authorities and fencing rules remain intact.
 - New architecture components require measured need, a named authority boundary

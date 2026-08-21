@@ -7,7 +7,6 @@ import {
 import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
 import { HttpDurableEventIngestor } from "@pi-cloud/runtime-core/http-durable-event-ingestor";
 import { GroupedDurableEventIngestor } from "@pi-cloud/runtime-core/grouped-durable-event-ingestor";
-import { PostgresEventProjectionBarrier } from "@pi-cloud/runtime-core/event-projection-barrier";
 import { AgentRunExecutionBackend } from "@pi-cloud/runtime-core/agent-run-execution-backend";
 import {
   PostgresTenantModelCredentialResolver,
@@ -31,7 +30,6 @@ import {
 } from "@pi-cloud/protocol";
 import { ReplicatedToolBrokerClient } from "@pi-cloud/tool-broker";
 import {
-  WalEventSpoolStore,
   createPiSubagentsCloudTool,
   AgentRunSupervisor,
   RemoteToolSandboxTurnRunner,
@@ -41,7 +39,6 @@ import {
   type ReconnectingSupervisorWebSocketClientStop,
 } from "@pi-cloud/sandbox-supervisor";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { resolve } from "node:path";
 import { sql, type Kysely } from "kysely";
 import { SupervisorBootLedger, type SupervisorHostBootIdentity } from "./boot-ledger.ts";
 import type { SupervisorHostConfig } from "./config.ts";
@@ -441,6 +438,7 @@ export class PiWorkerRuntime {
             scope: {
               tenantId: command.payload.tenantId,
               sessionId: command.payload.sessionId,
+              turnId: command.payload.turnId,
               runId: command.payload.runId,
               attemptId: command.payload.attemptId,
             },
@@ -597,19 +595,9 @@ export class PiWorkerRuntime {
         turnTimeoutMs: this.#config.piTurnTimeoutMs,
         ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
       });
-      const spoolStore = new WalEventSpoolStore({
-        rootDirectory: resolve(this.#config.eventSpoolDirectory, "active", identity.bootId),
-        quarantineDirectory: resolve(
-          this.#config.eventSpoolDirectory,
-          "quarantine",
-          identity.bootId,
-        ),
-      });
       const runSupervisor = new AgentRunSupervisor({
         runner,
         maxConcurrentSessions: this.#config.maxConcurrentSessions,
-        eventSpoolFactory: (options) => spoolStore.open(options),
-        eventSpoolRecovery: spoolStore,
       });
       this.#runSupervisor = runSupervisor;
       client = new ReconnectingSupervisorWebSocketClient({
@@ -642,9 +630,6 @@ export class PiWorkerRuntime {
             ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
           });
       const groupedEventIngestor = new GroupedDurableEventIngestor({ store: eventStore });
-      const eventProjectionBarrier = this.#config.externalWorkerEventLog
-        ? new PostgresEventProjectionBarrier({ database: this.#database })
-        : undefined;
       const terminalTurnProjectionSource = this.#config.externalWorkerEventLog
         ? new HttpTerminalTurnProjectionSource({
             baseUrl: this.#config.workerEventIngestBaseUrl!,
@@ -689,7 +674,6 @@ export class PiWorkerRuntime {
           backend: runBackend,
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
-          ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
           ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
           claimOwnerId: runWorkerIdentity,
           ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
@@ -699,7 +683,6 @@ export class PiWorkerRuntime {
           backend: runBackend,
           leaseManager: leaseCoordinator,
           eventNotificationPublisher: eventNotifications,
-          ...(eventProjectionBarrier === undefined ? {} : { eventProjectionBarrier }),
           ...(terminalTurnProjectionSource === undefined ? {} : { terminalTurnProjectionSource }),
         }),
         onFailure: (operation, error) =>

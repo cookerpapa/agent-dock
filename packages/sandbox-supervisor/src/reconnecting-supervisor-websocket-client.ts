@@ -1,5 +1,4 @@
 import type { SupervisorRegisteredMessage } from "@pi-cloud/protocol";
-import type { SupervisorEventSpoolRecoveryResult } from "./in-memory-event-spool.ts";
 import {
   SupervisorWebSocketClient,
   SupervisorWebSocketClientError,
@@ -17,15 +16,11 @@ const DEFAULT_ASSIGNMENT_TEARDOWN_TIMEOUT_MS = 30_000;
 export interface ReconnectingSupervisorControlRuntime extends SupervisorControlRuntime {
   readonly activeSessionCount: number;
   waitUntilAssignmentsSettled(): Promise<void>;
-  recoverPendingEvents(
-    publishEvent: Parameters<NonNullable<SupervisorControlRuntime["recoverPendingEvents"]>>[0],
-  ): Promise<SupervisorEventSpoolRecoveryResult>;
 }
 
 export interface SupervisorWebSocketConnection {
   readonly connectionId: string | undefined;
   setAcceptingAssignments(value: boolean): void;
-  recoverPendingEvents(): Promise<SupervisorEventSpoolRecoveryResult>;
   start(): Promise<SupervisorRegisteredMessage>;
   stop(): Promise<SupervisorWebSocketClientClose>;
   waitUntilClosed(): Promise<SupervisorWebSocketClientClose>;
@@ -94,9 +89,6 @@ function clientOptions(
     revokeAllAssignments() {
       return options.runtime.revokeAllAssignments();
     },
-    recoverPendingEvents(publishEvent) {
-      return options.runtime.recoverPendingEvents(publishEvent);
-    },
   };
   const result: SupervisorWebSocketClientOptions = {
     url: options.url,
@@ -112,9 +104,6 @@ function clientOptions(
   if (options.idGenerator !== undefined) result.idGenerator = options.idGenerator;
   if (options.connectTimeoutMs !== undefined) result.connectTimeoutMs = options.connectTimeoutMs;
   if (options.closeTimeoutMs !== undefined) result.closeTimeoutMs = options.closeTimeoutMs;
-  if (options.eventAckTimeoutMs !== undefined) {
-    result.eventAckTimeoutMs = options.eventAckTimeoutMs;
-  }
   if (options.maxPayloadBytes !== undefined) result.maxPayloadBytes = options.maxPayloadBytes;
   if (options.maxPendingFrames !== undefined) result.maxPendingFrames = options.maxPendingFrames;
   if (options.maxBufferedSendBytes !== undefined) {
@@ -286,13 +275,6 @@ export class ReconnectingSupervisorWebSocketClient {
       let startFailure: { code: string; message: string; retryable: boolean } | undefined;
       try {
         registration = await connection.start();
-        // A retryable control-channel reconnect can overlap a PostgreSQL-owned
-        // Run. Its active WAL is not recovery input, and the connection is not
-        // an execution lease authority. The normal publisher drains that WAL;
-        // settled spools are recovered when the Worker is otherwise idle.
-        if (this.#runtime.activeSessionCount === 0) {
-          await connection.recoverPendingEvents();
-        }
         connection.setAcceptingAssignments(this.#acceptingAssignments);
         connectedAt = Date.now();
         this.#successfulConnections += 1;

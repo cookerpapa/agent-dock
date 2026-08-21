@@ -42,7 +42,7 @@ type ConnectionManagerConfiguration = Omit<
   "database" | "controlPlaneInstanceId" | "ownerBoundary" | "assignmentRetirerFactory"
 >;
 
-type ControlChannelConfiguration = Omit<WorkerControlChannelRouterOptions, "eventIngestor">;
+type ControlChannelConfiguration = WorkerControlChannelRouterOptions;
 
 type GatewayConfiguration = Omit<
   SupervisorWebSocketGatewayOptions,
@@ -165,10 +165,7 @@ export async function createControlPlaneRuntime(
   const eventIngestor = new GroupedDurableEventIngestor({
     store: options.workerEventIngestor ?? eventStore,
   });
-  const controlChannelRouter = new WorkerControlChannelRouter({
-    ...options.controlChannelRouter,
-    eventIngestor,
-  });
+  const controlChannelRouter = new WorkerControlChannelRouter(options.controlChannelRouter);
   const connectionManager = new SupervisorConnectionManager({
     ...options.connectionManager,
     database: options.database,

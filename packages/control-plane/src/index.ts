@@ -131,13 +131,7 @@ export {
   type DurableEventStoreOptions,
   type EventReplayWindow,
 } from "@pi-cloud/runtime-core/durable-event-store";
-export {
-  materializeConversationTurnProjection,
-  materializeConversationTurnProjections,
-  projectConversationTurnTranscript,
-  type MaterializeConversationTurnProjectionInput,
-  type MaterializeConversationTurnProjectionsInput,
-} from "@pi-cloud/runtime-core/conversation-turn-projection";
+export { projectConversationTurnTranscript } from "@pi-cloud/runtime-core/conversation-turn-projection";
 export {
   DeterministicExecutionBackend,
   type DeterministicExecutionOutcome,

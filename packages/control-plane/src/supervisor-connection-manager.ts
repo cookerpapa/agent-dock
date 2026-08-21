@@ -7,7 +7,6 @@ import { transitionSandbox, type SandboxState } from "@pi-cloud/domain";
 import {
   parseControlToSupervisorMessage,
   parseSupervisorToControlMessage,
-  type EventPublishMessage,
   type SupervisorHeartbeatAckMessage,
   type SupervisorRegisterMessage,
   type SupervisorRegisteredMessage,
@@ -167,18 +166,6 @@ function positiveInteger(value: number, name: string): number {
     throw new TypeError(`${name} must be a positive safe integer`);
   }
   return value;
-}
-
-function storedPositiveInteger(value: string | number | bigint, name: string): number {
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new SupervisorConnectionManagerError(
-      "connection_invariant",
-      `${name} is outside the supported integer range`,
-      false,
-    );
-  }
-  return parsed;
 }
 
 function validDate(clock: () => Date): Date {
@@ -660,43 +647,6 @@ export class SupervisorConnectionManager {
     authority: SupervisorTransportAuthority,
   ): Promise<void> {
     await this.#currentConnection(connectionId, authority);
-  }
-
-  async assertEventAuthority(
-    connectionId: string,
-    authority: SupervisorTransportAuthority,
-    value: EventPublishMessage,
-  ): Promise<void> {
-    const message = parseSupervisorToControlMessage(value);
-    if (message.type !== "event.publish") {
-      throw new SupervisorConnectionManagerError(
-        "invalid_event",
-        "Expected a supervisor event publication",
-        false,
-      );
-    }
-    const event = message.payload.event;
-    await this.#currentConnection(connectionId, authority);
-    const now = validDate(this.#clock);
-    const lease = await this.#database
-      .selectFrom("session_leases")
-      .select(["sandbox_id", "lease_id", "fencing_token", "valid_until"])
-      .where("session_id", "=", event.sessionId)
-      .executeTakeFirst();
-    if (
-      lease === undefined ||
-      lease.sandbox_id !== authority.sandboxId ||
-      lease.lease_id !== message.payload.leaseId ||
-      storedPositiveInteger(lease.fencing_token, "event authority fencing token") !==
-        message.payload.fencingToken ||
-      new Date(lease.valid_until).valueOf() <= now.valueOf()
-    ) {
-      throw new SupervisorConnectionManagerError(
-        "stale_fence",
-        "Supervisor event lease authority is stale",
-        false,
-      );
-    }
   }
 
   async leaseCoordinator(

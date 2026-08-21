@@ -43,15 +43,17 @@ result is `UNKNOWN`.
 
 ## Events and terminal commit
 
-Pi events first enter the Worker WAL, then cross the authenticated Kafka batch
+Pi text fragments are coalesced, then independent Sessions share one bounded
+Host group-commit queue. Kafka acknowledgement is the first remote durability
 boundary. The Valkey projector advances PostgreSQL's projected watermark only
 after it builds the contiguous live read model. SSE exposes no later prefix.
 
-On successful settlement, the Worker prepares the complete assistant message,
-Pi Session mutation and bounded Workspace Volume revision. The terminal
-transaction validates the current Attempt/fence, writes canonical conversation
-state, advances the Workspace revision if applicable, commits the terminal
-event and settles the Run.
+Pi `message_end` appends complete SessionStorage state independently of the live
+event path. On successful settlement, the Worker prepares the bounded Workspace
+Volume revision. The terminal transaction validates the current Attempt/fence,
+advances the Workspace revision if applicable, commits the terminal event and
+settles the Run without waiting for Valkey. A lagging Kafka projector exposes
+that terminal event only after the preceding live-event gap closes.
 
 ## Cancellation and failure
 
