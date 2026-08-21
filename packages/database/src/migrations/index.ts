@@ -75,6 +75,7 @@ import * as recursiveSubagentTrees from "./073_recursive_subagent_trees.ts";
 import * as userOwnedDevelopmentEnvironments from "./074_user_owned_development_environments.ts";
 import * as canonicalPiConversationEntries from "./075_canonical_pi_conversation_entries.ts";
 import * as postgresLiveEventAuthority from "./076_postgres_live_event_authority.ts";
+import * as removeLegacyEventIdTrigger from "./077_remove_legacy_event_id_trigger.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -155,6 +156,7 @@ export const migrationProvider: MigrationProvider = {
       "074_user_owned_development_environments": userOwnedDevelopmentEnvironments,
       "075_canonical_pi_conversation_entries": canonicalPiConversationEntries,
       "076_postgres_live_event_authority": postgresLiveEventAuthority,
+      "077_remove_legacy_event_id_trigger": removeLegacyEventIdTrigger,
     };
   },
 };
@@ -439,3 +441,7 @@ export {
   down as downPostgresLiveEventAuthority,
   up as upPostgresLiveEventAuthority,
 } from "./076_postgres_live_event_authority.ts";
+export {
+  down as downRemoveLegacyEventIdTrigger,
+  up as upRemoveLegacyEventIdTrigger,
+} from "./077_remove_legacy_event_id_trigger.ts";

@@ -2,6 +2,7 @@ import { sql, type Kysely } from "kysely";
 
 /** Removes cursor state that existed only for Kafka-to-Valkey projection. */
 export async function up(db: Kysely<unknown>): Promise<void> {
+  await sql`drop function if exists agent_dock_register_session_event_id() cascade`.execute(db);
   await sql`drop function if exists pi_cloud_register_session_event_id() cascade`.execute(db);
   await sql`drop table if exists session_event_ids`.execute(db);
   await sql`drop table if exists worker_event_projection_offsets`.execute(db);

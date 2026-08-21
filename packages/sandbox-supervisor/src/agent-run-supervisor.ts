@@ -112,8 +112,8 @@ type Steer = {
 export class AgentRunSupervisorError extends Error {
   readonly code: string;
 
-  constructor(code: string, message: string) {
-    super(message);
+  constructor(code: string, message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "AgentRunSupervisorError";
     this.code = code;
   }
@@ -649,10 +649,11 @@ export class AgentRunSupervisor {
         let acknowledgement: EventAckMessage;
         try {
           acknowledgement = await assignment.publishEvent(message);
-        } catch {
+        } catch (error: unknown) {
           throw new AgentRunSupervisorError(
             "invalid_event_delivery",
-            "Supervisor event publisher did not cross the remote durability boundary",
+            "Supervisor event publisher did not cross the PostgreSQL durability boundary",
+            { cause: error },
           );
         }
         if (

@@ -1,7 +1,8 @@
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDatabase, runMigrations } from "../src/index.ts";
+import { createDatabase, runMigrations, upRemoveLegacyEventIdTrigger } from "../src/index.ts";
+import { applyCompiledQueries, compileMigration } from "./postgres-test-harness.ts";
 
 let pglite: PGlite;
 let socket: PGLiteSocketServer;
@@ -55,5 +56,46 @@ describe("PostgreSQL live-event authority migration", () => {
          and conname = 'session_event_cursors_bounds_valid'
     `);
     expect(constraints.rows).toEqual([{ conname: "session_event_cursors_bounds_valid" }]);
+  });
+
+  it("removes the pre-rename trigger from an occupied AgentDock database", async () => {
+    const legacy = await PGlite.create();
+    try {
+      await legacy.exec(`
+        create table session_event_ids (event_id uuid primary key);
+        create table session_events (event_id uuid not null);
+        create function agent_dock_register_session_event_id()
+        returns trigger language plpgsql as $$
+        begin
+          insert into session_event_ids (event_id) values (new.event_id);
+          return new;
+        end;
+        $$;
+        create trigger session_events_register_event_id
+        before insert on session_events
+        for each row execute function agent_dock_register_session_event_id();
+      `);
+      await applyCompiledQueries(legacy, await compileMigration(upRemoveLegacyEventIdTrigger));
+      expect(
+        (
+          await legacy.query<{ count: number }>(`
+            select count(*)::int as count
+              from information_schema.triggers
+             where trigger_name = 'session_events_register_event_id'
+          `)
+        ).rows,
+      ).toEqual([{ count: 0 }]);
+      expect(
+        (
+          await legacy.query<{ count: number }>(`
+            select count(*)::int as count
+              from information_schema.tables
+             where table_name = 'session_event_ids'
+          `)
+        ).rows,
+      ).toEqual([{ count: 0 }]);
+    } finally {
+      await legacy.close();
+    }
   });
 });

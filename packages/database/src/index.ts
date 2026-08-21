@@ -131,6 +131,10 @@ export {
   downUserOwnedDevelopmentEnvironments,
   upCanonicalPiConversationEntries,
   downCanonicalPiConversationEntries,
+  upPostgresLiveEventAuthority,
+  downPostgresLiveEventAuthority,
+  upRemoveLegacyEventIdTrigger,
+  downRemoveLegacyEventIdTrigger,
 } from "./migrations/index.ts";
 
 export {
