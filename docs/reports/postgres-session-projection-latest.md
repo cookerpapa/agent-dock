@@ -1,9 +1,9 @@
 # PostgreSQL Session projection acceptance
 
 - Complete messages: 8000
-- Throughput: 1087.97 messages/s
-- Latency p50/p95/p99: 226.26 / 303.24 / 429.42 ms
-- WAL: 52470900 bytes (6558.86 bytes/message)
+- Throughput: 1139.26 messages/s
+- Latency p50/p95/p99: 205.89 / 293.65 / 471.54 ms
+- WAL: 52406655 bytes (6550.83 bytes/message)
 - Failures: 0
 
 This measures complete semantic Session projection, not token deltas.

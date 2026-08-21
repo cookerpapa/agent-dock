@@ -1,7 +1,7 @@
 {
   "format": "pi-cloud.kafka-first-event-acceptance.v1",
-  "generatedAt": "2026-08-21T19:49:24.399Z",
-  "revision": "bfbdfb76bf31fff74ec1501c8423b6e54fbcd3db",
+  "generatedAt": "2026-08-21T20:35:48.509Z",
+  "revision": "f1b5061cef6036c8c1cd0a698552e48d476e92aa",
   "topology": {
     "brokers": ["kafka:9092"],
     "partitions": 16,
@@ -15,8 +15,8 @@
     "envelopes": 512
   },
   "result": {
-    "durationMs": 1328.75,
-    "eventsPerSecond": 6165.2,
+    "durationMs": 702.49,
+    "eventsPerSecond": 11661.41,
     "sessionOrderViolations": 0
   },
   "scope": [

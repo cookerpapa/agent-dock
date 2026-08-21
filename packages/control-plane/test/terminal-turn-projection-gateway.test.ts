@@ -23,6 +23,7 @@ describe("TerminalTurnProjectionGateway", () => {
       },
       source: {
         async prepare(input) {
+          if (input.body.type !== "turn.failed") throw new Error("expected failed terminal");
           return {
             schemaVersion: 1,
             previousSequence: 1,
