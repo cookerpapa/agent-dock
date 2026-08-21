@@ -1,7 +1,7 @@
 {
   "format": "pi-cloud.postgres-event-log-capacity.v2",
-  "generatedAt": "2026-08-21T15:32:10.407Z",
-  "gitRevision": "be8bfec0641099fd3678692e72aad1a4e12ea74a",
+  "generatedAt": "2026-08-21T16:06:42.813Z",
+  "gitRevision": "c713908b897f5dbb16e96afe0278818d5690a244",
   "database": {
     "image": "postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94",
     "partitions": 32,
@@ -20,16 +20,16 @@
     "passed": true,
     "failures": [],
     "persistedEvents": 8000,
-    "elapsedMs": 5932,
-    "eventsPerSecond": 1348.62,
-    "batchTransactionsPerSecond": 1348.62,
+    "elapsedMs": 5877,
+    "eventsPerSecond": 1361.19,
+    "batchTransactionsPerSecond": 1361.19,
     "ackLatencyMs": {
-      "p50": 176,
-      "p95": 262.01,
-      "p99": 288.15
+      "p50": 172.09,
+      "p95": 274.61,
+      "p99": 320.99
     },
-    "walBytes": 13251949,
-    "walBytesPerEvent": 1656.49
+    "walBytes": 13409456,
+    "walBytesPerEvent": 1676.18
   },
   "slo": {
     "maximumAckP95Ms": 500,
