@@ -64,6 +64,24 @@ assert(
   "Supervisor image must not assume npm creates a sandbox-supervisor node_modules directory",
 );
 assert(
+  dockerfile.includes("retry-npm-command.sh rebuild @confluentinc/kafka-javascript"),
+  "Supervisor image must build the pinned Kafka native binding",
+);
+const controlPlaneDockerfile = await readFile(
+  resolve(packagesDirectory, "control-plane", "Dockerfile"),
+  "utf8",
+);
+assert(
+  controlPlaneDockerfile.includes("retry-npm-command.sh rebuild @confluentinc/kafka-javascript"),
+  "Control Plane image must build the pinned Kafka native binding",
+);
+assert(
+  controlPlaneDockerfile.includes(
+    "COPY packages/pi-session-postgres/src packages/pi-session-postgres/src",
+  ),
+  "Control Plane image must include the Session mutation projector dependency",
+);
+assert(
   dockerfile.includes(
     "COPY --from=dependencies /app/packages/tool-broker/node_modules /app/packages/tool-broker/node_modules",
   ),

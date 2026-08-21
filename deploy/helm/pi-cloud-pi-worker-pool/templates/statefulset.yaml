@@ -133,6 +133,12 @@ spec:
               value: /run/pi-cloud-secrets/database-url
             - name: DATABASE_NOTIFICATION_URL_FILE
               value: /run/pi-cloud-secrets/database-notification-url
+            - name: PI_CLOUD_KAFKA_BROKERS
+              value: {{ join "," .Values.services.kafkaBrokers | quote }}
+            - name: PI_CLOUD_KAFKA_RAW_EVENT_TOPIC
+              value: {{ .Values.services.kafkaRawEventTopic | quote }}
+            - name: PI_CLOUD_KAFKA_SESSION_MUTATION_TOPIC
+              value: {{ .Values.services.kafkaSessionMutationTopic | quote }}
             - name: PI_CLOUD_ALLOW_INSECURE_INTERNAL_HTTP
               value: {{ .Values.runtime.allowInsecureInternalHttp | quote }}
             - name: PI_CLOUD_CONTROL_PLANE_URL

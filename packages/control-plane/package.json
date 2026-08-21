@@ -10,7 +10,6 @@
   },
   "scripts": {
     "bootstrap": "tsx src/bootstrap-main.ts",
-    "event-retention": "tsx src/event-retention-main.ts",
     "tenant-admin": "tsx src/tenant-admin.ts",
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",

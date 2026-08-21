@@ -326,6 +326,8 @@ export class PiCloudTurnRunner {
             leaseId: command.payload.leaseId,
             fencingToken: command.payload.fencingToken,
             commandId: command.payload.commandId,
+            runId: command.payload.runId,
+            attemptId: command.payload.attemptId,
             event,
           },
         });

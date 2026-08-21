@@ -8,7 +8,10 @@ import {
   type ControlPlaneApplicationOptions,
 } from "./application.ts";
 import { AssignmentReconciler } from "./assignment-reconciler.ts";
-import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
+import {
+  DurableEventStore,
+  type DurableEventLog,
+} from "@pi-cloud/runtime-core/durable-event-store";
 import { GroupedDurableEventIngestor } from "@pi-cloud/runtime-core/grouped-durable-event-ingestor";
 import {
   SupervisorMaintenanceRuntime,
@@ -32,7 +35,7 @@ import {
 } from "./supervisor-websocket-gateway.ts";
 import type { SupervisorProvisioningGateway } from "./supervisor-boot-provisioner.ts";
 import type { ProductionHttpGateway } from "./production-http-gateway.ts";
-import { PostgresTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
+import { UnavailableTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 
 type ConnectionManagerConfiguration = Omit<
   SupervisorConnectionManagerOptions,
@@ -59,6 +62,7 @@ export type ControlPlaneRuntimeOptions = Omit<
   assignmentInventoryFactory: (identity: SupervisorBootIdentity) => SandboxAssignmentInventory;
   supervisorProvisioningGateway?: SupervisorProvisioningGateway;
   productionHttpGateway?: ProductionHttpGateway;
+  eventRuntime?: ControlPlaneApplicationOptions["eventRuntime"];
   connectionManager?: ConnectionManagerConfiguration;
   controlChannelRouter?: ControlChannelConfiguration;
   gateway?: GatewayConfiguration;
@@ -70,8 +74,8 @@ export type ControlPlaneRuntimeState = "ready" | "running" | "closing" | "closed
 export class ControlPlaneRuntime {
   readonly application: NestFastifyApplication;
   readonly eventHub: SessionEventHub;
-  readonly eventStore: DurableEventStore;
-  readonly eventIngestor: GroupedDurableEventIngestor;
+  readonly eventStore: DurableEventLog;
+  readonly eventIngestor: GroupedDurableEventIngestor | undefined;
   readonly controlChannelRouter: WorkerControlChannelRouter;
   readonly connectionManager: SupervisorConnectionManager;
   readonly gateway: SupervisorWebSocketGateway;
@@ -82,8 +86,8 @@ export class ControlPlaneRuntime {
   constructor(options: {
     application: NestFastifyApplication;
     eventHub: SessionEventHub;
-    eventStore: DurableEventStore;
-    eventIngestor: GroupedDurableEventIngestor;
+    eventStore: DurableEventLog;
+    eventIngestor?: GroupedDurableEventIngestor;
     controlChannelRouter: WorkerControlChannelRouter;
     connectionManager: SupervisorConnectionManager;
     gateway: SupervisorWebSocketGateway;
@@ -133,7 +137,7 @@ export class ControlPlaneRuntime {
     this.maintenance.beginDrain();
     this.gateway.shutdown();
     try {
-      await this.eventIngestor.flush();
+      await this.eventIngestor?.flush();
       await this.maintenance.stop();
     } finally {
       try {
@@ -148,21 +152,20 @@ export class ControlPlaneRuntime {
 export async function createControlPlaneRuntime(
   options: ControlPlaneRuntimeOptions,
 ): Promise<ControlPlaneRuntime> {
-  const eventHub = new SessionEventHub();
-  const eventStore = new DurableEventStore({
-    database: options.database,
-    eventHub,
-    ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
-    ...(options.sessionEventNotifications === undefined
-      ? {}
-      : { eventNotificationPublisher: options.sessionEventNotifications }),
-  });
-  const eventIngestor = new GroupedDurableEventIngestor({
-    store: eventStore,
-  });
-  const terminalTurnProjectionSource = new PostgresTerminalTurnProjectionSource({
-    database: options.database,
-  });
+  const eventHub = options.eventRuntime?.eventHub ?? new SessionEventHub();
+  const eventStore =
+    options.eventRuntime?.eventStore ??
+    new DurableEventStore({
+      eventHub,
+      database: options.database,
+    });
+  const eventIngestor =
+    eventStore instanceof DurableEventStore
+      ? new GroupedDurableEventIngestor({ store: eventStore })
+      : undefined;
+  const terminalTurnProjectionSource =
+    options.eventRuntime?.terminalTurnProjectionSource ??
+    new UnavailableTerminalTurnProjectionSource();
   const controlChannelRouter = new WorkerControlChannelRouter(options.controlChannelRouter);
   const connectionManager = new SupervisorConnectionManager({
     ...options.connectionManager,
@@ -174,9 +177,6 @@ export async function createControlPlaneRuntime(
         database: options.database,
         sandboxId: identity.sandboxId,
         inventory: options.assignmentInventoryFactory(identity),
-        ...(options.sessionEventNotifications === undefined
-          ? {}
-          : { eventNotificationPublisher: options.sessionEventNotifications }),
         terminalTurnProjectionSource,
       }),
   });
@@ -234,10 +234,11 @@ export async function createControlPlaneRuntime(
       ...(options.developmentEnvironmentService === undefined
         ? {}
         : { developmentEnvironmentService: options.developmentEnvironmentService }),
-      eventRuntime: { eventHub, eventStore },
-      ...(options.sessionEventNotifications === undefined
-        ? {}
-        : { sessionEventNotifications: options.sessionEventNotifications }),
+      eventRuntime: {
+        ...(options.eventRuntime ?? {}),
+        eventHub,
+        eventStore,
+      },
       ...(options.sessionEventStreamOptions === undefined
         ? {}
         : { sessionEventStreamOptions: options.sessionEventStreamOptions }),
@@ -248,14 +249,13 @@ export async function createControlPlaneRuntime(
     });
   } catch (error: unknown) {
     gateway.shutdown();
-    await options.sessionEventNotifications?.stop().catch(() => undefined);
     throw error;
   }
   return new ControlPlaneRuntime({
     application,
     eventHub,
     eventStore,
-    eventIngestor,
+    ...(eventIngestor === undefined ? {} : { eventIngestor }),
     controlChannelRouter,
     connectionManager,
     gateway,

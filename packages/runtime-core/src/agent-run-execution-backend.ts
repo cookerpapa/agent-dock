@@ -334,6 +334,8 @@ export class AgentRunExecutionBackend implements TurnExecutionBackend, TurnCance
                   payload: {
                     leaseId: eventMessage.payload.leaseId,
                     fencingToken: eventMessage.payload.fencingToken,
+                    runId: eventMessage.payload.runId,
+                    attemptId: eventMessage.payload.attemptId,
                     ...(eventMessage.payload.commandId === undefined
                       ? {}
                       : { commandId: eventMessage.payload.commandId }),
@@ -400,6 +402,7 @@ export class AgentRunExecutionBackend implements TurnExecutionBackend, TurnCance
         }
       }
       const normalized = normalizeBackendError(error);
+      normalized.lastEventSeq ??= prepared?.lastAcknowledgedEventSeq();
       if (normalized.code === "agent_runner_error") {
         try {
           this.#onUnexpectedError?.(error);

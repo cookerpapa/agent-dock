@@ -617,15 +617,10 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
         })
         .executeTakeFirstOrThrow();
       await transaction
-        .insertInto("pi_sessions")
-        .values({
-          tenant_id: alpha.tenantId,
-          id: alphaSession.sessionId,
-          created_at_ms: NOW.valueOf(),
-          parent_session_id: null,
-          next_seq: 3,
-          name: "Test conversation",
-        })
+        .updateTable("pi_sessions")
+        .set({ next_seq: 3, name: "Test conversation" })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("id", "=", alphaSession.sessionId)
         .executeTakeFirstOrThrow();
       await transaction
         .insertInto("pi_session_entries")
@@ -681,13 +676,11 @@ describe.sequential("opt-in registration and tenant conversation discovery", () 
         ])
         .execute();
       await transaction
-        .insertInto("pi_session_lanes")
-        .values({
-          tenant_id: alpha.tenantId,
-          session_id: alphaSession.sessionId,
-          lane: "main",
-          leaf_id: assistantEntryId,
-        })
+        .updateTable("pi_session_lanes")
+        .set({ leaf_id: assistantEntryId })
+        .where("tenant_id", "=", alpha.tenantId)
+        .where("session_id", "=", alphaSession.sessionId)
+        .where("lane", "=", "main")
         .executeTakeFirstOrThrow();
       await transaction
         .insertInto("pi_session_log")

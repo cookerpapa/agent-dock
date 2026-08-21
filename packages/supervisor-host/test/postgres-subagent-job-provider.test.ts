@@ -167,7 +167,7 @@ beforeAll(async () => {
   parentSandboxId = crypto.randomUUID();
 
   const repository = new PostgresPiSessionRepository({ database, tenantId });
-  const parentPi = await repository.create({ id: parentSessionId });
+  const parentPi = await repository.openById(parentSessionId);
   await parentPi.appendMessage({ role: "user", content: "Earlier context", timestamp: Date.now() });
   await parentPi.appendMessage(assistant("Earlier answer"));
 

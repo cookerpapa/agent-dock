@@ -4,18 +4,22 @@ import {
   PostgresSandboxCheckpointStore,
   TtlCheckpointObjectStore,
 } from "@pi-cloud/runtime-core/checkpoint-runtime";
-import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
+import type { DurableEventIngestor } from "@pi-cloud/runtime-core/durable-event-store";
 import { GroupedDurableEventIngestor } from "@pi-cloud/runtime-core/grouped-durable-event-ingestor";
+import {
+  KafkaAgentEventProducer,
+  PostgresAcceptedEventBarrier,
+} from "@pi-cloud/runtime-core/kafka-agent-event-log";
+import { KafkaPiSessionMutationProducer } from "@pi-cloud/runtime-core/kafka-pi-session-mutations";
 import { AgentRunExecutionBackend } from "@pi-cloud/runtime-core/agent-run-execution-backend";
+import { AcknowledgedTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/acknowledged-terminal-turn-projection";
 import {
   PostgresTenantModelCredentialResolver,
   TenantModelCredentialVault,
 } from "@pi-cloud/runtime-core/model-credential-runtime";
 import { RunCommandExecutor } from "@pi-cloud/runtime-core/run-command-executor";
-import { PostgresSessionEventNotifications } from "@pi-cloud/runtime-core/postgres-session-event-notifications";
 import { PostgresRunAttemptPhaseObserver } from "@pi-cloud/runtime-core/run-attempt-runtime";
 import { SessionLeaseCoordinator } from "@pi-cloud/runtime-core/session-lease-coordinator";
-import { PostgresTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 import { createDatabase, type Database } from "@pi-cloud/database";
 import { GitHubGatewayClient } from "@pi-cloud/github-gateway";
 import { operationalLog, type PiCloudMetrics } from "@pi-cloud/observability";
@@ -73,6 +77,14 @@ export type PiWorkerRuntimeOptions = {
   connectionSecretGenerator?: () => string;
   metrics?: PiCloudMetrics;
   runWorkerFactory?: (options: PostgresPiWorkerOptions) => SupervisorRunWorker;
+  eventIngestor?: DurableEventIngestor & {
+    checkHealth?(): Promise<void>;
+    close?(): Promise<void>;
+  };
+  sessionMutationProducer?: Pick<
+    KafkaPiSessionMutationProducer,
+    "scoped" | "checkHealth" | "close"
+  >;
 };
 
 export type SupervisorRunWorker = {
@@ -176,6 +188,14 @@ export class PiWorkerRuntime {
   readonly #connectionSecretGenerator: () => string;
   readonly #metrics: PiCloudMetrics | undefined;
   readonly #runWorkerFactory: (options: PostgresPiWorkerOptions) => SupervisorRunWorker;
+  readonly #eventIngestor:
+    (DurableEventIngestor & { checkHealth?(): Promise<void>; close?(): Promise<void> }) | undefined;
+  #ownedEventProducer: KafkaAgentEventProducer | undefined;
+  readonly #configuredSessionMutationProducer:
+    Pick<KafkaPiSessionMutationProducer, "scoped" | "checkHealth" | "close"> | undefined;
+  #sessionMutationProducer:
+    Pick<KafkaPiSessionMutationProducer, "scoped" | "checkHealth" | "close"> | undefined;
+  #ownsSessionMutationProducer = false;
   readonly #ownerStoppedPromise: Promise<void>;
   readonly #resolveOwnerStopped: () => void;
   readonly #terminalPromise: Promise<SupervisorHostTerminalReason>;
@@ -231,6 +251,8 @@ export class PiWorkerRuntime {
     this.#metrics = options.metrics;
     this.#runWorkerFactory =
       options.runWorkerFactory ?? ((workerOptions) => new PostgresPiWorker(workerOptions));
+    this.#eventIngestor = options.eventIngestor;
+    this.#configuredSessionMutationProducer = options.sessionMutationProducer;
     let resolveOwnerStopped!: () => void;
     this.#ownerStoppedPromise = new Promise((resolvePromise) => {
       resolveOwnerStopped = resolvePromise;
@@ -409,6 +431,17 @@ export class PiWorkerRuntime {
       await modelGateway.start();
       this.#modelGateway = modelGateway;
       const runWorkerIdentity = `postgres:${identity.supervisorId}:${identity.bootId}`;
+      const sessionMutationProducer =
+        this.#configuredSessionMutationProducer ??
+        new KafkaPiSessionMutationProducer({
+          database: this.#database,
+          brokers: this.#config.kafkaBrokers,
+          clientId: `${this.#config.supervisorId}-session-mutations`,
+          topic: this.#config.kafkaSessionMutationTopic,
+        });
+      this.#ownsSessionMutationProducer = this.#configuredSessionMutationProducer === undefined;
+      await sessionMutationProducer.checkHealth();
+      this.#sessionMutationProducer = sessionMutationProducer;
       const sessionEntryPayloadCache = new PostgresPiSessionEntryPayloadCache();
       const subagentJobs = new PostgresSubagentJobProvider({
         database: this.#database,
@@ -444,6 +477,15 @@ export class PiWorkerRuntime {
             claimOwnerId: runWorkerIdentity,
             fencingToken: command.payload.fencingToken,
             entryPayloadCache: sessionEntryPayloadCache,
+            mutationPublisher: sessionMutationProducer.scoped({
+              tenantId: command.payload.tenantId,
+              sessionId: command.payload.sessionId,
+              turnId: command.payload.turnId,
+              runId: command.payload.runId,
+              attemptId: command.payload.attemptId,
+              claimOwnerId: runWorkerIdentity,
+              fencingToken: command.payload.fencingToken,
+            }),
           }),
         createOrchestrationTools: async (command, orchestrationContext) => {
           const session = await this.#database
@@ -613,19 +655,26 @@ export class PiWorkerRuntime {
       client.setAcceptingAssignments(false);
       this.#client = client;
       await client.start();
-      const eventNotifications = new PostgresSessionEventNotifications({
-        connectionString: this.#config.databaseUrl,
-        applicationName: `${this.#config.supervisorId}-event-publisher`,
-      });
-      const eventStore = new DurableEventStore({
-        database: this.#database,
-        eventNotificationPublisher: eventNotifications,
-        ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
-      });
-      const groupedEventIngestor = new GroupedDurableEventIngestor({ store: eventStore });
-      const terminalTurnProjectionSource = new PostgresTerminalTurnProjectionSource({
-        database: this.#database,
-      });
+      const eventProducer =
+        this.#eventIngestor === undefined
+          ? new KafkaAgentEventProducer({
+              brokers: this.#config.kafkaBrokers,
+              clientId: `${this.#config.supervisorId}-agent-events`,
+              topic: this.#config.kafkaRawEventTopic,
+              acceptedBarrier: new PostgresAcceptedEventBarrier({ database: this.#database }),
+            })
+          : undefined;
+      const eventIngestor =
+        this.#eventIngestor ??
+        new GroupedDurableEventIngestor({
+          store: eventProducer!,
+          maximumDelayMs: 4,
+          maximumGroupSize: 64,
+        });
+      this.#ownedEventProducer = eventProducer;
+      if (eventProducer !== undefined) await eventProducer.checkHealth();
+      else await this.#eventIngestor?.checkHealth?.();
+      const terminalTurnProjectionSource = new AcknowledgedTerminalTurnProjectionSource();
       const leaseCoordinator = new SessionLeaseCoordinator({
         database: this.#database,
         sandboxId: identity.sandboxId,
@@ -633,7 +682,8 @@ export class PiWorkerRuntime {
       const runBackend = new AgentRunExecutionBackend({
         supervisor: runSupervisor,
         leaseCoordinator,
-        eventIngestor: groupedEventIngestor,
+        eventIngestor,
+        onEvent: (publication) => terminalTurnProjectionSource.append(publication),
         onUnexpectedError: (error) =>
           operationalLog({
             service: "pi-cloud-pi-worker",
@@ -653,6 +703,9 @@ export class PiWorkerRuntime {
         canClaimRuns: () => this.#state === "ready" && client?.state === "connected",
         admitRunClaims: async () => {
           try {
+            if (eventProducer !== undefined) await eventProducer.checkHealth();
+            else await this.#eventIngestor?.checkHealth?.();
+            await sessionMutationProducer.checkHealth();
             await this.#toolBroker.checkHealth();
             return true;
           } catch {
@@ -663,7 +716,6 @@ export class PiWorkerRuntime {
           database: this.#database,
           backend: runBackend,
           leaseManager: leaseCoordinator,
-          eventNotificationPublisher: eventNotifications,
           terminalTurnProjectionSource,
           claimOwnerId: runWorkerIdentity,
           ...(this.#metrics === undefined ? {} : { metrics: this.#metrics }),
@@ -672,7 +724,6 @@ export class PiWorkerRuntime {
           database: this.#database,
           backend: runBackend,
           leaseManager: leaseCoordinator,
-          eventNotificationPublisher: eventNotifications,
           terminalTurnProjectionSource,
         }),
         onFailure: (operation, error) =>
@@ -732,6 +783,10 @@ export class PiWorkerRuntime {
     await this.#client?.stop().catch(() => undefined);
     await this.#managementServer?.close().catch(() => undefined);
     await this.#modelGateway?.close().catch(() => undefined);
+    await this.#ownedEventProducer?.close().catch(() => undefined);
+    if (this.#ownsSessionMutationProducer) {
+      await this.#sessionMutationProducer?.close().catch(() => undefined);
+    }
     this.#objectStore.destroy();
     if (this.#ownsDatabase) await this.#database.destroy();
     if (this.#state !== "failed") this.#state = "stopped";

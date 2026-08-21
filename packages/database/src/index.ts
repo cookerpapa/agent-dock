@@ -16,6 +16,7 @@ export {
   type DevelopmentEnvironmentState,
   type SandboxDomainState,
   type Database,
+  type JsonValue,
   type RunAttemptTable,
   type RunAttemptTransitionTable,
   type RunTable,

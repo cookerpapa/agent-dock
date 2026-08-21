@@ -76,6 +76,8 @@ import * as userOwnedDevelopmentEnvironments from "./074_user_owned_development_
 import * as canonicalPiConversationEntries from "./075_canonical_pi_conversation_entries.ts";
 import * as postgresLiveEventAuthority from "./076_postgres_live_event_authority.ts";
 import * as removeLegacyEventIdTrigger from "./077_remove_legacy_event_id_trigger.ts";
+import * as kafkaFirstAgentEventLog from "./078_kafka_first_agent_event_log.ts";
+import * as removePostgresHotEventLog from "./079_remove_postgres_hot_event_log.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -157,6 +159,8 @@ export const migrationProvider: MigrationProvider = {
       "075_canonical_pi_conversation_entries": canonicalPiConversationEntries,
       "076_postgres_live_event_authority": postgresLiveEventAuthority,
       "077_remove_legacy_event_id_trigger": removeLegacyEventIdTrigger,
+      "078_kafka_first_agent_event_log": kafkaFirstAgentEventLog,
+      "079_remove_postgres_hot_event_log": removePostgresHotEventLog,
     };
   },
 };

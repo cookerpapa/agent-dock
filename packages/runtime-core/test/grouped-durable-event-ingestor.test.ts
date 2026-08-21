@@ -17,6 +17,8 @@ function publication(sessionId: string, sequence = 1): EventPublishMessage {
     payload: {
       leaseId: globalThis.crypto.randomUUID(),
       fencingToken: 1,
+      runId: globalThis.crypto.randomUUID(),
+      attemptId: globalThis.crypto.randomUUID(),
       event: {
         schemaVersion: 1,
         eventId: globalThis.crypto.randomUUID(),

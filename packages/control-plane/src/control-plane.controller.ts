@@ -75,7 +75,8 @@ import { PlatformRuntimeSettingsService } from "./platform-runtime-settings.ts";
 import { TurnSteeringService } from "./turn-steering-service.ts";
 import { ConversationTreeService } from "./conversation-tree-service.ts";
 import { DevelopmentEnvironmentService } from "./development-environment-service.ts";
-import { PostgresLiveTurnSnapshotSource } from "@pi-cloud/runtime-core/live-turn-snapshot";
+import type { LiveTurnSnapshotSource } from "@pi-cloud/runtime-core/live-turn-snapshot";
+import { LIVE_TURN_SNAPSHOT_SOURCE } from "./event-runtime-token.ts";
 
 @Controller("v1")
 export class ControlPlaneController {
@@ -85,8 +86,8 @@ export class ControlPlaneController {
     private readonly publicTenantRegistration: PublicTenantRegistrationService,
     @Inject(TenantRequestContext) private readonly tenantRequestContext: TenantRequestContext,
     @Inject(SessionEventStream) private readonly sessionEventStream: SessionEventStream,
-    @Inject(PostgresLiveTurnSnapshotSource)
-    private readonly liveTurnSnapshots: PostgresLiveTurnSnapshotSource,
+    @Inject(LIVE_TURN_SNAPSHOT_SOURCE)
+    private readonly liveTurnSnapshots: LiveTurnSnapshotSource,
     @Inject(TenantModelConfigurationService)
     private readonly tenantModelConfiguration: TenantModelConfigurationService,
     @Inject(WorkspaceVersionService)

@@ -5,7 +5,6 @@ import type {
   AcceptedTurnResource,
   AcceptedTurnCancellationResource,
   ControlPlaneApiError,
-  EventPublishBatchMessage,
   EventPublishMessage,
   ProjectResource,
   SessionResource,
@@ -21,7 +20,7 @@ import {
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { sql, TableNode, type Kysely, type KyselyPlugin } from "kysely";
+import { sql, type Kysely, type KyselyPlugin } from "kysely";
 import {
   RunCancellationExecutor,
   AssignmentReconciler,
@@ -31,7 +30,6 @@ import {
   RunCommandExecutor,
   RunCommandExecutorStaleClaimError,
   TurnExecutionCancelledError,
-  PostgresSessionEventNotifications,
   PostgresRunAttemptPhaseObserver,
   SessionLeaseCoordinator,
   TurnCancellationBackendError,
@@ -41,6 +39,7 @@ import {
   createControlPlaneApplication,
 } from "../src/index.ts";
 import { dispatchNextTestCommand } from "./dispatch-next-test-command.ts";
+import { PostgresAgentEventAuthority } from "@pi-cloud/runtime-core/kafka-agent-event-log";
 
 const IDS = {
   tenant: "00000000-0000-4000-8000-000000000001",
@@ -79,14 +78,12 @@ const IDS = {
 let pglite: PGlite | undefined;
 let socketServer: PGLiteSocketServer | undefined;
 let database: Kysely<Database>;
-let databaseConnectionString: string;
 let application: NestFastifyApplication;
 let http: FastifyInstance;
 let durableEventStore: DurableEventStore;
 let project: ProjectResource;
 let session: SessionResource;
 let firstAccepted: AcceptedTurnResource;
-let sessionEventNotifications: PostgresSessionEventNotifications | undefined;
 
 // Heartbeat, settlement and assertion queries intentionally overlap. Keeping
 // only two PGLite socket slots intermittently interleaves PostgreSQL protocol
@@ -233,74 +230,6 @@ async function readTurnExecution(accepted: AcceptedTurnResource) {
     .executeTakeFirstOrThrow();
 }
 
-type ParsedSseEvent = {
-  id: number;
-  event: string;
-  data: Record<string, unknown>;
-};
-
-async function readSseEvents(
-  response: Response,
-  count: number,
-  timeoutMs = 10_000,
-): Promise<readonly ParsedSseEvent[]> {
-  if (response.body === null) throw new Error("SSE response did not include a body");
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const events: ParsedSseEvent[] = [];
-  let buffer = "";
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `Timed out reading SSE events after ${events.length}/${count}: ${events
-              .map((event) => event.event)
-              .join(", ")}`,
-          ),
-        ),
-      timeoutMs,
-    );
-    timer.unref();
-  });
-  const reading = (async () => {
-    while (events.length < count) {
-      const chunk = await reader.read();
-      if (chunk.done) throw new Error("SSE stream ended before all events arrived");
-      buffer += decoder.decode(chunk.value, { stream: true });
-      let boundary = buffer.indexOf("\n\n");
-      while (boundary >= 0) {
-        const frame = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        boundary = buffer.indexOf("\n\n");
-        if (frame.startsWith(":")) continue;
-        const fields = new Map(
-          frame.split("\n").map((line) => {
-            const separator = line.indexOf(":");
-            return [line.slice(0, separator), line.slice(separator + 1).trimStart()];
-          }),
-        );
-        events.push({
-          id: Number(fields.get("id")),
-          event: fields.get("event") ?? "",
-          data: JSON.parse(fields.get("data") ?? "{}") as Record<string, unknown>,
-        });
-        if (events.length === count) return events;
-      }
-    }
-    return events;
-  })();
-  try {
-    return await Promise.race([reading, timeout]);
-  } catch (error: unknown) {
-    await reader.cancel().catch(() => undefined);
-    throw error;
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
 async function waitForCondition(
   predicate: () => Promise<boolean> | boolean,
   timeoutMs = 10_000,
@@ -349,6 +278,7 @@ async function createAssignedTurn(options: {
   accepted: AcceptedTurnResource;
   assignedSession: SessionResource;
   runtime: SandboxRuntimeAssignment;
+  attemptId: string;
 }> {
   const projectResponse = await http.inject({
     method: "POST",
@@ -491,6 +421,7 @@ async function createAssignedTurn(options: {
   return {
     accepted,
     assignedSession,
+    attemptId,
     runtime: {
       runtimeId: `runtime-${options.sandboxId}`,
       runtimeName: `runtime-${options.sandboxId}`,
@@ -520,26 +451,16 @@ beforeAll(async () => {
     await socketServer.start();
     connectionString = `postgresql://postgres@${socketServer.getServerConn()}/postgres?sslmode=disable`;
   }
-  databaseConnectionString = connectionString;
   database = createDatabase({
     connectionString,
     maxConnections: PGLITE_CONNECTION_LIMIT,
   });
   await runMigrations(database, "up");
   await seedSingleUserProfile();
-  if (pglite === undefined) {
-    sessionEventNotifications = new PostgresSessionEventNotifications({
-      connectionString: databaseConnectionString,
-      applicationName: `pi-cloud-api-test-${process.pid}`,
-      initialReconnectDelayMs: 20,
-      maxReconnectDelayMs: 100,
-    });
-  }
   application = await createControlPlaneApplication({
     database,
     tenantId: IDS.tenant,
     defaultModelProfileId: IDS.profile,
-    ...(sessionEventNotifications === undefined ? {} : { sessionEventNotifications }),
   });
   await application.listen(0, "127.0.0.1");
   http = application.getHttpAdapter().getInstance() as FastifyInstance;
@@ -593,12 +514,64 @@ describe.sequential("single-user durable turn intake API", () => {
       modelProfileId: IDS.profile,
     });
 
-    const cursor = await database
-      .selectFrom("session_event_cursors")
-      .select(["last_persisted_seq"])
-      .where("session_id", "=", session.sessionId)
+    const piSession = await database
+      .selectFrom("pi_sessions")
+      .innerJoin("pi_session_lanes as lane", (join) =>
+        join
+          .onRef("lane.tenant_id", "=", "pi_sessions.tenant_id")
+          .onRef("lane.session_id", "=", "pi_sessions.id"),
+      )
+      .select(["pi_sessions.next_seq", "lane.lane", "lane.leaf_id"])
+      .where("pi_sessions.id", "=", session.sessionId)
       .executeTakeFirstOrThrow();
-    expect(cursor).toEqual({ last_persisted_seq: "0" });
+    expect(piSession).toEqual({ next_seq: "1", lane: "main", leaf_id: null });
+  });
+
+  it("rejects a raw Kafka event after its RunAttempt fence is superseded", async () => {
+    const assigned = await createAssignedTurn({
+      sandboxId: "50000000-0000-4000-8000-000000000019",
+      sandboxBootId: "60000000-0000-4000-8000-000000000019",
+      supervisorId: "kafka-authority-supervisor",
+      phase: "acknowledged",
+      expired: false,
+    });
+    const now = new Date().toISOString();
+    const publication: EventPublishMessage = {
+      protocolVersion: 1,
+      messageId: globalThis.crypto.randomUUID(),
+      sentAt: now,
+      type: "event.publish",
+      payload: {
+        commandId: assigned.accepted.commandId,
+        runId: assigned.accepted.runId,
+        attemptId: assigned.attemptId,
+        leaseId: assigned.runtime.leaseId,
+        fencingToken: assigned.runtime.fencingToken,
+        event: {
+          schemaVersion: 1,
+          eventId: globalThis.crypto.randomUUID(),
+          sessionId: assigned.assignedSession.sessionId,
+          turnId: assigned.accepted.turnId,
+          agentId: "root",
+          seq: 1,
+          occurredAt: now,
+          type: "turn.started",
+          payload: { inputKind: "prompt" },
+        },
+      },
+    };
+    const authority = new PostgresAgentEventAuthority({ database });
+    await expect(
+      authority.validate({ schemaVersion: 1, publications: [publication] }),
+    ).resolves.toMatchObject({ tenantId: IDS.tenant });
+    await database
+      .updateTable("run_attempts")
+      .set({ state: "superseded", settled_at: new Date() })
+      .where("id", "=", assigned.attemptId)
+      .executeTakeFirstOrThrow();
+    await expect(
+      authority.validate({ schemaVersion: 1, publications: [publication] }),
+    ).resolves.toBeUndefined();
   });
 
   it("persists a public GitHub exact commit as pending source metadata", async () => {
@@ -1920,256 +1893,6 @@ describe.sequential("single-user durable turn intake API", () => {
     expect(failedCancellation.publishedAt).not.toBeNull();
   });
 
-  it("recovers a cross-replica SSE stream from PostgreSQL on its bounded heartbeat", async () => {
-    const assigned = await createAssignedTurn({
-      sandboxId: IDS.notificationFallbackSandbox,
-      sandboxBootId: IDS.notificationFallbackSandboxBoot,
-      supervisorId: "notification-fallback-supervisor",
-      phase: "acknowledged",
-      expired: false,
-    });
-    const secondApplication = await createControlPlaneApplication({
-      database,
-      tenantId: IDS.tenant,
-      defaultModelProfileId: IDS.profile,
-      sessionEventStreamOptions: { heartbeatIntervalMs: 25 },
-    });
-    const abort = new AbortController();
-    try {
-      await secondApplication.listen(0, "127.0.0.1");
-      const response = await fetch(
-        `${await secondApplication.getUrl()}/v1/sessions/${assigned.assignedSession.sessionId}/events`,
-        { signal: abort.signal },
-      );
-      expect(response.status).toBe(200);
-      const received = readSseEvents(response, 1, 2_000);
-      const now = new Date().toISOString();
-      const event: EventPublishMessage = {
-        protocolVersion: 1,
-        messageId: globalThis.crypto.randomUUID(),
-        sentAt: now,
-        type: "event.publish",
-        payload: {
-          commandId: assigned.accepted.commandId,
-          leaseId: assigned.runtime.leaseId,
-          fencingToken: assigned.runtime.fencingToken,
-          event: {
-            schemaVersion: 1,
-            eventId: globalThis.crypto.randomUUID(),
-            sessionId: assigned.assignedSession.sessionId,
-            turnId: assigned.accepted.turnId,
-            agentId: "root",
-            seq: 1,
-            occurredAt: now,
-            type: "turn.started",
-            payload: { inputKind: "prompt" },
-          },
-        },
-      };
-      await durableEventStore.ingest(event);
-      await expect(received).resolves.toMatchObject([
-        {
-          id: 1,
-          event: "turn.started",
-          data: { sessionId: assigned.assignedSession.sessionId, seq: 1 },
-        },
-      ]);
-    } finally {
-      abort.abort();
-      await secondApplication.close();
-    }
-  });
-
-  it("persists a mixed redelivery and new streaming suffix with one set-based write", async () => {
-    const assigned = await createAssignedTurn({
-      sandboxId: IDS.batchSandbox,
-      sandboxBootId: IDS.batchSandboxBoot,
-      supervisorId: "batch-ingest-supervisor",
-      phase: "acknowledged",
-      expired: false,
-    });
-    const lease = assigned.runtime;
-    const occurredAt = new Date().toISOString();
-    const events = Array.from({ length: 48 }, (_, index) => ({
-      schemaVersion: 1 as const,
-      eventId: globalThis.crypto.randomUUID(),
-      sessionId: assigned.assignedSession.sessionId,
-      turnId: assigned.accepted.turnId,
-      agentId: "root",
-      seq: index + 1,
-      occurredAt,
-      type: "assistant.text.delta" as const,
-      payload: { text: `chunk-${String(index + 1)} ` },
-    }));
-    const batch = (selected: typeof events): EventPublishBatchMessage => ({
-      protocolVersion: 1,
-      messageId: globalThis.crypto.randomUUID(),
-      sentAt: occurredAt,
-      type: "event.publish_batch",
-      payload: {
-        commandId: assigned.accepted.commandId,
-        leaseId: lease.leaseId,
-        fencingToken: lease.fencingToken,
-        events: selected,
-      },
-    });
-    await expect(durableEventStore.ingest(batch(events.slice(0, 32)))).resolves.toMatchObject({
-      payload: { acknowledgedThroughSeq: 32 },
-    });
-
-    const writes = { events: 0, cursor: 0, session: 0 };
-    const countedDatabase = database.withPlugin({
-      transformQuery({ node }) {
-        if (
-          node.kind === "InsertQueryNode" &&
-          node.into?.kind === "TableNode" &&
-          node.into.table.identifier.name === "session_events"
-        ) {
-          writes.events += 1;
-        }
-        const updateTable = node.kind === "UpdateQueryNode" ? node.table : undefined;
-        if (updateTable !== undefined && TableNode.is(updateTable)) {
-          if (updateTable.table.identifier.name === "session_event_cursors") writes.cursor += 1;
-          if (updateTable.table.identifier.name === "sessions") writes.session += 1;
-        }
-        return node;
-      },
-      async transformResult({ result }) {
-        return result;
-      },
-    });
-    const countedStore = new DurableEventStore({ database: countedDatabase });
-    await expect(countedStore.ingest(batch(events.slice(16)))).resolves.toMatchObject({
-      payload: { acknowledgedThroughSeq: 48 },
-    });
-
-    expect(writes).toEqual({ events: 1, cursor: 1, session: 1 });
-    expect(
-      await database
-        .selectFrom("session_events")
-        .select(({ fn }) => fn.countAll<string>().as("count"))
-        .where("session_id", "=", assigned.assignedSession.sessionId)
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ count: "48" });
-    expect(
-      await database
-        .selectFrom("session_event_cursors")
-        .select(["last_persisted_seq"])
-        .where("session_id", "=", assigned.assignedSession.sessionId)
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ last_persisted_seq: "48" });
-  });
-
-  it.skipIf(!process.env.PI_CLOUD_TEST_DATABASE_URL)(
-    "notifies a second control-plane replica without duplicating its durable SSE sequence",
-    async () => {
-      const assigned = await createAssignedTurn({
-        sandboxId: IDS.notificationSandbox,
-        sandboxBootId: IDS.notificationSandboxBoot,
-        supervisorId: "notification-supervisor",
-        phase: "acknowledged",
-        expired: false,
-      });
-      const secondNotifications = new PostgresSessionEventNotifications({
-        connectionString: databaseConnectionString,
-        applicationName: `pi-cloud-second-api-test-${process.pid}`,
-        initialReconnectDelayMs: 20,
-        maxReconnectDelayMs: 100,
-      });
-      let secondApplication: NestFastifyApplication | undefined;
-      const abort = new AbortController();
-      try {
-        secondApplication = await createControlPlaneApplication({
-          database,
-          tenantId: IDS.tenant,
-          defaultModelProfileId: IDS.profile,
-          sessionEventNotifications: secondNotifications,
-          sessionEventStreamOptions: { heartbeatIntervalMs: 5_000 },
-        });
-        await secondApplication.listen(0, "127.0.0.1");
-        const response = await fetch(
-          `${await secondApplication.getUrl()}/v1/sessions/${assigned.assignedSession.sessionId}/events`,
-          { signal: abort.signal },
-        );
-        expect(response.status).toBe(200);
-        const received = readSseEvents(response, 2, 2_000);
-        const firstAt = new Date().toISOString();
-        const first: EventPublishMessage = {
-          protocolVersion: 1,
-          messageId: globalThis.crypto.randomUUID(),
-          sentAt: firstAt,
-          type: "event.publish",
-          payload: {
-            commandId: assigned.accepted.commandId,
-            leaseId: assigned.runtime.leaseId,
-            fencingToken: assigned.runtime.fencingToken,
-            event: {
-              schemaVersion: 1,
-              eventId: globalThis.crypto.randomUUID(),
-              sessionId: assigned.assignedSession.sessionId,
-              turnId: assigned.accepted.turnId,
-              agentId: "root",
-              seq: 1,
-              occurredAt: firstAt,
-              type: "turn.started",
-              payload: { inputKind: "prompt" },
-            },
-          },
-        };
-        await durableEventStore.ingest(first);
-        await database.transaction().execute((transaction) =>
-          sessionEventNotifications!.publish(transaction, {
-            schemaVersion: 1,
-            tenantId: IDS.tenant,
-            sessionId: assigned.assignedSession.sessionId,
-            throughSequence: 1,
-          }),
-        );
-        const secondAt = new Date().toISOString();
-        const second: EventPublishMessage = {
-          protocolVersion: 1,
-          messageId: globalThis.crypto.randomUUID(),
-          sentAt: secondAt,
-          type: "event.publish",
-          payload: {
-            commandId: assigned.accepted.commandId,
-            leaseId: assigned.runtime.leaseId,
-            fencingToken: assigned.runtime.fencingToken,
-            event: {
-              schemaVersion: 1,
-              eventId: globalThis.crypto.randomUUID(),
-              sessionId: assigned.assignedSession.sessionId,
-              turnId: assigned.accepted.turnId,
-              agentId: "root",
-              seq: 2,
-              occurredAt: secondAt,
-              type: "assistant.text.delta",
-              payload: { text: "cross-replica" },
-            },
-          },
-        };
-        await durableEventStore.ingest(second);
-
-        const events = await received;
-        expect(events.map((event) => event.id)).toEqual([1, 2]);
-        expect(events.map((event) => event.event)).toEqual([
-          "turn.started",
-          "assistant.text.delta",
-        ]);
-        expect(events[1]?.data).toMatchObject({
-          sessionId: assigned.assignedSession.sessionId,
-          seq: 2,
-          payload: { text: "cross-replica" },
-        });
-      } finally {
-        abort.abort();
-        await secondApplication?.close();
-        await secondNotifications.stop();
-      }
-    },
-    10_000,
-  );
-
   it("releases the fenced lease after a post-ACK supervisor failure", async () => {
     await createReadySandbox({
       id: IDS.sandbox,
@@ -2896,48 +2619,5 @@ describe.sequential("single-user durable turn intake API", () => {
       turnFailureCode: "pi_timeout",
       sessionState: "idle",
     });
-  });
-
-  it("does not expose a terminal event when the final settlement transaction rolls back", async () => {
-    const accepted = await acceptTurn(
-      "terminal-transaction-rollback",
-      "exercise the final settlement transaction",
-    );
-    const dispatcher = new RunCommandExecutor({
-      database,
-      backend: new DeterministicExecutionBackend([
-        { kind: "complete", stopReason: "prepared-result" },
-      ]),
-      eventNotificationPublisher: {
-        async publish() {
-          throw new Error("simulated terminal notification failure");
-        },
-      },
-    });
-
-    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).rejects.toThrow(
-      "simulated terminal notification failure",
-    );
-    expect(await readTurnExecution(accepted)).toMatchObject({
-      commandState: "acknowledged",
-      turnState: "running",
-      sessionState: "running",
-      stopReason: null,
-    });
-    expect(
-      await database
-        .selectFrom("session_events")
-        .select((expression) => expression.fn.countAll<string>().as("count"))
-        .where("turn_id", "=", accepted.turnId)
-        .where("type", "in", ["turn.completed", "turn.failed", "turn.cancelled"])
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ count: "0" });
-    expect(
-      await database
-        .selectFrom("session_terminal_events")
-        .select((expression) => expression.fn.countAll<string>().as("count"))
-        .where("turn_id", "=", accepted.turnId)
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ count: "0" });
   });
 });

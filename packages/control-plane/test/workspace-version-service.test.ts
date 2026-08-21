@@ -136,7 +136,6 @@ async function seed(): Promise<void> {
       workspace_snapshot_key: "checkpoints/workspace-2",
     })
     .execute();
-  await database.insertInto("session_event_cursors").values({ session_id: IDS.session }).execute();
   const artifact = (
     id: string,
     kind: "workspace_snapshot",

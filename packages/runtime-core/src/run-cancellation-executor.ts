@@ -22,7 +22,6 @@ import type {
   TurnExecutionRequest,
 } from "./run-command-executor.ts";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
-import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
 import type {
   PreparedTerminalTurnProjection,
@@ -50,6 +49,7 @@ export type TurnCancellationLifecycle = {
 export type TurnCancellationResult = {
   reason: TurnCancellationReason;
   forced: boolean;
+  lastEventSeq?: number;
 };
 
 export interface TurnCancellationBackend {
@@ -125,7 +125,6 @@ export type RunCancellationExecutorOptions = {
   retryDelayMs?: number;
   maxAttempts?: number;
   idGenerator?: () => string;
-  eventNotificationPublisher?: SessionEventNotificationPublisher;
   terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
@@ -219,7 +218,6 @@ export class RunCancellationExecutor {
   readonly #retryDelayMs: number;
   readonly #maxAttempts: number;
   readonly #idGenerator: () => string;
-  readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #terminalTurnProjectionSource: TerminalTurnProjectionSource | undefined;
 
   constructor(options: RunCancellationExecutorOptions) {
@@ -237,7 +235,6 @@ export class RunCancellationExecutor {
     );
     this.#maxAttempts = positiveInteger(options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS, "maxAttempts");
     this.#idGenerator = options.idGenerator ?? randomUUID;
-    this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#terminalTurnProjectionSource = options.terminalTurnProjectionSource;
   }
 
@@ -575,16 +572,7 @@ export class RunCancellationExecutor {
         .where("turn_id", "=", claim.request.target.turnId)
         .where("command_id", "=", claim.request.target.commandId)
         .executeTakeFirst();
-      const localTerminalEvent = await transaction
-        .selectFrom("session_events")
-        .select("event_id")
-        .where("tenant_id", "=", claim.request.target.tenantId)
-        .where("session_id", "=", claim.request.target.sessionId)
-        .where("turn_id", "=", claim.request.target.turnId)
-        .where("command_id", "=", claim.request.target.commandId)
-        .where("type", "in", ["turn.completed", "turn.failed", "turn.cancelled"])
-        .executeTakeFirst();
-      if (canonicalTerminalEvent !== undefined || localTerminalEvent !== undefined) {
+      if (canonicalTerminalEvent !== undefined) {
         throw new TurnCancellationBackendError(
           "cancellation_too_late",
           "Turn already emitted a terminal event before cancellation",
@@ -705,6 +693,17 @@ export class RunCancellationExecutor {
         acknowledgement,
         now,
       );
+      if (result.lastEventSeq !== undefined) {
+        const boundary = await transaction
+          .updateTable("run_attempts")
+          .set({ last_event_seq: result.lastEventSeq, updated_at: now })
+          .where("tenant_id", "=", claim.request.target.tenantId)
+          .where("run_id", "=", claim.request.target.runId)
+          .where("id", "=", claim.request.target.attemptId)
+          .where("last_event_seq", "<=", String(result.lastEventSeq))
+          .executeTakeFirst();
+        expectOne(boundary.numUpdatedRows, "recording the cancelled Run event boundary");
+      }
       await transitionCurrentRunAttempt(
         transaction,
         {
@@ -785,9 +784,6 @@ export class RunCancellationExecutor {
         now,
         eventId: terminalEventId,
         ...(preparedProjection === undefined ? {} : { preparedProjection }),
-        ...(this.#eventNotificationPublisher === undefined
-          ? {}
-          : { notificationPublisher: this.#eventNotificationPublisher }),
       });
 
       await this.#leaseManager.releaseCurrent(

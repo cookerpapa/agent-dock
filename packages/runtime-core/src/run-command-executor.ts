@@ -28,7 +28,6 @@ import type { PiCloudMetrics } from "@pi-cloud/observability";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
 import { transitionCurrentRunAttempt } from "./run-attempt-state.ts";
-import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import { commitTerminalTurnEvent } from "./terminal-turn-event.ts";
 import type {
   PreparedTerminalTurnProjection,
@@ -81,6 +80,7 @@ export type TurnExecutionLifecycle = {
 export type TurnExecutionResult = {
   stopReason: string;
   workspacePatch?: WorkspacePatch;
+  lastEventSeq?: number;
 };
 
 export interface TurnExecutionBackend {
@@ -115,13 +115,21 @@ export class TurnExecutionBackendError extends Error {
   readonly code: string;
   readonly retryable: boolean;
   readonly quarantineSession: boolean;
+  lastEventSeq: number | undefined;
 
-  constructor(code: string, safeMessage: string, retryable: boolean, quarantineSession = false) {
+  constructor(
+    code: string,
+    safeMessage: string,
+    retryable: boolean,
+    quarantineSession = false,
+    lastEventSeq?: number,
+  ) {
     super(safeMessage);
     this.name = "TurnExecutionBackendError";
     this.code = code;
     this.retryable = retryable;
     this.quarantineSession = quarantineSession;
+    this.lastEventSeq = lastEventSeq;
   }
 }
 
@@ -207,7 +215,6 @@ export type RunCommandExecutorOptions = {
   idGenerator?: () => string;
   leaseManager?: TurnExecutionLeaseManager;
   metrics?: PiCloudMetrics;
-  eventNotificationPublisher?: SessionEventNotificationPublisher;
   terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
@@ -236,6 +243,7 @@ type ExecutionFailure = {
   safeMessage: string;
   retryable: boolean;
   quarantineSession: boolean;
+  lastEventSeq?: number;
 };
 
 function positiveInteger(value: number, name: string): number {
@@ -278,6 +286,7 @@ function normalizeFailure(error: unknown): ExecutionFailure {
       safeMessage: error.message,
       retryable: error.retryable,
       quarantineSession: error.quarantineSession,
+      ...(error.lastEventSeq === undefined ? {} : { lastEventSeq: error.lastEventSeq }),
     };
   }
   if (
@@ -296,6 +305,12 @@ function normalizeFailure(error: unknown): ExecutionFailure {
         "quarantineSession" in error && typeof error.quarantineSession === "boolean"
           ? error.quarantineSession
           : false,
+      ...("lastEventSeq" in error &&
+      typeof error.lastEventSeq === "number" &&
+      Number.isSafeInteger(error.lastEventSeq) &&
+      error.lastEventSeq >= 0
+        ? { lastEventSeq: error.lastEventSeq }
+        : {}),
     };
   }
   return {
@@ -322,7 +337,6 @@ export class RunCommandExecutor {
   readonly #idGenerator: () => string;
   readonly #leaseManager: TurnExecutionLeaseManager | undefined;
   readonly #metrics: PiCloudMetrics | undefined;
-  readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #terminalTurnProjectionSource: TerminalTurnProjectionSource | undefined;
 
   constructor(options: RunCommandExecutorOptions) {
@@ -345,7 +359,6 @@ export class RunCommandExecutor {
     this.#idGenerator = options.idGenerator ?? randomUUID;
     this.#leaseManager = options.leaseManager;
     this.#metrics = options.metrics;
-    this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#terminalTurnProjectionSource = options.terminalTurnProjectionSource;
   }
 
@@ -907,6 +920,7 @@ export class RunCommandExecutor {
           running_at: null,
           checkpointing_at: null,
           last_heartbeat_at: null,
+          last_event_seq: Math.max(0, Number(row.nextEventSeq) - 1),
           settled_at: null,
           claimed_at: now,
           created_at: now,
@@ -1198,6 +1212,12 @@ export class RunCommandExecutor {
       if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
         await this.#leaseManager.assertCurrent(transaction, claim.request, acknowledgement, now);
       }
+      await this.#storeEventBoundary(
+        transaction,
+        claim,
+        result.lastEventSeq ?? Number(claim.request.nextEventSeq) - 1,
+        now,
+      );
       if (rows.runAttemptState === "provisioning" || rows.runAttemptState === "restoring") {
         await transitionCurrentRunAttempt(
           transaction,
@@ -1282,9 +1302,6 @@ export class RunCommandExecutor {
         body: terminalBody,
         now,
         eventId: terminalEventId,
-        ...(this.#eventNotificationPublisher === undefined
-          ? {}
-          : { notificationPublisher: this.#eventNotificationPublisher }),
       });
       if (this.#leaseManager !== undefined && acknowledgement !== undefined) {
         await this.#leaseManager.releaseCurrent(transaction, claim.request, acknowledgement, now);
@@ -1450,6 +1467,12 @@ export class RunCommandExecutor {
           await this.#leaseManager.assertCurrent(transaction, claim.request, acknowledgement, now);
         }
       }
+      await this.#storeEventBoundary(
+        transaction,
+        claim,
+        failure.lastEventSeq ?? Number(claim.request.nextEventSeq) - 1,
+        now,
+      );
       const timedOut = /(?:^|_)timeout$/.test(failure.code) || failure.code === "pi_timeout";
       if (failure.code.startsWith("environment_")) {
         await transaction
@@ -1544,9 +1567,6 @@ export class RunCommandExecutor {
         now,
         eventId: terminalEventId,
         ...(preparedProjection === undefined ? {} : { preparedProjection }),
-        ...(this.#eventNotificationPublisher === undefined
-          ? {}
-          : { notificationPublisher: this.#eventNotificationPublisher }),
       });
 
       if (started) {
@@ -1607,6 +1627,27 @@ export class RunCommandExecutor {
       phase: started ? "after_start" : "before_start",
       failureCode: failure.code,
     };
+  }
+
+  async #storeEventBoundary(
+    transaction: Transaction<Database>,
+    claim: ClaimedTurn,
+    sequence: number,
+    now: Date,
+  ): Promise<void> {
+    const minimum = Number(claim.request.nextEventSeq) - 1;
+    if (!Number.isSafeInteger(sequence) || sequence < minimum) {
+      throw new RunCommandExecutorInvariantError("Run event boundary is invalid");
+    }
+    const updated = await transaction
+      .updateTable("run_attempts")
+      .set({ last_event_seq: sequence, updated_at: now })
+      .where("tenant_id", "=", claim.request.tenantId)
+      .where("run_id", "=", claim.request.runId)
+      .where("id", "=", claim.request.attemptId)
+      .where("last_event_seq", "<=", String(sequence))
+      .executeTakeFirst();
+    expectOne(updated.numUpdatedRows, "recording the Run event boundary");
   }
 
   async #lockLifecycleRows(

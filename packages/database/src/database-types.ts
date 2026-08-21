@@ -37,6 +37,11 @@ type JsonObject = JSONColumnType<
   Record<string, unknown>,
   Record<string, unknown>
 >;
+export type JsonValue = JSONColumnType<
+  Record<string, unknown> | null,
+  Record<string, unknown> | null,
+  Record<string, unknown> | null
+>;
 type GeneratedJsonObject = JSONColumnType<
   Record<string, unknown>,
   Record<string, unknown> | undefined,
@@ -610,6 +615,7 @@ export interface RunAttemptTable {
   running_at: NullableTimestamp;
   checkpointing_at: NullableTimestamp;
   last_heartbeat_at: NullableTimestamp;
+  last_event_seq: GeneratedInt8;
   settled_at: NullableTimestamp;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
@@ -764,31 +770,6 @@ export interface ApprovalTable {
   resolved_at: NullableTimestamp;
 }
 
-export interface SessionEventTable {
-  event_id: string;
-  tenant_id: string;
-  session_id: string;
-  turn_id: GeneratedNullable<string>;
-  agent_node_id: string | null;
-  agent_id: string;
-  command_id: string | null;
-  seq: Int8;
-  schema_version: number;
-  type: string;
-  payload: JsonObject;
-  lease_id: string;
-  fencing_token: Int8;
-  occurred_at: Timestamp;
-  persisted_at: GeneratedTimestamp;
-}
-
-export interface SessionEventCursorTable {
-  session_id: string;
-  last_persisted_seq: GeneratedInt8;
-  replay_floor_seq: GeneratedInt8;
-  updated_at: GeneratedTimestamp;
-}
-
 export interface SessionTerminalEventTable {
   event_id: string;
   tenant_id: string;
@@ -802,22 +783,6 @@ export interface SessionTerminalEventTable {
   payload: JsonObject;
   occurred_at: Timestamp;
   persisted_at: GeneratedTimestamp;
-}
-
-export interface SessionLiveStreamCompactionTable {
-  id: string;
-  tenant_id: string;
-  session_id: string;
-  turn_id: string;
-  through_seq: Int8;
-  state: "pending" | "completed";
-  attempts: GeneratedInteger;
-  available_at: GeneratedTimestamp;
-  claim_owner: string | null;
-  claim_until: NullableTimestamp;
-  last_error: string | null;
-  created_at: GeneratedTimestamp;
-  completed_at: NullableTimestamp;
 }
 
 export interface OutboxTable {
@@ -1163,6 +1128,22 @@ export interface PiSessionLogTable {
   seq: Int8;
   kind: string;
   payload: JsonObject;
+  mutation_id: string | null;
+  mutation_result: JsonValue | null;
+}
+
+export interface PiSessionMutationResultTable {
+  mutation_id: string;
+  tenant_id: string;
+  session_id: string;
+  run_id: string;
+  attempt_id: string;
+  state: "completed" | "failed";
+  result: JsonValue | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: GeneratedTimestamp;
+  expires_at: Timestamp;
 }
 
 export interface CheckpointObjectTable {
@@ -1217,11 +1198,8 @@ export interface Database {
   session_leases: SessionLeaseTable;
   commands: CommandTable;
   approvals: ApprovalTable;
-  session_events: SessionEventTable;
-  session_event_cursors: SessionEventCursorTable;
   conversation_fork_operations: ConversationForkOperationTable;
   session_terminal_events: SessionTerminalEventTable;
-  session_live_stream_compactions: SessionLiveStreamCompactionTable;
   outbox: OutboxTable;
   artifacts: ArtifactTable;
   test_results: TestResultTable;
@@ -1240,6 +1218,7 @@ export interface Database {
   pi_session_records: PiSessionRecordTable;
   pi_session_labels: PiSessionLabelTable;
   pi_session_log: PiSessionLogTable;
+  pi_session_mutation_results: PiSessionMutationResultTable;
   checkpoint_objects: CheckpointObjectTable;
   github_app_installations: GitHubAppInstallationTable;
   github_repositories: GitHubRepositoryTable;

@@ -589,11 +589,6 @@ export class PostgresSubagentJobProvider {
           archived_at: null,
         })
         .executeTakeFirstOrThrow();
-      await transaction
-        .insertInto("session_event_cursors")
-        .values({ session_id: childSessionId })
-        .executeTakeFirstOrThrow();
-
       if (input.contextMode === "fork") {
         const leaf = await transaction
           .selectFrom("pi_session_lanes")

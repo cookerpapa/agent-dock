@@ -11,7 +11,7 @@ import {
 } from "./http-supervisor-management.ts";
 import { SessionLeaseCoordinator } from "@pi-cloud/runtime-core/session-lease-coordinator";
 import { PostgresCheckpointObjectStore } from "@pi-cloud/runtime-core/postgres-checkpoint-object-store";
-import { PostgresSessionEventNotifications } from "@pi-cloud/runtime-core/postgres-session-event-notifications";
+import { KafkaFirstAgentEventRuntime } from "@pi-cloud/runtime-core/kafka-first-event-runtime";
 import {
   PostgresSupervisorCredentialAuthorizer,
   SupervisorBootProvisioner,
@@ -53,16 +53,21 @@ export async function startControlPlane(): Promise<void> {
     defaultMetricsPort: 9464,
   });
   const database = createDatabase({ connectionString: config.databaseUrl, maxConnections: 12 });
-  const notifications = new PostgresSessionEventNotifications({
-    // LISTEN requires a session connection and must bypass PgBouncer's
-    // transaction pool in distributed deployments.
-    connectionString: config.databaseNotificationUrl,
-  });
   const objectStore = new PostgresCheckpointObjectStore(database);
+  const controlPlaneInstanceId = randomUUID();
+  const kafkaEvents = new KafkaFirstAgentEventRuntime({
+    database,
+    brokers: config.kafkaBrokers,
+    rawTopic: config.kafkaRawEventTopic,
+    acceptedTopic: config.kafkaAcceptedEventTopic,
+    sessionMutationTopic: config.kafkaSessionMutationTopic,
+    instanceId: controlPlaneInstanceId,
+  });
   let runtime: ControlPlaneRuntime | undefined;
   let closing = false;
   try {
     await verifyBootstrap(database);
+    await kafkaEvents.start();
     const modelCredentialVault = new TenantModelCredentialVault(config.modelCredentialMasterKey);
     const platformInitialModel = await resolvePlatformInitialModel(
       database,
@@ -150,6 +155,7 @@ export async function startControlPlane(): Promise<void> {
       webSessionAuthenticator: webAuthentication,
       readiness: async () => {
         if (runtime?.state !== "running") return false;
+        kafkaEvents.checkHealth();
         await Promise.all([sql`select 1`.execute(database), snapshotMaterializer.checkHealth()]);
         return true;
       },
@@ -166,8 +172,13 @@ export async function startControlPlane(): Promise<void> {
     });
     runtime = await createControlPlaneRuntime({
       database,
-      controlPlaneInstanceId: randomUUID(),
-      sessionEventNotifications: notifications,
+      controlPlaneInstanceId,
+      eventRuntime: {
+        eventHub: kafkaEvents.eventHub,
+        eventStore: kafkaEvents.eventStore,
+        liveTurnSnapshotSource: kafkaEvents.liveTurnSnapshotSource,
+        terminalTurnProjectionSource: kafkaEvents.terminalTurnProjectionSource,
+      },
       developmentEnvironmentService,
       supervisorAuthorizer: new PostgresSupervisorCredentialAuthorizer({ database }),
       supervisorOwnerBoundary: new RoutedHttpSupervisorOwnerBoundary(resolveManagementClient),
@@ -223,6 +234,7 @@ export async function startControlPlane(): Promise<void> {
       if (closing) return;
       closing = true;
       await runtime?.close();
+      await kafkaEvents.close();
       objectStore.destroy();
       await database.destroy();
       await observability.close();
@@ -237,7 +249,7 @@ export async function startControlPlane(): Promise<void> {
   } catch (error: unknown) {
     closing = true;
     await runtime?.close().catch(() => undefined);
-    await notifications.stop().catch(() => undefined);
+    await kafkaEvents.close().catch(() => undefined);
     objectStore.destroy();
     await database.destroy();
     await observability.close().catch(() => undefined);

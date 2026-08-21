@@ -274,6 +274,8 @@ describe("supervisor/control-plane wire protocol", () => {
         leaseId: IDS.lease,
         fencingToken: 7,
         commandId: IDS.command,
+        runId: IDS.run,
+        attemptId: IDS.attempt,
         event,
       },
     } as const;

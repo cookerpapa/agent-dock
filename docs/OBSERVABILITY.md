@@ -40,7 +40,7 @@ observability network:
 | Control Plane | `control-plane:9464/metrics` | Turn admission, tenant quota-lock wait, queue, outcomes, process |
 | Trusted Runner | `supervisor-host:9465/metrics` | Run, model, sandbox, checkpoint, process |
 | Tool Broker | `tool-broker:9466/metrics` | Provider lifecycle, tools, process |
-| Live Stream Compactor | `event-retention:9468/metrics` | PostgreSQL hot-tail deletion/replay-floor signals |
+| Kafka event plane | broker/projector metrics | Raw/Accepted lag, rejected stale events and retained replay |
 
 `pi_cloud_sandbox_active{provider="cubesandbox"}` reports assigned and
 exact-Session warm Cube activations. Provider lifecycle, warm reuse and cleanup

@@ -29,6 +29,8 @@ export type PiToolOutputArtifact = {
 export type PiTurnResult = {
   stopReason: string;
   workspacePatch?: WorkspacePatch;
+  /** Highest Agent event durably acknowledged by the Kafka raw topic. */
+  lastEventSeq?: number;
 };
 
 export type PiCancellationSignal = {

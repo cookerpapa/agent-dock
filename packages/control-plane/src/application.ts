@@ -4,7 +4,6 @@ import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fa
 import { ApiExceptionFilter } from "./api-exception.filter.ts";
 import { ControlPlaneModule, type ControlPlaneEventRuntime } from "./control-plane.module.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
-import type { SessionEventNotificationTransport } from "@pi-cloud/runtime-core/session-event-notifications";
 import type { SessionEventStreamOptions } from "@pi-cloud/runtime-core/session-event-stream";
 import type { SupervisorWebSocketGateway } from "./supervisor-websocket-gateway.ts";
 import type { TurnSteerBackend } from "./turn-steer.ts";
@@ -30,7 +29,6 @@ export type ControlPlaneApplicationOptions = Omit<
   turnSteerBackendFactory?: (sandboxId: string) => Promise<TurnSteerBackend>;
   supervisorProvisioningGateway?: SupervisorProvisioningGateway;
   productionHttpGateway?: ProductionHttpGateway;
-  sessionEventNotifications?: SessionEventNotificationTransport;
   sessionEventStreamOptions?: SessionEventStreamOptions;
   eventRuntime?: ControlPlaneEventRuntime;
   publicRegistration?: PublicTenantRegistrationConfiguration;

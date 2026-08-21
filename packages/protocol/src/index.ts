@@ -513,6 +513,7 @@ export {
 
 export {
   TURN_COMMAND_OUTBOX_TOPIC,
+  SESSION_TERMINAL_EVENT_OUTBOX_TOPIC,
   TurnCommandOutboxPayloadSchema,
   TurnCommandOutboxProtocolError,
   parseTurnCommandOutboxPayload,

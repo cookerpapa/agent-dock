@@ -421,6 +421,8 @@ export const EventPublishMessageSchema = Type.Object(
       {
         ...LeaseProperties,
         commandId: Type.Optional(UuidSchema),
+        runId: UuidSchema,
+        attemptId: UuidSchema,
         event: PiCloudEventSchema,
       },
       { additionalProperties: false },
@@ -437,6 +439,8 @@ export const EventPublishBatchMessageSchema = Type.Object(
       {
         ...LeaseProperties,
         commandId: Type.Optional(UuidSchema),
+        runId: UuidSchema,
+        attemptId: UuidSchema,
         events: Type.Array(PiCloudEventSchema, { minItems: 1, maxItems: 128 }),
       },
       { additionalProperties: false },

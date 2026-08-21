@@ -7,7 +7,8 @@ PiCloud owns durable admission, multi-tenancy, Worker execution authority,
 remote Tool routing, Workspace lifetime, streaming and recovery.
 
 CubeSandbox KVM is the only untrusted execution runtime. PostgreSQL is the only
-business/Run-state authority. There is no second workflow scheduler.
+business/Run-state authority, Kafka is the bounded hot event log, and there is
+no second workflow scheduler.
 
 ## Source-of-truth and terminology guardrail
 
@@ -300,17 +301,25 @@ Tool-call JSON and partial Tool stdout. It publishes only coalesced Assistant
 text, complete Tool start/result Items and low-frequency lifecycle boundaries.
 
 Workers combine adjacent text for 100 ms or 4 KiB, then independent Sessions
-share one bounded Host-level PostgreSQL group-commit queue. An event is eligible
-for SSE only after the transaction commits. `LISTEN/NOTIFY` wakes every Control
-Plane replica, but the bounded `session_events` table is the replay authority;
-heartbeat polling repairs a missed notification.
+share a bounded Host-level Kafka append. Raw records are keyed by Session. An
+authority consumer checks Run, Attempt, lease and fence in PostgreSQL before it
+publishes to the Accepted topic. Only an Accepted broker ACK advances the
+Worker boundary and makes bytes eligible for SSE.
 
-Pi SessionStorage and the browser hot tail are independent projections of one
-Agent Run. `message_end` appends the complete Pi message without waiting for a
-delta replay. After terminal settlement and a one-hour reconnect window, the
-retention worker deletes the Turn's hot events and advances its replay floor.
-Only abnormal hard-interruption recovery reads the retained tail to preserve a
-visible prefix that never reached `message_end`.
+Each Control Plane replica rebuilds a bounded in-memory Session replay view
+from retained Accepted Kafka records before becoming ready, then tails that
+topic. Browsers keep the same `Last-Event-ID` SSE contract and never receive
+Kafka credentials. Kafka time/byte retention removes old deltas; a cursor older
+than the retained window reloads canonical PostgreSQL conversation state.
+
+Pi SessionStorage mutations use a separate Session-keyed Kafka topic. A
+PostgreSQL projector applies complete entries, records and compaction facts
+idempotently, while the active Worker waits at a projection barrier before the
+next model Step. PostgreSQL therefore stores semantic Pi state, not token
+fragments. Terminal Run state and a one-row Kafka outbox commit in the same
+PostgreSQL transaction. Abnormal interruption recovery reads only the retained
+Accepted tail needed to preserve a visible prefix that never reached
+`message_end`.
 
 ## State ownership
 
@@ -322,7 +331,7 @@ visible prefix that never reached `message_end`.
 | Session Tool grants and immutable Run capability snapshots | PostgreSQL |
 | conversation parent/fork graph | PostgreSQL |
 | canonical completed conversation | PostgreSQL |
-| bounded live SSE replay | PostgreSQL hot event partitions |
+| bounded live SSE replay | Accepted Kafka topic + rebuildable Gateway memory |
 | Workspace bytes | persistent Cube Volume |
 | Workspace revision/reference and Git baseline | PostgreSQL + trusted Volume envelope |
 | live process tree | one Cube KVM only |

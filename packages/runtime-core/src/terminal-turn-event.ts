@@ -1,8 +1,12 @@
 import type { Database } from "@pi-cloud/database";
-import { parsePiCloudEvent, type PiCloudEvent, type PiCloudEventBody } from "@pi-cloud/protocol";
+import {
+  parsePiCloudEvent,
+  SESSION_TERMINAL_EVENT_OUTBOX_TOPIC,
+  type PiCloudEvent,
+  type PiCloudEventBody,
+} from "@pi-cloud/protocol";
 import { sql, type Transaction } from "kysely";
 import { appendInterruptedAssistantPrefix } from "./canonical-pi-conversation.ts";
-import type { SessionEventNotificationPublisher } from "./session-event-notifications.ts";
 import type { PreparedTerminalTurnProjection } from "./terminal-turn-projection.ts";
 
 type TerminalEventBody = Extract<
@@ -21,9 +25,7 @@ export type CommitTerminalTurnEventInput = {
   body: TerminalEventBody;
   now: Date;
   eventId: string;
-  notificationPublisher?: SessionEventNotificationPublisher;
   preparedProjection?: PreparedTerminalTurnProjection;
-  liveStreamRetentionMs?: number;
 };
 
 function safeSequence(value: string | number | bigint, description: string): number {
@@ -53,19 +55,32 @@ export async function commitTerminalTurnEvent(
     .where("id", "=", input.sessionId)
     .forUpdate()
     .executeTakeFirst();
-  const cursor = await transaction
-    .selectFrom("session_event_cursors")
-    .select(["last_persisted_seq"])
-    .where("session_id", "=", input.sessionId)
-    .forUpdate()
+  const execution = await transaction
+    .selectFrom("runs as run")
+    .innerJoin("run_attempts as attempt", (join) =>
+      join
+        .onRef("attempt.tenant_id", "=", "run.tenant_id")
+        .onRef("attempt.run_id", "=", "run.id")
+        .onRef("attempt.id", "=", "run.current_attempt_id"),
+    )
+    .select([
+      "run.id as runId",
+      "attempt.id as attemptId",
+      "attempt.last_event_seq as lastEventSeq",
+    ])
+    .where("run.tenant_id", "=", input.tenantId)
+    .where("run.session_id", "=", input.sessionId)
+    .where("run.turn_id", "=", input.turnId)
+    .where("run.command_id", "=", input.commandId)
     .executeTakeFirst();
-  if (session === undefined || cursor === undefined) {
+  if (session === undefined || execution === undefined) {
     throw new Error("Terminal event stream is missing");
   }
-  const sequence = safeSequence(session.next_event_seq, "Session next event sequence");
-  const persisted = safeSequence(cursor.last_persisted_seq, "Persisted event cursor");
-  if (sequence < 1 || persisted !== sequence - 1) {
-    throw new Error("Terminal event stream is not contiguous");
+  const nextSequence = safeSequence(session.next_event_seq, "Session next event sequence");
+  const previousSequence = safeSequence(execution.lastEventSeq, "Run event boundary");
+  const sequence = previousSequence + 1;
+  if (nextSequence < 1 || previousSequence < nextSequence - 1) {
+    throw new Error("Terminal event boundary precedes the current Session stream");
   }
 
   const event = parsePiCloudEvent({
@@ -92,7 +107,7 @@ export async function commitTerminalTurnEvent(
     }
     const preparedEvent = prepared.terminalEvent;
     if (
-      prepared.previousSequence !== persisted ||
+      prepared.previousSequence !== previousSequence ||
       preparedEvent.eventId !== event.eventId ||
       preparedEvent.sessionId !== event.sessionId ||
       preparedEvent.turnId !== event.turnId ||
@@ -132,39 +147,41 @@ export async function commitTerminalTurnEvent(
       entryId: globalThis.crypto.randomUUID(),
     });
   }
-  const retentionMs = input.liveStreamRetentionMs ?? 60 * 60 * 1_000;
-  if (!Number.isSafeInteger(retentionMs) || retentionMs < 60_000) {
-    throw new TypeError("Live event retention must be at least one minute");
-  }
   await transaction
-    .insertInto("session_live_stream_compactions")
+    .insertInto("outbox")
     .values({
-      id: globalThis.crypto.randomUUID(),
+      id: input.eventId,
       tenant_id: input.tenantId,
-      session_id: input.sessionId,
-      turn_id: input.turnId,
-      through_seq: sequence,
-      state: "pending",
+      aggregate_type: "session_terminal_event",
+      aggregate_id: input.eventId,
+      topic: SESSION_TERMINAL_EVENT_OUTBOX_TOPIC,
+      payload: {
+        schemaVersion: 1,
+        tenantId: input.tenantId,
+        publications: [
+          {
+            protocolVersion: 1,
+            messageId: input.eventId,
+            sentAt: input.now.toISOString(),
+            type: "event.publish",
+            payload: {
+              leaseId: input.leaseId,
+              fencingToken: input.fencingToken,
+              commandId: input.commandId,
+              runId: execution.runId,
+              attemptId: execution.attemptId,
+              event,
+            },
+          },
+        ],
+      },
       attempts: 0,
-      available_at: new Date(input.now.valueOf() + retentionMs),
-      claim_owner: null,
-      claim_until: null,
-      last_error: null,
+      available_at: input.now,
       created_at: input.now,
-      completed_at: null,
+      published_at: null,
+      last_error: null,
     })
     .executeTakeFirstOrThrow();
-
-  const cursorUpdate = await transaction
-    .updateTable("session_event_cursors")
-    .set({
-      last_persisted_seq: sequence,
-      updated_at: input.now,
-    })
-    .where("session_id", "=", input.sessionId)
-    .where("last_persisted_seq", "=", cursor.last_persisted_seq)
-    .executeTakeFirst();
-  expectOne(cursorUpdate.numUpdatedRows, "Advancing the terminal event cursor");
 
   const sessionUpdate = await transaction
     .updateTable("sessions")
@@ -179,12 +196,5 @@ export async function commitTerminalTurnEvent(
     .where("next_event_seq", "=", session.next_event_seq)
     .executeTakeFirst();
   expectOne(sessionUpdate.numUpdatedRows, "Advancing the terminal session sequence");
-
-  await input.notificationPublisher?.publish(transaction, {
-    schemaVersion: 1,
-    tenantId: input.tenantId,
-    sessionId: input.sessionId,
-    throughSequence: sequence,
-  });
   return event;
 }

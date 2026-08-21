@@ -70,15 +70,6 @@ controlPlane:
     requests: { cpu: 500m, memory: 1Gi }
     limits: { cpu: "2", memory: 4Gi }
 
-eventRetention:
-  enabled: true
-  replicas: 2
-  intervalMs: 60000
-  batchSize: 100
-  resources:
-    requests: { cpu: 100m, memory: 128Mi }
-    limits: { cpu: "1", memory: 512Mi }
-
 web:
   replicas: 2
   autoscaling:
@@ -96,6 +87,11 @@ web:
     limits: { cpu: 500m, memory: 256Mi }
 
 external:
+  kafka:
+    brokers: [kafka.kafka.svc.cluster.local:9092]
+    rawEventTopic: pi-cloud.agent-events.raw.v1
+    acceptedEventTopic: pi-cloud.agent-events.accepted.v1
+    sessionMutationTopic: pi-cloud.session-mutations.v1
   database:
     # database-url should target PgBouncer transaction pooling. The separate
     # database-notification-url Secret key must target PostgreSQL directly.
@@ -177,6 +173,9 @@ pi-workers:
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
     providerProxyUrl: https://provider-proxy.example.com:3129
     otlpTracesEndpoint: ""
+    kafkaBrokers: [kafka.kafka.svc.cluster.local:9092]
+    kafkaRawEventTopic: pi-cloud.agent-events.raw.v1
+    kafkaSessionMutationTopic: pi-cloud.session-mutations.v1
   database:
     existingSecret: pi-cloud-platform-secrets
     urlKey: database-url
@@ -209,7 +208,7 @@ pi-workers:
   networkPolicy:
     enabled: true
     trustedNamespaceLabel: { key: pi-cloud.io/trusted-plane, value: "true" }
-    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 5432, 7233, 9000]
+    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 5432, 9092]
     externalEgressCidrs: []
   disruptionBudget: { minAvailable: 1 }
   placement: { nodeSelector: {}, tolerations: [] }

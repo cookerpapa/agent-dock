@@ -16,11 +16,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Kysely } from "kysely";
-import {
-  FileCheckpointObjectStore,
-  PostgresSandboxCheckpointStore,
-  SessionLiveStreamCompactionService,
-} from "../src/index.ts";
+import { FileCheckpointObjectStore, PostgresSandboxCheckpointStore } from "../src/index.ts";
 
 const IDS = {
   tenant: "10000000-0000-4000-8000-000000000001",
@@ -582,73 +578,5 @@ describe.sequential("PostgreSQL settled checkpoint store", () => {
     await expect(expiredStore.load(command(2))).rejects.toMatchObject({
       code: "stale_checkpoint_fence",
     });
-  }, 30_000);
-});
-
-describe("PostgreSQL Session live-stream compaction", () => {
-  it("deletes a settled hot tail and advances the replay floor", async () => {
-    const isolatedPglite = await PGlite.create();
-    const isolatedSocket = new PGLiteSocketServer({
-      db: isolatedPglite,
-      host: "127.0.0.1",
-      port: 0,
-    });
-    let isolatedDatabase: Kysely<Database> | undefined;
-    try {
-      await isolatedSocket.start();
-      isolatedDatabase = createDatabase({
-        connectionString: `postgresql://postgres@${isolatedSocket.getServerConn()}/postgres?sslmode=disable`,
-        maxConnections: 2,
-      });
-      await runMigrations(isolatedDatabase, "up");
-      await seed(isolatedDatabase);
-      await isolatedDatabase
-        .insertInto("session_event_cursors")
-        .values({
-          session_id: IDS.session,
-          last_persisted_seq: 3,
-          replay_floor_seq: 0,
-        })
-        .executeTakeFirstOrThrow();
-      await isolatedDatabase
-        .insertInto("session_live_stream_compactions")
-        .values({
-          id: "61000000-0000-4000-8000-000000000001",
-          tenant_id: IDS.tenant,
-          session_id: IDS.session,
-          turn_id: IDS.turn1,
-          through_seq: 3,
-          state: "pending",
-          attempts: 0,
-          available_at: new Date(0),
-          claim_owner: null,
-          claim_until: null,
-          last_error: null,
-          created_at: new Date(0),
-          completed_at: null,
-        })
-        .executeTakeFirstOrThrow();
-      const service = new SessionLiveStreamCompactionService({
-        database: isolatedDatabase,
-        ownerId: "compaction-test",
-        clock: () => new Date("2026-08-10T00:00:00.000Z"),
-      });
-      await expect(service.runOnce()).resolves.toMatchObject({
-        status: "compacted",
-        throughSequence: 3,
-      });
-      await expect(service.runOnce()).resolves.toEqual({ status: "idle" });
-      expect(
-        await isolatedDatabase
-          .selectFrom("session_event_cursors")
-          .select("replay_floor_seq")
-          .where("session_id", "=", IDS.session)
-          .executeTakeFirst(),
-      ).toMatchObject({ replay_floor_seq: "3" });
-    } finally {
-      await isolatedDatabase?.destroy();
-      await isolatedSocket.stop().catch(() => undefined);
-      await isolatedPglite.close().catch(() => undefined);
-    }
   }, 30_000);
 });

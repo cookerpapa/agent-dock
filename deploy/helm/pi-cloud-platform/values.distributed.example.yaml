@@ -44,6 +44,14 @@ web:
     tlsSecretName: pi-cloud-web-tls
 
 external:
+  kafka:
+    brokers:
+      - kafka-0.kafka.example.internal:9092
+      - kafka-1.kafka.example.internal:9092
+      - kafka-2.kafka.example.internal:9092
+    rawEventTopic: pi-cloud.agent-events.raw.v1
+    acceptedEventTopic: pi-cloud.agent-events.accepted.v1
+    sessionMutationTopic: pi-cloud.session-mutations.v1
   providerProxyUrl: https://provider-proxy.example.com:3129
 
 networkPolicy:
@@ -85,6 +93,12 @@ pi-workers:
     githubGateway: { enabled: false, url: http://github-gateway:4400 }
     providerProxyUrl: https://provider-proxy.example.com:3129
     otlpTracesEndpoint: ""
+    kafkaBrokers:
+      - kafka-0.kafka.example.internal:9092
+      - kafka-1.kafka.example.internal:9092
+      - kafka-2.kafka.example.internal:9092
+    kafkaRawEventTopic: pi-cloud.agent-events.raw.v1
+    kafkaSessionMutationTopic: pi-cloud.session-mutations.v1
   database:
     existingSecret: pi-cloud-platform-secrets
     urlKey: database-url
@@ -100,7 +114,7 @@ pi-workers:
   networkPolicy:
     enabled: true
     trustedNamespaceLabel: { key: pi-cloud.io/trusted-plane, value: "true" }
-    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 5432]
+    trustedTcpPorts: [443, 3000, 3129, 4300, 4318, 5432, 9092]
     externalEgressCidrs:
       - 203.0.113.16/28
       - 198.51.100.32/28

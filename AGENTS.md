@@ -40,8 +40,9 @@ protocol, record the decision under `docs/adr/` before implementation.
 - Persist commands before acknowledging them.
 - Use idempotency keys, leases, and fencing tokens for distributed mutations.
 - Preserve per-session ordering without dedicating a process or OS thread to a cold session.
-- Treat Pi's PostgreSQL `SessionStorage` as conversation authority and
-  PostgreSQL as the sole Run/control authority. Any Pi JSONL compatibility
+- Treat Pi's PostgreSQL `SessionStorage` as conversation authority,
+  PostgreSQL as the sole Run/control authority and Accepted Kafka as the
+  bounded hot-stream authority. Any Pi JSONL compatibility
   object must remain a bounded PostgreSQL-backed upstream adapter; it is never
   a lifetime transcript or a second conversation authority.
 - Treat the persistent Cube Volume as the sole Workspace byte authority. Do
@@ -58,7 +59,7 @@ protocol, record the decision under `docs/adr/` before implementation.
 - Do not mount the Docker socket, host home directory, or long-lived provider
   credentials into an agent sandbox.
 - Do not add a second event broker, cache, workflow scheduler or cluster layer
-  merely to make the architecture look larger. PostgreSQL and Kubernetes have
+  merely to make the architecture look larger. Kafka, PostgreSQL and Kubernetes have
   bounded current roles; additions require a demonstrated gap and the
   adopt-before-build policy below.
 - Pin Pi and other important dependency versions and provide upgrade contract tests.

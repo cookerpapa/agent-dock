@@ -2,14 +2,15 @@ import { Module, type DynamicModule } from "@nestjs/common";
 import { ControlPlaneController } from "./control-plane.controller.ts";
 import type { ControlPlaneStoreOptions } from "./control-plane-store.ts";
 import { ControlPlaneStoreFactory } from "./control-plane-store-factory.ts";
-import { DurableEventStore } from "@pi-cloud/runtime-core/durable-event-store";
+import {
+  DurableEventStore,
+  type DurableEventLog,
+} from "@pi-cloud/runtime-core/durable-event-store";
 import {
   PublicTenantRegistrationService,
   type PublicTenantRegistrationConfiguration,
 } from "./public-tenant-registration.ts";
 import { SessionEventHub } from "@pi-cloud/runtime-core/session-event-hub";
-import { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
-import type { SessionEventNotificationTransport } from "@pi-cloud/runtime-core/session-event-notifications";
 import {
   SessionEventStream,
   type SessionEventStreamOptions,
@@ -30,13 +31,18 @@ import { TurnSteeringService } from "./turn-steering-service.ts";
 import type { TurnSteerBackend } from "./turn-steer.ts";
 import { ConversationTreeService } from "./conversation-tree-service.ts";
 import { DevelopmentEnvironmentService } from "./development-environment-service.ts";
-import { PostgresLiveTurnSnapshotSource } from "@pi-cloud/runtime-core/live-turn-snapshot";
+import {
+  EmptyLiveTurnSnapshotSource,
+  type LiveTurnSnapshotSource,
+} from "@pi-cloud/runtime-core/live-turn-snapshot";
+import type { TerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
+
+import { LIVE_TURN_SNAPSHOT_SOURCE } from "./event-runtime-token.ts";
 
 export type ControlPlaneModuleOptions = Omit<
   ControlPlaneStoreOptions,
   "tenantId" | "defaultModelProfileId"
 > & {
-  sessionEventNotifications?: SessionEventNotificationTransport;
   sessionEventStreamOptions?: SessionEventStreamOptions;
   eventRuntime?: ControlPlaneEventRuntime;
   staticRequestIdentity?: TenantRequestIdentity;
@@ -55,7 +61,9 @@ export type ControlPlaneModuleOptions = Omit<
 
 export type ControlPlaneEventRuntime = {
   eventHub: SessionEventHub;
-  eventStore: DurableEventStore;
+  eventStore: DurableEventLog;
+  liveTurnSnapshotSource?: LiveTurnSnapshotSource;
+  terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
 @Module({})
@@ -65,16 +73,9 @@ export class ControlPlaneModule {
     const eventStore =
       options.eventRuntime?.eventStore ??
       new DurableEventStore({
-        database: options.database,
         eventHub,
-        ...(options.sessionEventNotifications === undefined
-          ? {}
-          : { eventNotificationPublisher: options.sessionEventNotifications }),
+        database: options.database,
       });
-    const notificationBridge =
-      options.sessionEventNotifications === undefined
-        ? undefined
-        : new SessionEventNotificationBridge(options.sessionEventNotifications, eventHub);
     const workspaceVersions = new WorkspaceVersionService({
       database: options.database,
       ...(options.artifactReader === undefined ? {} : { artifactReader: options.artifactReader }),
@@ -206,27 +207,20 @@ export class ControlPlaneModule {
         { provide: SessionEventHub, useValue: eventHub },
         { provide: DurableEventStore, useValue: eventStore },
         {
-          provide: PostgresLiveTurnSnapshotSource,
-          useValue: new PostgresLiveTurnSnapshotSource({ database: options.database }),
+          provide: LIVE_TURN_SNAPSHOT_SOURCE,
+          useValue:
+            options.eventRuntime?.liveTurnSnapshotSource ?? new EmptyLiveTurnSnapshotSource(),
         },
         {
           provide: SessionEventStream,
           useValue: new SessionEventStream(eventStore, eventHub, options.sessionEventStreamOptions),
         },
-        ...(notificationBridge === undefined
-          ? []
-          : [
-              {
-                provide: SessionEventNotificationBridge,
-                useValue: notificationBridge,
-              },
-            ]),
       ],
       exports: [
         DurableEventStore,
         SessionEventHub,
         SessionEventStream,
-        PostgresLiveTurnSnapshotSource,
+        LIVE_TURN_SNAPSHOT_SOURCE,
         WorkspaceVersionService,
       ],
     };

@@ -1,6 +1,6 @@
 # Backlog
 
-This backlog covers the current PostgreSQL + Pi SDK + Cube persistent-Volume
+This backlog covers the current PostgreSQL + Kafka + Pi SDK + Cube persistent-Volume
 architecture. Temporal, Cells, MinIO/Kopia and alternate Sandbox runtimes are
 retired and remain only in Git history or explicitly superseded ADRs.
 
@@ -52,7 +52,7 @@ retired and remain only in Git history or explicitly superseded ADRs.
       the cluster WebUI or Cube credentials to tenants.
 - [ ] Add branch rename controls to the tree UI.
 - [ ] Expand orphan reconciliation for Cube activations and persistent Volumes.
-- [ ] Publish sustained PostgreSQL hot-tail and SSE reconnect evidence.
+- [x] Publish Kafka hot-event and PostgreSQL complete-message projection evidence.
 
 ## Distributed deployment
 

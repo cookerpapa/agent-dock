@@ -21,6 +21,7 @@ COPY packages/supervisor-host/package.json packages/supervisor-host/package.json
 COPY packages/supervisor-host/tsconfig.json packages/supervisor-host/tsconfig.json
 COPY packages/workspace-runtime/package.json packages/workspace-runtime/package.json
 RUN sh scripts/retry-npm-command.sh ci --omit=dev --ignore-scripts \
+    && sh scripts/retry-npm-command.sh rebuild @confluentinc/kafka-javascript \
     && node scripts/harden-pi-dependencies.mjs \
     && node scripts/harden-pi-dependencies.mjs --check \
     && npm cache clean --force

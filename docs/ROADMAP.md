@@ -3,11 +3,11 @@
 ## Completed foundation
 
 - multi-tenant Web Coding Agent using Pi SDK;
-- PostgreSQL Run/Attempt/Event state, leases/fences and same-Session ordering;
+- PostgreSQL Run/Attempt state, leases/fences and same-Session ordering;
 - one shared, horizontally scalable PostgreSQL-backed Pi Worker queue;
 - official Pi `SessionRepo`/`SessionStorage` PostgreSQL adapter with
   compaction-bounded reads and upstream backend conformance;
-- resumable PostgreSQL/SSE hot-event path with canonical terminal Turns;
+- Kafka-first resumable SSE with PostgreSQL canonical terminal Turns;
 - CubeSandbox KVM-only Tool execution;
 - persistent Cube Volumes as Workspace byte authority;
 - lazy/warm/persistent Cube lifecycle and model-visible reset semantics;
@@ -44,7 +44,7 @@
   multi-node cluster;
 - validate Tool Broker and persistent Volume gateway replacement under load;
 - publish PostgreSQL queue latency and Worker slot-density measurements;
-- validate PostgreSQL hot-tail ingest and retention at target load;
+- validate Kafka ingest/replay and PostgreSQL semantic projection at target load;
 - define Workspace snapshot/backup policy separately from normal Run commits;
 
 Every performance or availability claim must name the tested revision,

@@ -155,7 +155,7 @@ describe("AgentRunSupervisor", () => {
     expect(runner.calls).toHaveLength(0);
     expect(supervisor.activeSessionCount).toBe(1);
 
-    await expect(prepared.run()).resolves.toEqual({ stopReason: "stop" });
+    await expect(prepared.run()).resolves.toEqual({ stopReason: "stop", lastEventSeq: 0 });
     expect(runner.calls).toHaveLength(1);
     expect(supervisor.activeSessionCount).toBe(0);
   });
@@ -237,6 +237,8 @@ describe("AgentRunSupervisor", () => {
             leaseId: value.payload.leaseId,
             fencingToken: value.payload.fencingToken + 1,
             commandId: value.payload.commandId,
+            runId: value.payload.runId,
+            attemptId: value.payload.attemptId,
             event: {
               schemaVersion: 1,
               eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -272,6 +274,8 @@ describe("AgentRunSupervisor", () => {
             leaseId: value.payload.leaseId,
             fencingToken: value.payload.fencingToken,
             commandId: value.payload.commandId,
+            runId: value.payload.runId,
+            attemptId: value.payload.attemptId,
             event: {
               schemaVersion: 1,
               eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -336,6 +340,7 @@ describe("AgentRunSupervisor", () => {
     await expect(preparedCancellation.run()).resolves.toEqual({
       reason: "user_request",
       forced: false,
+      lastEventSeq: 0,
     });
     await expect(execution).rejects.toBeInstanceOf(PiTurnCancelledError);
     expect(observedSignal?.aborted).toBe(true);
@@ -371,7 +376,7 @@ describe("AgentRunSupervisor", () => {
       },
     ]);
     settle();
-    await expect(execution).resolves.toEqual({ stopReason: "stop" });
+    await expect(execution).resolves.toEqual({ stopReason: "stop", lastEventSeq: 0 });
   });
 
   it("reports a running assignment and applies only its exact heartbeat renewal", async () => {

@@ -1,12 +1,10 @@
 import type { Database } from "@pi-cloud/database";
 import {
-  parsePiCloudEvent,
   parseConversationTurnTranscriptResource,
   type ConversationTranscriptItemResource,
   type ConversationTurnTranscriptResource,
 } from "@pi-cloud/protocol";
 import { sql, type Kysely, type Transaction } from "kysely";
-import { projectConversationTurnTranscript } from "./conversation-turn-projection.ts";
 
 export const INTERRUPTED_ASSISTANT_PREFIX_CUSTOM_TYPE = "pi-cloud.interrupted_assistant_prefix";
 
@@ -263,61 +261,9 @@ export async function readCanonicalPiTurnTranscripts(
       .where("turn_id", "in", turnIds)
       .execute(),
   ]);
-  const durableTurnIds = new Set(durableTerminalRows.map((row) => row.turn_id));
-  const localTurnIds = turnIds.filter((turnId) => !durableTurnIds.has(turnId));
-  const localEvents =
-    localTurnIds.length === 0
-      ? []
-      : await database
-          .selectFrom("session_events")
-          .select([
-            "event_id",
-            "session_id",
-            "turn_id",
-            "agent_id",
-            "seq",
-            "schema_version",
-            "type",
-            "payload",
-            "occurred_at",
-          ])
-          .where("tenant_id", "=", input.tenantId)
-          .where("turn_id", "in", localTurnIds)
-          .orderBy("seq", "asc")
-          .execute();
-  const localByTurn = new Map<string, typeof localEvents>();
-  for (const event of localEvents) {
-    if (event.turn_id === null) continue;
-    const existing = localByTurn.get(event.turn_id) ?? [];
-    existing.push(event);
-    localByTurn.set(event.turn_id, existing);
-  }
   const terminalByTurn = new Map<string, (typeof durableTerminalRows)[number]>(
     durableTerminalRows.map((row) => [row.turn_id, row]),
   );
-  for (const [turnId, events] of localByTurn) {
-    let terminal: (typeof events)[number] | undefined;
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const candidate = events[index]!;
-      if (
-        candidate.type === "turn.completed" ||
-        candidate.type === "turn.failed" ||
-        candidate.type === "turn.cancelled"
-      ) {
-        terminal = candidate;
-        break;
-      }
-    }
-    if (terminal !== undefined && !terminalByTurn.has(turnId)) {
-      terminalByTurn.set(turnId, {
-        turn_id: turnId,
-        seq: terminal.seq,
-        type: terminal.type as "turn.completed" | "turn.failed" | "turn.cancelled",
-        payload: terminal.payload,
-        occurred_at: terminal.occurred_at,
-      });
-    }
-  }
   const entriesByTurn = new Map<string, typeof entries>();
   for (const entry of entries) {
     if (entry.turn_id === null) continue;
@@ -333,28 +279,6 @@ export async function readCanonicalPiTurnTranscripts(
     const piEntries = entriesByTurn.get(turnId) ?? [];
     if (piEntries.length > 0) {
       result.set(turnId, projectPiEntries(piEntries, terminalMetadata(terminalRow)));
-      continue;
-    }
-    const events = localByTurn.get(turnId) ?? [];
-    if (events.length > 0) {
-      result.set(
-        turnId,
-        projectConversationTurnTranscript(
-          events.map((event) =>
-            parsePiCloudEvent({
-              schemaVersion: event.schema_version,
-              eventId: event.event_id,
-              sessionId: event.session_id,
-              turnId: event.turn_id,
-              agentId: event.agent_id,
-              seq: safeInteger(event.seq, "Local conversation event sequence"),
-              occurredAt: timestamp(event.occurred_at),
-              type: event.type,
-              payload: event.payload,
-            }),
-          ),
-        ),
-      );
       continue;
     }
     const terminal = terminalMetadata(terminalRow);

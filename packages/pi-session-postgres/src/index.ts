@@ -4,6 +4,7 @@ export {
   type PiCloudPiSessionMetadata,
   type PostgresPiSessionStorageOptions,
 } from "./postgres-session-storage.ts";
+export type { PiSessionMutationOperation, PiSessionMutationPublisher } from "./session-mutation.ts";
 export type { ActiveExecutionAuthority, ExecutionAuthority } from "./execution-authority.ts";
 export {
   PostgresRunExecutionAuthority,

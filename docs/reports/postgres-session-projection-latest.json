@@ -1,0 +1,31 @@
+{
+  "format": "pi-cloud.postgres-session-projection-capacity.v1",
+  "generatedAt": "2026-08-21T19:01:14.776Z",
+  "revision": "sha256:067020aaa5615356cba0618f4f0e7478ef39840bb691d597b2916b09b1e4b417",
+  "workload": {
+    "sessionCount": 2000,
+    "mutationsPerSession": 4,
+    "concurrency": 256,
+    "completeMessages": 8000,
+    "payloadBytes": 1024
+  },
+  "result": {
+    "failures": [],
+    "persistedEntries": 8000,
+    "persistedResults": 8000,
+    "elapsedMs": 7719.88,
+    "messagesPerSecond": 1036.29,
+    "latencyMs": {
+      "p50": 234.8,
+      "p95": 304.49,
+      "p99": 429.11
+    },
+    "walBytes": 51300410,
+    "walBytesPerMessage": 6412.55
+  },
+  "scope": [
+    "isolated single-node PostgreSQL",
+    "complete 1 KiB Pi semantic entries plus projection-result barriers",
+    "no token deltas, model calls or Cube execution"
+  ]
+}

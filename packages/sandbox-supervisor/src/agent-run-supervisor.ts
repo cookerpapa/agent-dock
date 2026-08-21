@@ -30,6 +30,7 @@ export interface SupervisorTurnRunner {
 export type PreparedTurnExecution = {
   ack: CommandAckMessage;
   run(): Promise<PiTurnResult>;
+  lastAcknowledgedEventSeq(): number;
   releaseBeforeStart(): void;
   revokeLease(): void;
 };
@@ -49,6 +50,7 @@ export type AppliedHeartbeatResult = {
 export type SupervisorTurnCancellationResult = {
   reason: CancelTurnCommandMessage["payload"]["reason"];
   forced: boolean;
+  lastEventSeq: number;
 };
 
 export type PreparedTurnCancellation = {
@@ -485,6 +487,7 @@ export class AgentRunSupervisor {
     return {
       ack: this.#ack(assignment.command, { status }),
       run: () => this.#run(assignment),
+      lastAcknowledgedEventSeq: () => assignment.lastAcknowledgedSeq,
       releaseBeforeStart: () => this.#releaseBeforeStart(assignment),
       revokeLease: () => this.#revokeLease(assignment),
     };
@@ -499,6 +502,7 @@ export class AgentRunSupervisor {
     return {
       ack: this.#ack(command, { status: "rejected", code, message, retryable }),
       run: () => Promise.reject(new AgentRunSupervisorError(code, "Rejected command cannot run")),
+      lastAcknowledgedEventSeq: () => command.payload.nextEventSeq - 1,
       releaseBeforeStart: () => undefined,
       revokeLease: () => undefined,
     };
@@ -621,56 +625,58 @@ export class AgentRunSupervisor {
   }
 
   #runWithDurableEventBoundary(assignment: Assignment): Promise<PiTurnResult> {
-    return this.#runner.run(
-      assignment.command,
-      async (message) => {
-        const latest = this.#currentBySession.get(assignment.command.payload.sessionId);
-        if (
-          latest !== assignment ||
-          (assignment.state !== "running" && assignment.state !== "cancelling")
-        ) {
-          throw new AgentRunSupervisorError(
-            "stale_fence",
-            "Stale assignment cannot publish events",
-          );
-        }
-        if (
-          message.payload.leaseId !== assignment.command.payload.leaseId ||
-          message.payload.fencingToken !== assignment.command.payload.fencingToken ||
-          message.payload.commandId !== assignment.command.payload.commandId ||
-          message.payload.event.seq !== assignment.lastProducedSeq + 1
-        ) {
-          throw new AgentRunSupervisorError(
-            "invalid_event",
-            "Runner event identity or sequence does not match its assignment",
-          );
-        }
-        assignment.lastProducedSeq = message.payload.event.seq;
-        let acknowledgement: EventAckMessage;
-        try {
-          acknowledgement = await assignment.publishEvent(message);
-        } catch (error: unknown) {
-          throw new AgentRunSupervisorError(
-            "invalid_event_delivery",
-            "Supervisor event publisher did not cross the PostgreSQL durability boundary",
-            { cause: error },
-          );
-        }
-        if (
-          acknowledgement.payload.sessionId !== message.payload.event.sessionId ||
-          acknowledgement.payload.leaseId !== message.payload.leaseId ||
-          acknowledgement.payload.fencingToken !== message.payload.fencingToken ||
-          acknowledgement.payload.acknowledgedThroughSeq !== message.payload.event.seq
-        ) {
-          throw new AgentRunSupervisorError(
-            "invalid_event_delivery",
-            "Supervisor event acknowledgement did not match the published event",
-          );
-        }
-        assignment.lastAcknowledgedSeq = acknowledgement.payload.acknowledgedThroughSeq;
-      },
-      assignment.abortController.signal,
-    );
+    return this.#runner
+      .run(
+        assignment.command,
+        async (message) => {
+          const latest = this.#currentBySession.get(assignment.command.payload.sessionId);
+          if (
+            latest !== assignment ||
+            (assignment.state !== "running" && assignment.state !== "cancelling")
+          ) {
+            throw new AgentRunSupervisorError(
+              "stale_fence",
+              "Stale assignment cannot publish events",
+            );
+          }
+          if (
+            message.payload.leaseId !== assignment.command.payload.leaseId ||
+            message.payload.fencingToken !== assignment.command.payload.fencingToken ||
+            message.payload.commandId !== assignment.command.payload.commandId ||
+            message.payload.event.seq !== assignment.lastProducedSeq + 1
+          ) {
+            throw new AgentRunSupervisorError(
+              "invalid_event",
+              "Runner event identity or sequence does not match its assignment",
+            );
+          }
+          assignment.lastProducedSeq = message.payload.event.seq;
+          let acknowledgement: EventAckMessage;
+          try {
+            acknowledgement = await assignment.publishEvent(message);
+          } catch (error: unknown) {
+            throw new AgentRunSupervisorError(
+              "invalid_event_delivery",
+              "Supervisor event publisher did not cross the accepted Kafka durability boundary",
+              { cause: error },
+            );
+          }
+          if (
+            acknowledgement.payload.sessionId !== message.payload.event.sessionId ||
+            acknowledgement.payload.leaseId !== message.payload.leaseId ||
+            acknowledgement.payload.fencingToken !== message.payload.fencingToken ||
+            acknowledgement.payload.acknowledgedThroughSeq !== message.payload.event.seq
+          ) {
+            throw new AgentRunSupervisorError(
+              "invalid_event_delivery",
+              "Supervisor event acknowledgement did not match the published event",
+            );
+          }
+          assignment.lastAcknowledgedSeq = acknowledgement.payload.acknowledgedThroughSeq;
+        },
+        assignment.abortController.signal,
+      )
+      .then((result) => ({ ...result, lastEventSeq: assignment.lastAcknowledgedSeq }));
   }
 
   #assertHeartbeatRenewalScope(
@@ -754,7 +760,11 @@ export class AgentRunSupervisor {
           );
         }
         cancellation.state = "completed";
-        return { reason: error.reason, forced: error.forced };
+        return {
+          reason: error.reason,
+          forced: error.forced,
+          lastEventSeq: assignment.lastAcknowledgedSeq,
+        };
       },
     );
     return cancellation.runPromise;

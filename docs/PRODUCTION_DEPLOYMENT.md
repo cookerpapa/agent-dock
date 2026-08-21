@@ -24,12 +24,12 @@ manual Cube credential to configure.
 
 ## Services
 
-The default topology includes PostgreSQL, Control Plane, two trusted Pi
+The default topology includes PostgreSQL, Kafka, Control Plane, two trusted Pi
 Workers, Tool Broker, persistent Workspace Volume
 gateway, Cube integration, provider proxy and Web. Observability and GitHub
 experiments are optional profiles.
 
-Temporal, MinIO and Kopia are not installed.
+Temporal, Valkey, MinIO and Kopia are not installed.
 
 ## Operations
 

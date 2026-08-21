@@ -32,7 +32,7 @@ Important operator values include:
 - Cube warm/persistent retention and capacity;
 - Workspace Volume gateway concurrency;
 - Workspace deletion reaper interval and batch size;
-- PostgreSQL hot-event retention interval and batch size;
+- Kafka broker/topic names and bounded time/byte retention;
 - optional GitHub and observability profiles.
 
 The Worker requires both:
@@ -40,6 +40,9 @@ The Worker requires both:
 ```text
 DATABASE_URL_FILE
 DATABASE_NOTIFICATION_URL_FILE (optional on one host; defaults to DATABASE_URL)
+PI_CLOUD_KAFKA_BROKERS
+PI_CLOUD_KAFKA_RAW_EVENT_TOPIC
+PI_CLOUD_KAFKA_SESSION_MUTATION_TOPIC
 ```
 
 In distributed deployments the first may use PgBouncer transaction pooling.
@@ -55,6 +58,7 @@ The platform and Pi Worker charts are JSON-schema validated. Required external
 authorities are:
 
 - PostgreSQL/PgBouncer and direct PostgreSQL notification URL;
+- Kafka with Raw, Accepted and Session Mutation topics;
 - an existing ReadWriteMany Workspace PVC/CSI backend;
 - Cube API/proxy/Volume Plugin endpoints;
 - provider egress proxy.
@@ -73,7 +77,7 @@ model upstream timeout <= Pi model timeout <= Pi Turn timeout
 model capability TTL >= Pi Turn timeout + expiry margin
 repository import lease <= repository import wait
 Worker termination grace > Turn + Tool settlement window
-hot-event retention >= maximum supported browser reconnect window
+Kafka time/byte retention >= maximum supported browser reconnect window
 tenant maximum concurrent Runs >= desired active Subagents + one waiting root Run
 ```
 
@@ -90,4 +94,5 @@ npm run helm:check
 Never place credentials in committed Helm values or environment files. Use
 private files/Kubernetes Secrets for database URLs, model encryption key,
 Worker enrollment/management tokens, Tool Broker token, Cube API key and
-metrics token. Cube receives none of them.
+metrics token. Enterprise Kafka credentials and CA material belong in
+Kubernetes Secrets/ACL configuration. Cube receives none of them.

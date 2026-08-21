@@ -975,8 +975,19 @@ export class ControlPlaneStore {
         ])
         .executeTakeFirstOrThrow();
       await transaction
-        .insertInto("session_event_cursors")
-        .values({ session_id: session.id })
+        .insertInto("pi_sessions")
+        .values({
+          tenant_id: this.#tenantId,
+          id: session.id,
+          created_at_ms: new Date(session.created_at).valueOf(),
+          parent_session_id: null,
+          next_seq: 1,
+          name: title,
+        })
+        .executeTakeFirstOrThrow();
+      await transaction
+        .insertInto("pi_session_lanes")
+        .values({ tenant_id: this.#tenantId, session_id: session.id, lane: "main", leaf_id: null })
         .executeTakeFirstOrThrow();
       return {
         sessionId: session.id,
@@ -1358,7 +1369,6 @@ export class ControlPlaneStore {
           .onRef("project.tenant_id", "=", "session_row.tenant_id")
           .onRef("project.id", "=", "session_row.project_id"),
       )
-      .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
       .innerJoin("workspace_sources as source", (join) =>
         join
           .onRef("source.tenant_id", "=", "session_row.tenant_id")
@@ -1392,8 +1402,7 @@ export class ControlPlaneStore {
         "source.github_installation_id as sourceInstallationId",
         "source.github_repository_id as sourceRepositoryId",
         "github_repository.private as sourcePrivate",
-        "cursor.last_persisted_seq as lastPersistedSequence",
-        "cursor.replay_floor_seq as replayFloorSequence",
+        "session_row.next_event_seq as nextEventSequence",
       ])
       .where("session_row.tenant_id", "=", this.#tenantId)
       .where("session_row.id", "=", sessionId)
@@ -1512,11 +1521,11 @@ export class ControlPlaneStore {
         const transcript = transcriptByTurnId.get(row.turnId);
         return transcript === undefined ? [] : [transcript];
       });
+    const canonicalEventSequence =
+      nonNegativeSafeInteger(conversation.nextEventSequence, "Conversation next event sequence") -
+      1;
     let replayAfterSequence = Math.max(
-      nonNegativeSafeInteger(
-        conversation.lastPersistedSequence,
-        "Conversation durable event cursor",
-      ),
+      canonicalEventSequence,
       ...currentTerminalTranscripts.map((transcript) => transcript.throughSequence),
     );
     const unprojectedTurnIds = includedRows
@@ -1526,9 +1535,9 @@ export class ControlPlaneStore {
     if (unprojectedTurnIds.length > 0) {
       // An active Turn is not yet represented by canonical Pi entries. Start
       // SSE after the latest settled projection so the browser replays its
-      // already-durable PostgreSQL events from the retained hot tail.
+      // already-durable accepted Kafka events from the retained hot tail.
       replayAfterSequence = Math.max(
-        nonNegativeSafeInteger(conversation.replayFloorSequence, "Conversation replay floor"),
+        canonicalEventSequence,
         ...currentTerminalTranscripts.map((transcript) => transcript.throughSequence),
       );
     }

@@ -263,7 +263,6 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
               .onRef("run_attempt.run_id", "=", "run.id")
               .onRef("run_attempt.id", "=", "run.current_attempt_id"),
           )
-          .innerJoin("session_event_cursors as cursor", "cursor.session_id", "session_row.id")
           .select([
             "lease.lease_id as leaseId",
             "lease.fencing_token as leaseFencingToken",
@@ -276,11 +275,11 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
             "run_attempt.state as runAttemptState",
             "run_attempt.lease_id as runAttemptLeaseId",
             "run_attempt.fencing_token as runAttemptFencingToken",
-            "cursor.last_persisted_seq as persistedSequence",
+            "run_attempt.last_event_seq as lastEventSequence",
           ])
           .where("lease.session_id", "=", observation.sessionId)
           .where("lease.sandbox_id", "=", this.#sandboxId)
-          .forUpdate(["lease", "session_row", "turn", "command", "run", "run_attempt", "cursor"])
+          .forUpdate(["lease", "session_row", "turn", "command", "run", "run_attempt"])
           .executeTakeFirst();
         if (assignment === undefined) continue;
 
@@ -292,9 +291,9 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           assignment.sessionFencingToken,
           "heartbeat session fencing token",
         );
-        const persistedSequence = safeInteger(
-          assignment.persistedSequence,
-          "heartbeat persisted sequence",
+        const lastEventSequence = safeInteger(
+          assignment.lastEventSequence,
+          "heartbeat event sequence",
         );
         if (
           assignment.leaseId !== observation.leaseId ||
@@ -312,8 +311,8 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           assignment.runAttemptState === "cancelled" ||
           assignment.runAttemptState === "timed_out" ||
           assignment.runAttemptState === "superseded" ||
-          observation.lastAcknowledgedSeq > persistedSequence ||
-          persistedSequence > observation.lastProducedSeq
+          observation.lastAcknowledgedSeq > observation.lastProducedSeq ||
+          observation.lastAcknowledgedSeq < lastEventSequence
         ) {
           continue;
         }
@@ -332,6 +331,7 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           .set({
             claim_expires_at: validUntil,
             last_heartbeat_at: now,
+            last_event_seq: observation.lastAcknowledgedSeq,
             updated_at: now,
           })
           .where("id", "=", assignment.runAttemptId)

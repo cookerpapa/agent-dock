@@ -147,6 +147,74 @@ describe.sequential("PostgresPiSessionStorage", () => {
     await expect(storage.getName()).resolves.toBe("durable session");
   });
 
+  it("routes active Worker mutations through the Kafka projection port", async () => {
+    const operations: unknown[] = [];
+    const storage = new PostgresPiSessionStorage({
+      database,
+      tenantId: TENANT_ID,
+      sessionId: SESSION_ID,
+      mutationPublisher: {
+        async mutate(operation) {
+          operations.push(operation);
+          if (operation.kind === "append_entry") {
+            return {
+              ...operation.entry,
+              parentId: null,
+              seq: 999,
+              timestamp: 1_700_000_000_999,
+            };
+          }
+        },
+      },
+    });
+    await storage.setName("projected name");
+    await expect(
+      storage.appendEntry(
+        { id: "projected-entry", type: "custom", customType: "projection", data: { ok: true } },
+        "main",
+      ),
+    ).resolves.toMatchObject({ id: "projected-entry", seq: 999 });
+    expect(operations).toEqual([
+      { kind: "set_name", name: "projected name" },
+      {
+        kind: "append_entry",
+        entry: {
+          id: "projected-entry",
+          type: "custom",
+          customType: "projection",
+          data: { ok: true },
+        },
+        lane: "main",
+      },
+    ]);
+    await expect(storage.getName()).resolves.toBe("durable session");
+  });
+
+  it("replays one projected mutation ID as one PostgreSQL effect", async () => {
+    const storage = new PostgresPiSessionStorage({
+      database,
+      tenantId: TENANT_ID,
+      sessionId: SESSION_ID,
+      projectedMutationId: "d1000000-0000-4000-8000-000000000099",
+    });
+    const before = await database
+      .selectFrom("pi_sessions")
+      .select("next_seq")
+      .where("tenant_id", "=", TENANT_ID)
+      .where("id", "=", SESSION_ID)
+      .executeTakeFirstOrThrow();
+    await storage.setName("idempotent projection");
+    await storage.setName("would be a duplicate");
+    const after = await database
+      .selectFrom("pi_sessions")
+      .select(["next_seq", "name"])
+      .where("tenant_id", "=", TENANT_ID)
+      .where("id", "=", SESSION_ID)
+      .executeTakeFirstOrThrow();
+    expect(Number(after.next_seq)).toBe(Number(before.next_seq) + 1);
+    expect(after.name).toBe("idempotent projection");
+  });
+
   it("forks by reference without copying inherited JSON payloads", async () => {
     const entryPayloadCache = new PostgresPiSessionEntryPayloadCache({
       maximumBytes: 1024 * 1024,

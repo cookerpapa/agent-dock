@@ -3,6 +3,7 @@ import { Value } from "typebox/value";
 import { UuidSchema } from "./protocol-primitives.ts";
 
 export const TURN_COMMAND_OUTBOX_TOPIC = "control.command.pending.v1";
+export const SESSION_TERMINAL_EVENT_OUTBOX_TOPIC = "session.event.accepted.v1";
 
 export const TurnCommandOutboxPayloadSchema = Type.Object(
   {

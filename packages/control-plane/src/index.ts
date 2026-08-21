@@ -100,12 +100,6 @@ export {
   type TtlCheckpointObjectStoreSnapshot,
 } from "@pi-cloud/runtime-core/checkpoint-object-cache";
 export {
-  SessionLiveStreamCompactionError,
-  SessionLiveStreamCompactionService,
-  type SessionLiveStreamCompactionOptions,
-  type SessionLiveStreamCompactionResult,
-} from "@pi-cloud/runtime-core/session-event-retention";
-export {
   RunCancellationExecutor,
   RunCancellationExecutorInvariantError,
   RunCancellationExecutorStaleClaimError,
@@ -282,21 +276,6 @@ export {
   SessionEventSubscription,
   type SessionEventWake,
 } from "@pi-cloud/runtime-core/session-event-hub";
-export { SessionEventNotificationBridge } from "./session-event-notification-bridge.ts";
-export {
-  type SessionEventNotification,
-  type SessionEventNotificationHandlers,
-  type SessionEventNotificationPublisher,
-  type SessionEventNotificationTransport,
-} from "@pi-cloud/runtime-core/session-event-notifications";
-export {
-  PostgresSessionEventNotifications,
-  PostgresSessionEventNotificationsError,
-  SESSION_EVENT_NOTIFICATION_CHANNEL,
-  parseSessionEventNotificationPayload,
-  type PostgresSessionEventNotificationsOptions,
-  type PostgresSessionEventNotificationsState,
-} from "@pi-cloud/runtime-core/postgres-session-event-notifications";
 export {
   OpenSessionEventStream,
   SessionEventStream,

@@ -17,7 +17,6 @@ import type {
 import { sql, type Kysely, type Transaction } from "kysely";
 import { randomUUID } from "node:crypto";
 import { transitionCurrentRunAttempt } from "@pi-cloud/runtime-core/run-attempt-state";
-import type { SessionEventNotificationPublisher } from "@pi-cloud/runtime-core/session-event-notifications";
 import { commitTerminalTurnEvent } from "@pi-cloud/runtime-core/terminal-turn-event";
 import type {
   PreparedTerminalTurnProjection,
@@ -38,7 +37,6 @@ export type AssignmentReconcilerOptions = {
   sandboxId: string;
   inventory: SandboxAssignmentInventory;
   clock?: () => Date;
-  eventNotificationPublisher?: SessionEventNotificationPublisher;
   terminalTurnProjectionSource?: TerminalTurnProjectionSource;
 };
 
@@ -142,7 +140,6 @@ export class AssignmentReconciler {
   readonly #sandboxId: string;
   readonly #inventory: SandboxAssignmentInventory;
   readonly #clock: () => Date;
-  readonly #eventNotificationPublisher: SessionEventNotificationPublisher | undefined;
   readonly #terminalTurnProjectionSource: TerminalTurnProjectionSource | undefined;
 
   constructor(options: AssignmentReconcilerOptions) {
@@ -153,7 +150,6 @@ export class AssignmentReconciler {
     this.#sandboxId = options.sandboxId;
     this.#inventory = options.inventory;
     this.#clock = options.clock ?? (() => new Date());
-    this.#eventNotificationPublisher = options.eventNotificationPublisher;
     this.#terminalTurnProjectionSource = options.terminalTurnProjectionSource;
   }
 
@@ -700,9 +696,6 @@ export class AssignmentReconciler {
       now,
       eventId: terminalEventId,
       ...(preparedProjection === undefined ? {} : { preparedProjection }),
-      ...(this.#eventNotificationPublisher === undefined
-        ? {}
-        : { notificationPublisher: this.#eventNotificationPublisher }),
     });
     await this.#deleteLease(transaction, candidate);
     return "settled";

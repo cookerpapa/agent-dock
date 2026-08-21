@@ -49,8 +49,9 @@
     "kubernetes:distributed:deploy": "node scripts/distributed-kubernetes.mjs deploy",
     "kubernetes:distributed:status": "node scripts/distributed-kubernetes.mjs status",
     "runtime-policy:check": "node scripts/check-runtime-time-budgets.mjs && node scripts/check-cubesandbox-template-retention.mjs",
-    "benchmark:postgres-event-log": "tsx scripts/run-postgres-event-log-benchmark.ts",
-    "eval:enterprise-events": "tsx scripts/run-postgres-event-log-benchmark.ts",
+    "benchmark:postgres-session-projection": "tsx scripts/run-postgres-session-projection-benchmark.ts",
+    "eval:postgres-session-projection": "tsx scripts/run-postgres-session-projection-benchmark.ts",
+    "eval:kafka-events": "node scripts/run-kafka-first-event-acceptance.mjs",
     "production:init": "node scripts/init-production.mjs",
     "production:config": "node scripts/production-compose.mjs config --quiet",
     "production:config:observability": "PI_CLOUD_PRODUCTION_PROFILES=observability node scripts/production-compose.mjs config --quiet",
@@ -95,6 +96,7 @@
     "eval:load": "node scripts/run-control-plane-load.mjs"
   },
   "devDependencies": {
+    "@confluentinc/kafka-javascript": "1.10.0",
     "@types/node": "24.12.4",
     "kysely": "0.29.4",
     "prettier": "3.9.5",

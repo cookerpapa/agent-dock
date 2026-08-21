@@ -17,6 +17,24 @@
       "invariant": "A released or recovered old worker cannot reacquire an obsolete fence."
     },
     {
+      "id": "stale-kafka-event-authority",
+      "workspace": "@pi-cloud/control-plane",
+      "file": "test/control-plane-api.test.ts",
+      "test": "rejects a raw Kafka event after its RunAttempt fence is superseded",
+      "setupTests": ["creates a project and workspace atomically, then creates a cold session"],
+      "invariant": "A stale Worker may reach Raw Kafka but cannot publish browser-visible Accepted events."
+    },
+    {
+      "id": "session-mutation-redelivery",
+      "workspace": "@pi-cloud/pi-session-postgres",
+      "file": "test/postgres-pi-session-storage.test.ts",
+      "test": "replays one projected mutation ID as one PostgreSQL effect",
+      "setupTests": [
+        "persists bounded branch context and durable operation records without a JSONL download"
+      ],
+      "invariant": "At-least-once Session mutation delivery creates one canonical PostgreSQL effect."
+    },
+    {
       "id": "message-stream-independence",
       "workspace": "@pi-cloud/pi-session-postgres",
       "file": "test/cloud-agent-runtime.test.ts",

@@ -47,7 +47,9 @@ const productionCompose = await readFile(
   fileURLToPath(new URL("../deploy/production/compose.yaml", import.meta.url)),
   "utf8",
 );
-assert.doesNotMatch(productionCompose, /event-gateway|kafka|valkey/u);
+assert.match(productionCompose, /pi-cloud\.agent-events\.raw\.v1/u);
+assert.match(productionCompose, /pi-cloud\.agent-events\.accepted\.v1/u);
+assert.doesNotMatch(productionCompose, /event-gateway|valkey/u);
 
 await assert.rejects(
   execute("bash", [installer, "--print-plan", "--pi-workers", "invalid"], {

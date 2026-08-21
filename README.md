@@ -5,10 +5,11 @@ SDK. It keeps the Agent Loop and provider credentials in a trusted Worker pool,
 while every model-generated file or shell operation runs in a CubeSandbox KVM
 microVM.
 
-The current architecture deliberately has two durable authorities:
+The current architecture has three deliberately narrow durable authorities:
 
-- PostgreSQL owns product state, the Run queue, attempts/leases/fences, Pi
-  Session records, canonical messages and the bounded live SSE tail;
+- PostgreSQL owns product state, the Run queue, attempts/leases/fences and
+  canonical Pi Session records;
+- Kafka owns the bounded hot Agent event log used for resumable SSE;
 - a persistent Cube Volume owns each Workspace's bytes.
 
 Temporal, execution Cells, MinIO/S3 conversation checkpoints, Kopia Workspace
@@ -64,8 +65,9 @@ Control Plane ── transaction ──► PostgreSQL Run queue
                                CubeSandbox KVM
                                persistent /workspace
 
-Assistant deltas ── coalesce + Host group commit ──► PostgreSQL ──► SSE
-complete Tool Items / Pi messages / Run terminal state ─────────────► PostgreSQL
+Assistant deltas ── coalesce/group ──► Raw Kafka ── authority ──► Accepted Kafka ──► SSE
+complete Pi entries/records ─────────► Session Mutation Kafka ──► PostgreSQL
+Run/Attempt/Lease/Fence + terminal outbox ─────────────────────────► PostgreSQL
 ```
 
 The Control Plane authenticates and commits an idempotent command before
@@ -152,7 +154,7 @@ authorization boundary.
 - stale/expired Workers cannot commit messages or advance Workspace state;
 - arbitrary shell operations are not blindly replayed after an ambiguous loss;
 - interruption and Sandbox reset facts survive Pi compaction and Worker changes;
-- browser-visible live bytes commit to PostgreSQL before SSE exposure;
+- browser-visible live bytes receive an Accepted Kafka broker ACK before SSE exposure;
 - Pi `message_end` writes complete SessionStorage state independently of its
   short-lived delta rows;
 - failed/cancelled visible prefixes remain in Pi context as bounded
@@ -178,7 +180,7 @@ See [Architecture](docs/ARCHITECTURE.md),
 
 ## Technology
 
-TypeScript, Node.js 24, React, Fastify/NestJS, PostgreSQL/Kysely, Pi SDK,
+TypeScript, Node.js 24, React, Fastify/NestJS, PostgreSQL/Kysely, Kafka, Pi SDK,
 Kubernetes/KEDA and Tencent CubeSandbox/KVM. OpenTelemetry,
 Prometheus, Grafana and Jaeger are optional.
 
@@ -216,10 +218,9 @@ cross-Worker recovery.
 
 ## Kubernetes deployment
 
-The chart in `deploy/helm/pi-cloud-platform` expects external PostgreSQL
-(plus a direct notification endpoint), ReadWriteMany persistent Workspace
-storage and Cube authorities. KEDA scales the shared Worker pool from the
-PostgreSQL ready-Run backlog.
+The chart in `deploy/helm/pi-cloud-platform` expects external PostgreSQL,
+Kafka, ReadWriteMany persistent Workspace storage and Cube authorities. KEDA
+scales the shared Worker pool from the PostgreSQL ready-Run backlog.
 
 ```bash
 cp deploy/helm/pi-cloud-platform/values.distributed.example.yaml values.yaml

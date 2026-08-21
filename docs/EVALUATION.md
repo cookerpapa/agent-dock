@@ -2,7 +2,7 @@
 
 Pi Cloud separates deterministic protocol checks, live infrastructure
 acceptance and model-quality experiments. A checked-in report is current only
-when its workload exercises the PostgreSQL queue/SessionStorage/live-event
+when its workload exercises the PostgreSQL queue/SessionStorage, Kafka event
 path, persistent Cube Volume and CubeSandbox KVM runtime described in the
 current architecture ADR.
 
@@ -30,24 +30,27 @@ prefix still survives Worker replacement.
 ## Live-event durability
 
 ```bash
-npm run eval:enterprise-events
+npm run eval:kafka-events
+npm run eval:postgres-session-projection
 ```
 
 The production stream is:
 
 ```text
-Pi text coalescer -> Host PostgreSQL group commit -> LISTEN/NOTIFY -> resumable SSE
+Pi text coalescer -> Raw Kafka -> fenced Accepted Kafka -> resumable SSE
+Pi complete message -> Session Mutation Kafka -> PostgreSQL SessionStorage
 ```
 
-PostgreSQL acknowledgement precedes visibility. It stores Pi-native complete
-messages once and retains only a bounded hot tail of coalesced Assistant text
-and complete Tool/lifecycle Items. The enterprise event check uses a real
-PostgreSQL server and the production grouped `DurableEventStore` path to measure
-ordering, acknowledgement latency, throughput and WAL bytes per event.
+Accepted Kafka acknowledgement precedes visibility. Kafka retains a bounded
+hot tail of coalesced Assistant text and complete Tool/lifecycle Items;
+PostgreSQL stores Pi-native complete messages once. The two checks separately
+measure Kafka ordering/throughput and PostgreSQL complete-message projection
+latency/WAL, so token fragments never masquerade as canonical database state.
 
 Current evidence:
 
-- [PostgreSQL event-log capacity](reports/postgres-event-log-2000-latest.md)
+- [Kafka-first event capacity](reports/kafka-first-event-acceptance-latest.md)
+- [PostgreSQL Session projection](reports/postgres-session-projection-latest.md)
 - [Pi SDK stream shape](reports/pi-sdk-stream-shape-latest.md)
 
 These reports are single-host evidence, not managed-PostgreSQL HA or

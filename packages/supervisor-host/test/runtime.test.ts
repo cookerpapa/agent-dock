@@ -198,6 +198,9 @@ describe("PiWorkerRuntime", () => {
       modelCredentialMasterKey: Buffer.alloc(32, 7).toString("base64url"),
       databaseUrl: connectionString,
       databaseNotificationUrl: connectionString,
+      kafkaBrokers: ["kafka:9092"],
+      kafkaRawEventTopic: "pi-cloud.agent-events.raw.v1",
+      kafkaSessionMutationTopic: "pi-cloud.session-mutations.v1",
       managementHost: "127.0.0.1",
       managementPort: 0,
       managementAdvertisedBaseUrl: `http://${SUPERVISOR_ID}:4100`,
@@ -245,6 +248,19 @@ describe("PiWorkerRuntime", () => {
         objectStore: objectStore(),
         toolBroker: runtimeToolBroker,
         runWorkerFactory,
+        eventIngestor: {
+          async ingest() {
+            throw new Error("unused");
+          },
+          async checkHealth() {},
+        },
+        sessionMutationProducer: {
+          scoped() {
+            return { async mutate() {} };
+          },
+          async checkHealth() {},
+          async close() {},
+        },
         provisioningClient: { provision: (request) => provisioner.provision(request) },
       });
       await first.start();
@@ -260,6 +276,19 @@ describe("PiWorkerRuntime", () => {
         objectStore: objectStore(),
         toolBroker: runtimeToolBroker,
         runWorkerFactory,
+        eventIngestor: {
+          async ingest() {
+            throw new Error("unused");
+          },
+          async checkHealth() {},
+        },
+        sessionMutationProducer: {
+          scoped() {
+            return { async mutate() {} };
+          },
+          async checkHealth() {},
+          async close() {},
+        },
         provisioningClient: { provision: (request) => provisioner.provision(request) },
       });
       await second.start();

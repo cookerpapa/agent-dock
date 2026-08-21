@@ -1144,10 +1144,6 @@ export class ConversationTreeService {
           .returning(["id", "title", "created_at"])
           .executeTakeFirstOrThrow();
         await transaction
-          .insertInto("session_event_cursors")
-          .values({ session_id: childSessionId })
-          .executeTakeFirstOrThrow();
-        await transaction
           .insertInto("pi_sessions")
           .values({
             tenant_id: tenantId,

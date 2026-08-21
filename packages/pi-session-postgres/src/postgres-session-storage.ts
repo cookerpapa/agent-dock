@@ -18,6 +18,7 @@ import {
 import { sql, type Kysely, type Transaction } from "kysely";
 import type { ExecutionAuthority } from "./execution-authority.ts";
 import type { PostgresPiSessionEntryPayloadCache } from "./session-entry-payload-cache.ts";
+import type { PiSessionMutationOperation, PiSessionMutationPublisher } from "./session-mutation.ts";
 
 export type { ActiveExecutionAuthority, ExecutionAuthority } from "./execution-authority.ts";
 
@@ -32,6 +33,8 @@ export type PostgresPiSessionStorageOptions = {
   turnId?: string;
   authority?: ExecutionAuthority;
   entryPayloadCache?: PostgresPiSessionEntryPayloadCache;
+  mutationPublisher?: PiSessionMutationPublisher;
+  projectedMutationId?: string;
 };
 
 function safeInteger(value: string | number, name: string): number {
@@ -121,6 +124,8 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
   readonly #turnId: string | undefined;
   readonly #authority: ExecutionAuthority | undefined;
   readonly #entryPayloadCache: PostgresPiSessionEntryPayloadCache | undefined;
+  readonly #mutationPublisher: PiSessionMutationPublisher | undefined;
+  readonly #projectedMutationId: string | undefined;
 
   constructor(options: PostgresPiSessionStorageOptions) {
     this.#database = options.database;
@@ -129,6 +134,11 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
     this.#turnId = options.turnId;
     this.#authority = options.authority;
     this.#entryPayloadCache = options.entryPayloadCache;
+    if (options.mutationPublisher !== undefined && options.projectedMutationId !== undefined) {
+      throw new TypeError("Pi Session mutation cannot be both published and projected");
+    }
+    this.#mutationPublisher = options.mutationPublisher;
+    this.#projectedMutationId = options.projectedMutationId;
   }
 
   static async create(
@@ -198,6 +208,10 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
   }
 
   async createLane(lane: string, at: string | null): Promise<void> {
+    if (this.#mutationPublisher !== undefined) {
+      await this.#publish({ kind: "create_lane", lane, at });
+      return;
+    }
     await this.#mutate(async (transaction) => {
       await this.#requireTarget(transaction, at);
       const existing = await transaction
@@ -220,6 +234,10 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
   }
 
   async moveLane(lane: string, to: string | null): Promise<void> {
+    if (this.#mutationPublisher !== undefined) {
+      await this.#publish({ kind: "move_lane", lane, to });
+      return;
+    }
     await this.#mutate(async (transaction) => {
       await this.#requireTarget(transaction, to);
       const update = await transaction
@@ -240,6 +258,13 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
     newEntry: ProvisionedEntry<TEntry>,
     lane: string,
   ): Promise<TEntry> {
+    if (this.#mutationPublisher !== undefined) {
+      return (await this.#publish({
+        kind: "append_entry",
+        entry: newEntry as ProvisionedEntry<Entry>,
+        lane,
+      })) as TEntry;
+    }
     return this.#mutate(async (transaction) => {
       const pointer = await transaction
         .selectFrom("pi_session_lanes")
@@ -281,12 +306,18 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
         .where("session_id", "=", this.#sessionId)
         .where("lane", "=", lane)
         .executeTakeFirstOrThrow();
-      await this.#appendLog(transaction, seq, "entry", { entryId: complete.id });
+      await this.#appendLog(transaction, seq, "entry", { entryId: complete.id }, complete);
       return complete;
     });
   }
 
   async appendRecord<TRecord extends LaneRecord>(newRecord: NewRecord<TRecord>): Promise<TRecord> {
+    if (this.#mutationPublisher !== undefined) {
+      return (await this.#publish({
+        kind: "append_record",
+        record: newRecord as NewRecord<LaneRecord>,
+      })) as TRecord;
+    }
     return this.#mutate(async (transaction) => {
       const lane = await transaction
         .selectFrom("pi_session_lanes")
@@ -337,7 +368,7 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
           turn_id: turnId,
         })
         .executeTakeFirst();
-      await this.#appendLog(transaction, seq, "record", { recordId: complete.id });
+      await this.#appendLog(transaction, seq, "record", { recordId: complete.id }, complete);
       return complete;
     });
   }
@@ -653,6 +684,10 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
   }
 
   async setName(name: string): Promise<void> {
+    if (this.#mutationPublisher !== undefined) {
+      await this.#publish({ kind: "set_name", name });
+      return;
+    }
     await this.#mutate(async (transaction) => {
       const seq = await this.#nextSequence(transaction);
       await transaction
@@ -677,6 +712,14 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
   }
 
   async setLabel(id: string, label: string | undefined): Promise<void> {
+    if (this.#mutationPublisher !== undefined) {
+      await this.#publish({
+        kind: "set_label",
+        id,
+        ...(label === undefined ? {} : { label }),
+      });
+      return;
+    }
     await this.#mutate(async (transaction) => {
       await this.#requireTarget(transaction, id);
       const seq = await this.#nextSequence(transaction);
@@ -774,6 +817,18 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
     try {
       return await this.#database.transaction().execute(async (transaction) => {
         await this.#authority?.assertCurrent(transaction);
+        if (this.#projectedMutationId !== undefined) {
+          const projected = await transaction
+            .selectFrom("pi_session_log")
+            .select("mutation_result")
+            .where("tenant_id", "=", this.#tenantId)
+            .where("session_id", "=", this.#sessionId)
+            .where("mutation_id", "=", this.#projectedMutationId)
+            .executeTakeFirst();
+          if (projected !== undefined) {
+            return payload<T>(projected.mutation_result);
+          }
+        }
         return effect(transaction);
       });
     } catch (error) {
@@ -886,6 +941,7 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
     seq: number,
     kind: LogItem["kind"],
     value: Record<string, unknown>,
+    mutationResult: unknown = null,
   ): Promise<void> {
     await transaction
       .insertInto("pi_session_log")
@@ -895,8 +951,17 @@ export class PostgresPiSessionStorage implements SessionStorage<PiCloudPiSession
         seq,
         kind,
         payload: value,
+        mutation_id: this.#projectedMutationId ?? null,
+        mutation_result: mutationResult as Record<string, unknown> | null,
       })
       .executeTakeFirst();
+  }
+
+  #publish(operation: PiSessionMutationOperation): Promise<unknown> {
+    if (this.#mutationPublisher === undefined) {
+      throw new Error("Pi Session mutation publisher is unavailable");
+    }
+    return this.#mutationPublisher.mutate(operation);
   }
 
   async #requireTarget(transaction: Transaction<Database>, id: string | null): Promise<void> {

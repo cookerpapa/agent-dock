@@ -4,6 +4,7 @@ import type { Kysely } from "kysely";
 import { PostgresRunExecutionAuthority } from "./postgres-execution-authority.ts";
 import { PostgresPiSessionRepository } from "./postgres-session-repository.ts";
 import type { PostgresPiSessionEntryPayloadCache } from "./session-entry-payload-cache.ts";
+import type { PiSessionMutationPublisher } from "./session-mutation.ts";
 
 export type CloudAgentExecutionScope = Readonly<{
   tenantId: string;
@@ -21,6 +22,7 @@ export type OpenPostgresDurableAgentSessionOptions = Readonly<{
   pollIntervalMs?: number;
   clock?: () => Date;
   entryPayloadCache?: PostgresPiSessionEntryPayloadCache;
+  mutationPublisher?: PiSessionMutationPublisher;
 }>;
 
 export type PostgresDurableAgentSession = Readonly<{
@@ -57,8 +59,11 @@ export async function openPostgresDurableAgentSession(
       ...(options.entryPayloadCache === undefined
         ? {}
         : { entryPayloadCache: options.entryPayloadCache }),
+      ...(options.mutationPublisher === undefined
+        ? {}
+        : { mutationPublisher: options.mutationPublisher }),
     });
-    const session = await repository.openOrCreate({ id: options.scope.sessionId });
+    const session = await repository.openById(options.scope.sessionId);
     return {
       session,
       authority,

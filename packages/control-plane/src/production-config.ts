@@ -11,6 +11,10 @@ export type ProductionControlPlaneEnvironment = Readonly<Record<string, string |
 export type ProductionControlPlaneConfig = {
   databaseUrl: string;
   databaseNotificationUrl: string;
+  kafkaBrokers: readonly string[];
+  kafkaRawEventTopic: string;
+  kafkaAcceptedEventTopic: string;
+  kafkaSessionMutationTopic: string;
   supervisorEnrollmentToken: string;
   supervisorManagementToken: string;
   modelCredentialMasterKey: string;
@@ -141,6 +145,22 @@ function bounded(value: string, name: string, maximum = 256): string {
     throw new TypeError(`${name} is invalid`);
   }
   return value;
+}
+
+function boundedList(value: string, name: string, maximumItems = 64): string[] {
+  const values = value.split(",");
+  if (
+    values.length < 1 ||
+    values.length > maximumItems ||
+    values.some((entry) => entry.trim() !== entry || entry.length < 1)
+  ) {
+    throw new TypeError(`${name} must contain bounded comma-separated values without whitespace`);
+  }
+  const normalized = values.map((entry) => bounded(entry, name, 512));
+  if (new Set(normalized).size !== normalized.length) {
+    throw new TypeError(`${name} must contain unique values`);
+  }
+  return normalized;
 }
 
 function booleanValue(environment: ProductionControlPlaneEnvironment, name: string): boolean {
@@ -322,6 +342,25 @@ export async function loadProductionControlPlaneConfig(
   return {
     databaseUrl,
     databaseNotificationUrl,
+    kafkaBrokers: boundedList(
+      required(environment, "PI_CLOUD_KAFKA_BROKERS"),
+      "PI_CLOUD_KAFKA_BROKERS",
+    ),
+    kafkaRawEventTopic: bounded(
+      environment.PI_CLOUD_KAFKA_RAW_EVENT_TOPIC ?? "pi-cloud.agent-events.raw.v1",
+      "PI_CLOUD_KAFKA_RAW_EVENT_TOPIC",
+      249,
+    ),
+    kafkaAcceptedEventTopic: bounded(
+      environment.PI_CLOUD_KAFKA_ACCEPTED_EVENT_TOPIC ?? "pi-cloud.agent-events.accepted.v1",
+      "PI_CLOUD_KAFKA_ACCEPTED_EVENT_TOPIC",
+      249,
+    ),
+    kafkaSessionMutationTopic: bounded(
+      environment.PI_CLOUD_KAFKA_SESSION_MUTATION_TOPIC ?? "pi-cloud.session-mutations.v1",
+      "PI_CLOUD_KAFKA_SESSION_MUTATION_TOPIC",
+      249,
+    ),
     supervisorEnrollmentToken: await secret(
       environment,
       "PI_CLOUD_SUPERVISOR_ENROLLMENT_TOKEN",

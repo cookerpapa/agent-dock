@@ -11,7 +11,6 @@
     "images",
     "bootstrap",
     "controlPlane",
-    "eventRetention",
     "web",
     "external",
     "networkPolicy",
@@ -104,18 +103,6 @@
       }
     },
     "controlPlane": { "$ref": "#/$defs/httpWorkload" },
-    "eventRetention": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["enabled", "replicas", "intervalMs", "batchSize", "resources"],
-      "properties": {
-        "enabled": { "type": "boolean" },
-        "replicas": { "type": "integer", "minimum": 1, "maximum": 32 },
-        "intervalMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 },
-        "batchSize": { "type": "integer", "minimum": 1, "maximum": 10000 },
-        "resources": { "$ref": "#/$defs/resources" }
-      }
-    },
     "web": {
       "allOf": [
         { "$ref": "#/$defs/httpWorkload" },
@@ -141,7 +128,7 @@
     "external": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["database", "providerProxyUrl", "otlpTracesEndpoint"],
+      "required": ["database", "kafka", "providerProxyUrl", "otlpTracesEndpoint"],
       "properties": {
         "database": {
           "type": "object",
@@ -151,6 +138,23 @@
             "secretKey": { "$ref": "#/$defs/secretKey" },
             "notificationSecretKey": { "$ref": "#/$defs/secretKey" },
             "apiTokenSecretKey": { "$ref": "#/$defs/secretKey" }
+          }
+        },
+        "kafka": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["brokers", "rawEventTopic", "acceptedEventTopic", "sessionMutationTopic"],
+          "properties": {
+            "brokers": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 3, "maxLength": 512 }
+            },
+            "rawEventTopic": { "type": "string", "minLength": 1, "maxLength": 249 },
+            "acceptedEventTopic": { "type": "string", "minLength": 1, "maxLength": 249 },
+            "sessionMutationTopic": { "type": "string", "minLength": 1, "maxLength": 249 }
           }
         },
         "providerProxyUrl": { "$ref": "#/$defs/httpUrl" },

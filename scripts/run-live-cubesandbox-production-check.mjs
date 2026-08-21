@@ -200,6 +200,24 @@ async function psql(query) {
   ]);
 }
 
+async function kafkaEndOffset(topic) {
+  const output = await capture(process.execPath, [
+    "scripts/production-compose.mjs",
+    "exec",
+    "-T",
+    "kafka",
+    "/opt/kafka/bin/kafka-get-offsets.sh",
+    "--bootstrap-server",
+    "kafka:9092",
+    "--topic",
+    topic,
+  ]);
+  return output
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .reduce((total, line) => total + Number(line.split(":").at(-1) ?? 0), 0);
+}
+
 async function runUsageEvidence(runId) {
   const value = await psql(
     `select count(*) || '|' ||
@@ -779,6 +797,23 @@ try {
   assert(piEntryCount > terminalCount);
   assert(canonicalPayloadBytes > 0);
   assert(terminalThroughSequence <= conversation.replayAfterSequence);
+  const eventPlaneEvidence = await psql(
+    `select (to_regclass('public.session_events') is null)::int || '|' ||
+            count(*)
+       from pi_session_mutation_results
+      where tenant_id = ${sqlLiteral(tenantId)}`,
+  );
+  const [postgresHotEventTableAbsent, projectedSessionMutations] = eventPlaneEvidence
+    .split("|")
+    .map(Number);
+  assert.equal(postgresHotEventTableAbsent, 1);
+  assert(projectedSessionMutations > 0);
+  const kafkaOffsets = {
+    raw: await kafkaEndOffset("pi-cloud.agent-events.raw.v1"),
+    accepted: await kafkaEndOffset("pi-cloud.agent-events.accepted.v1"),
+    sessionMutations: await kafkaEndOffset("pi-cloud.session-mutations.v1"),
+  };
+  assert(kafkaOffsets.raw > 0 && kafkaOffsets.accepted > 0 && kafkaOffsets.sessionMutations > 0);
 
   const foreignApi = bootstrapApi;
   const foreignProject = await foreignApi.createProject(`Foreign Cube project ${suffix}`);
@@ -934,6 +969,12 @@ try {
       canonicalPayloadBytes,
       replayAfterSequence: conversation.replayAfterSequence,
     },
+    eventPlane: {
+      authority: "Kafka Accepted topic",
+      postgresHotEventTableAbsent: true,
+      projectedSessionMutations,
+      kafkaEndOffsets: kafkaOffsets,
+    },
     scheduler: {
       authority: "PostgreSQL",
       queue: "outbox",
@@ -985,6 +1026,8 @@ try {
         `- Large Workspace fresh-VM cold restore: ${String(report.largeWorkspace.freshCubeMicroVm)}`,
         `- Real input/output/cache-read tokens: ${String(report.totalUsage.inputTokens)} / ${String(report.totalUsage.outputTokens)} / ${String(report.totalUsage.cacheReadTokens)}`,
         `- Canonical conversation: ${String(report.canonicalConversation.terminalCount)} terminal Turns / ${String(report.canonicalConversation.piEntryCount)} Pi entries / ${String(report.canonicalConversation.canonicalPayloadBytes)} bytes`,
+        `- Kafka Raw / Accepted / Session Mutation end offsets: ${String(report.eventPlane.kafkaEndOffsets.raw)} / ${String(report.eventPlane.kafkaEndOffsets.accepted)} / ${String(report.eventPlane.kafkaEndOffsets.sessionMutations)}`,
+        `- PostgreSQL hot-event table absent / projected Session mutations: ${String(report.eventPlane.postgresHotEventTableAbsent)} / ${String(report.eventPlane.projectedSessionMutations)}`,
         `- Scheduler / Worker pool: ${report.scheduler.authority} / ${report.scheduler.workerPool}`,
         `- Cross-tenant conversation hidden: ${String(report.multiTenant.crossTenantConversationHidden)}`,
         `- Explicit warm eviction / remaining Cube microVMs: ${String(report.cleanup.explicitWarmEvictionVerified)} / ${String(report.cleanup.retainedRunningSessionMicroVmCount + report.cleanup.foreignSessionMicroVmCount)}`,

@@ -14,4 +14,4 @@ dependencies:
 annotations:
   pi-cloud.io/scheduler: postgresql-run-queue
   pi-cloud.io/tool-runtime: cubesandbox-kvm
-  pi-cloud.io/state-authority: postgresql-and-persistent-cube-volume
+  pi-cloud.io/state-authority: postgresql-kafka-and-persistent-cube-volume

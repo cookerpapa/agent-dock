@@ -7,6 +7,8 @@ external durable authorities.
 ## External requirements
 
 - PostgreSQL HA plus optional PgBouncer;
+- Kafka HA with replication factor at least 3, `acks=all`,
+  `min.insync.replicas>=2`, topic ACLs and bounded time/byte retention;
 - one direct PostgreSQL connection for migrations, `LISTEN/NOTIFY` and KEDA;
 - ReadWriteMany persistent Workspace storage visible to Cube Volume Plugin and
   trusted Volume gateway replicas;
@@ -30,7 +32,8 @@ Ingress -> Web / Control Plane
                          │
               persistent Workspace storage
 
-Worker events -> PostgreSQL group commit -> LISTEN/NOTIFY -> SSE
+Worker events -> Raw Kafka -> fenced authority -> Accepted Kafka -> SSE
+Complete Pi entries -> Session Mutation Kafka -> PostgreSQL SessionStorage
 ```
 
 There are no execution Cells or Worker-affinity queues. A Workspace binds to a
@@ -55,12 +58,12 @@ npm run kubernetes:distributed:deploy -- --values values.yaml
 ```
 
 The platform Secret must contain database URLs, API/bootstrap credentials,
-Cube/Tool credentials and metrics tokens.
+Cube/Tool credentials, Kafka credentials/CA material and metrics tokens.
 No S3 or Temporal credential is required.
 
 ## Scaling
 
-- Control Plane/Web scale by CPU;
+- Control Plane/Web scale by CPU and Accepted-topic projection lag;
 - Pi Workers scale by PostgreSQL ready Run backlog;
 - Tool Broker and Volume gateway scale independently;
 - Cube compute and underlying nodes scale from active Sandbox demand.
@@ -79,7 +82,7 @@ Before claiming high availability, test on the actual storage/network stack:
 
 - Worker and node loss during model and Tool calls;
 - PostgreSQL/PgBouncer failover and notification reconnect;
-- PostgreSQL hot-event retention and SSE reconnect;
+- Kafka Accepted-event retention, consumer lag and SSE reconnect;
 - Tool Broker/Volume gateway owner loss;
 - Cube compute-node drain and persistent Volume reattachment;
 - KEDA and node-autoscaler scale-up/down under real backlog.
