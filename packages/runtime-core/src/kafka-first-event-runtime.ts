@@ -49,6 +49,7 @@ export class KafkaFirstAgentEventRuntime {
       events: this.eventStore,
     });
     this.terminalTurnProjectionSource = new KafkaTerminalTurnProjectionSource({
+      database: options.database,
       events: this.eventStore,
     });
     this.#acceptedProducer = new KafkaAcceptedAgentEventProducer({

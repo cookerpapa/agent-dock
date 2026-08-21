@@ -557,7 +557,7 @@ export class PostgresAcceptedEventBarrier {
     pollIntervalMs?: number;
   }) {
     this.#database = options.database;
-    this.#timeoutMs = options.timeoutMs ?? 30_000;
+    this.#timeoutMs = options.timeoutMs ?? 120_000;
     this.#pollIntervalMs = options.pollIntervalMs ?? 10;
   }
 

@@ -57,11 +57,26 @@
       "invariant": "A successful Run terminal commit does not reconstruct a complete message from the short-lived delta tail."
     },
     {
+      "id": "accepted-projection-ahead-of-worker-ack",
+      "workspace": "@pi-cloud/control-plane",
+      "file": "test/control-plane-api.test.ts",
+      "test": "accepts an already-ahead Kafka projection boundary during Run settlement",
+      "setupTests": ["creates a project and workspace atomically, then creates a cold session"],
+      "invariant": "An Accepted projector that commits before the Worker observes its ACK cannot strand terminal Run settlement."
+    },
+    {
       "id": "control-plane-process-sigkill",
       "workspace": "@pi-cloud/sandbox-supervisor",
       "file": "test/control-channel-process-fault.test.ts",
       "test": "keeps an active assignment alive while the Control Plane process is killed and replaced",
       "invariant": "A Control Plane process replacement does not revoke a healthy fenced Agent Loop."
+    },
+    {
+      "id": "control-channel-expiry-with-live-run",
+      "workspace": "@pi-cloud/control-plane",
+      "file": "test/supervisor-connection-manager.test.ts",
+      "test": "defers channel retirement while a RunAttempt keeps heartbeating through PostgreSQL",
+      "invariant": "A stale Control Channel cannot retire a Worker whose active RunAttempt still has fresh database authority."
     },
     {
       "id": "checkpoint-corruption-and-cas",

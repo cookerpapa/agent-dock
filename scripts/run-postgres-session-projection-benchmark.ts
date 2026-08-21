@@ -190,13 +190,10 @@ try {
     const report = {
       format: "pi-cloud.postgres-session-projection-capacity.v1",
       generatedAt: new Date().toISOString(),
-      revision: docker([
-        "image",
-        "inspect",
-        "pi-cloud/control-plane:production",
-        "--format",
-        "{{.Id}}",
-      ]),
+      revision: spawnSync("git", ["rev-parse", "HEAD"], {
+        cwd: root,
+        encoding: "utf8",
+      }).stdout.trim(),
       workload: {
         sessionCount,
         mutationsPerSession,

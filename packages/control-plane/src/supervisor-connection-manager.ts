@@ -475,12 +475,15 @@ export class SupervisorConnectionManager {
           currentActive !== undefined &&
           new Date(currentActive.expires_at).valueOf() <= now.valueOf()
         ) {
-          await this.#fenceSandbox(transaction, current, "heartbeat_timeout", now);
-          return this.#registrationRejection(
-            "stale_registration",
-            "Expired supervisor connection cannot be revived",
-            false,
-          );
+          const freshExecution = await this.#hasFreshExecution(transaction, current.id, now);
+          if (!freshExecution) {
+            await this.#fenceSandbox(transaction, current, "heartbeat_timeout", now);
+            return this.#registrationRejection(
+              "stale_registration",
+              "Expired supervisor connection cannot be revived",
+              false,
+            );
+          }
         }
 
         this.#validateRegistrationPolicy(message);
@@ -975,9 +978,43 @@ export class SupervisorConnectionManager {
       ) {
         return false;
       }
+      if (await this.#hasFreshExecution(transaction, sandbox.id, now)) {
+        const deferred = await transaction
+          .updateTable("supervisor_connections")
+          .set({ expires_at: new Date(now.valueOf() + this.#heartbeatTimeoutMs) })
+          .where("connection_id", "=", connectionId)
+          .where("state", "=", "active")
+          .where("expires_at", "<=", now)
+          .executeTakeFirst();
+        expectOne(deferred.numUpdatedRows, "deferring a live Supervisor connection retirement");
+        return false;
+      }
       await this.#fenceSandbox(transaction, sandbox, "heartbeat_timeout", now);
       return true;
     });
+  }
+
+  async #hasFreshExecution(
+    database: Kysely<Database> | Transaction<Database>,
+    sandboxId: string,
+    now: Date,
+  ): Promise<boolean> {
+    const freshnessBoundary = new Date(now.valueOf() - this.#heartbeatTimeoutMs);
+    const attempt = await database
+      .selectFrom("run_attempts")
+      .select("id")
+      .where("sandbox_id", "=", sandboxId)
+      .where("state", "in", [
+        "provisioning",
+        "restoring",
+        "running",
+        "checkpointing",
+        "cancel_requested",
+      ])
+      .where("claim_expires_at", ">", now)
+      .where("last_heartbeat_at", ">", freshnessBoundary)
+      .executeTakeFirst();
+    return attempt !== undefined;
   }
 
   async #claimRetirement(now: Date): Promise<RetirementClaim | undefined> {

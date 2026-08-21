@@ -145,6 +145,9 @@ export class SupervisorMaintenanceRuntime {
   }
 
   async #run(signal: AbortSignal): Promise<void> {
+    // Give healthy Workers one reconnect interval after a Control Plane
+    // process replacement before examining the previous instance's channels.
+    await abortableWait(this.#maintenanceIntervalMs, signal);
     while (!signal.aborted) {
       let delayMs = this.#maintenanceIntervalMs;
       try {

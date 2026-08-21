@@ -2593,6 +2593,39 @@ describe.sequential("single-user durable turn intake API", () => {
     });
   });
 
+  it("accepts an already-ahead Kafka projection boundary during Run settlement", async () => {
+    const accepted = await acceptTurn(
+      "accepted-projection-ahead",
+      "settle after the accepted projector advances first",
+    );
+    let expectedTerminalSequence = 0;
+    const backend: TurnExecutionBackend = {
+      async execute(request, lifecycle) {
+        await lifecycle.started();
+        const baseSequence = Number(request.nextEventSeq) - 1;
+        expectedTerminalSequence = baseSequence + 6;
+        await database
+          .updateTable("run_attempts")
+          .set({ last_event_seq: baseSequence + 5 })
+          .where("id", "=", request.attemptId)
+          .executeTakeFirstOrThrow();
+        return { stopReason: "stop", lastEventSeq: baseSequence + 4 };
+      },
+    };
+    const dispatcher = new RunCommandExecutor({ database, backend });
+    await expect(dispatchNextTestCommand(database, dispatcher, IDS.tenant)).resolves.toMatchObject({
+      status: "completed",
+      commandId: accepted.commandId,
+    });
+    expect(
+      await database
+        .selectFrom("session_terminal_events")
+        .select("seq")
+        .where("turn_id", "=", accepted.turnId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ seq: String(expectedTerminalSequence) });
+  });
+
   it("settles an internally timed-out Pi turn without requiring a user cancellation command", async () => {
     const accepted = await acceptTurn(
       "internal-turn-timeout",

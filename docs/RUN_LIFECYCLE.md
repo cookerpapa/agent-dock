@@ -44,24 +44,29 @@ result is `UNKNOWN`.
 ## Events and terminal commit
 
 Pi text fragments are coalesced for 100 ms or 4 KiB, then independent Sessions
-share one bounded Host PostgreSQL group-commit queue. Tool arguments and Tool
-results enter this stream only as complete Items. PostgreSQL acknowledgement is
-the visibility boundary; `LISTEN/NOTIFY` wakes SSE readers after commit.
+share one bounded Host Kafka append. Raw events are Session-keyed; a projector
+rechecks Attempt/Lease/Fence and publishes only valid records to Accepted
+Kafka. Tool arguments and Tool results enter this stream only as complete
+Items. Accepted broker acknowledgement is the visibility boundary.
 
-Pi `message_end` appends complete SessionStorage state independently of the
-short-lived delta rows. On successful settlement, the Worker prepares the
-bounded Workspace Volume revision. The terminal transaction validates the
-current Attempt/fence, advances the Workspace revision if applicable, commits
-the terminal event and settles the Run. After the reconnect window, a retention
-worker deletes the hot Turn events while keeping canonical Pi messages.
+Pi `message_end` publishes a complete Session mutation. The PostgreSQL
+projector applies it idempotently and the Worker waits at a read-your-writes
+barrier before the next model Step. On successful settlement, the Worker
+prepares the bounded Workspace Volume revision. The terminal transaction
+validates the current Attempt/fence, advances the Workspace revision if
+applicable, writes a terminal Kafka Outbox record and settles the Run. Kafka
+time/byte retention eventually removes hot fragments while canonical Pi
+messages remain in PostgreSQL.
 
 ## Cancellation and failure
 
 Cancellation revokes authority before trying to interrupt model/Tool work.
 Expired or superseded Workers cannot mutate Pi SessionStorage, execute another
 Tool or commit terminal state. A caught interruption writes Pi's minimal
-abort/reset boundary. A hard Worker loss is reconciled from already durable
-public events plus a factual interruption marker; no Tool result is invented.
+abort/reset boundary. A hard Worker loss is reconciled from the Accepted Kafka
+prefix plus a factual interruption marker; no Tool result is invented. A
+normal failure/cancellation also fetches that trusted prefix from the Control
+Plane instead of trusting a possibly-behind Worker-local buffer.
 
 Cube loss discards processes, memory, sockets and PTYs. The persistent Workspace
 Volume survives and can attach to a fresh KVM. The next Pi step is told only
@@ -76,10 +81,10 @@ capacity.
 
 ```text
 Run queue              at-least-once wakeup + transactional claim
-Pi Session mutation    current authority + transaction
+Pi Session mutation    Kafka + idempotent fenced PostgreSQL projection
 Tool start              no blind retry; UNKNOWN if ambiguous
 Workspace revision      fence + expected revision
 terminal Run commit     idempotent current-Attempt transaction
 Cube create/delete      idempotent reconcile
-live event batch        at-least-once + sequence/event-id dedupe
+live event batch        Raw/Accepted Kafka + sequence/event-id dedupe
 ```

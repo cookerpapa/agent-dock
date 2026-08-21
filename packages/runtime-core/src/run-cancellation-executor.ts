@@ -702,7 +702,20 @@ export class RunCancellationExecutor {
           .where("id", "=", claim.request.target.attemptId)
           .where("last_event_seq", "<=", String(result.lastEventSeq))
           .executeTakeFirst();
-        expectOne(boundary.numUpdatedRows, "recording the cancelled Run event boundary");
+        if (boundary.numUpdatedRows !== 1n) {
+          const existing = await transaction
+            .selectFrom("run_attempts")
+            .select("last_event_seq")
+            .where("tenant_id", "=", claim.request.target.tenantId)
+            .where("run_id", "=", claim.request.target.runId)
+            .where("id", "=", claim.request.target.attemptId)
+            .executeTakeFirst();
+          if (existing === undefined || Number(existing.last_event_seq) < result.lastEventSeq) {
+            throw new RunCancellationExecutorInvariantError(
+              "Cancelled Run event boundary could not be advanced or confirmed",
+            );
+          }
+        }
       }
       await transitionCurrentRunAttempt(
         transaction,

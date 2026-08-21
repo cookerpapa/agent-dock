@@ -215,7 +215,7 @@ export class KafkaPiSessionMutationProducer {
       topic: this.#topic,
       messages: [{ key: scope.sessionId, value: JSON.stringify(envelope) }],
     });
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + 120_000;
     while (true) {
       const result = await this.#database
         .selectFrom("pi_session_mutation_results")

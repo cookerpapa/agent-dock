@@ -74,6 +74,7 @@
     "production:semantic-check": "node scripts/run-live-cubesandbox-production-check.mjs",
     "production:worker-pool-check": "node scripts/run-live-pi-worker-pool-check.mjs",
     "production:control-plane-restart-check": "node scripts/run-live-control-plane-restart-check.mjs",
+    "production:kafka-restart-check": "node scripts/run-live-kafka-restart-check.mjs",
     "production:multi-tenant-model-load": "node scripts/run-live-multi-tenant-model-load.mjs",
     "production:long-context-check": "node scripts/run-live-long-context-compaction-check.mjs",
     "production:backup": "node scripts/production-backup.mjs",

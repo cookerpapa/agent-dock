@@ -12,7 +12,7 @@ import {
 } from "@pi-cloud/runtime-core/kafka-agent-event-log";
 import { KafkaPiSessionMutationProducer } from "@pi-cloud/runtime-core/kafka-pi-session-mutations";
 import { AgentRunExecutionBackend } from "@pi-cloud/runtime-core/agent-run-execution-backend";
-import { AcknowledgedTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/acknowledged-terminal-turn-projection";
+import { HttpTerminalTurnProjectionSource } from "@pi-cloud/runtime-core/terminal-turn-projection";
 import {
   PostgresTenantModelCredentialResolver,
   TenantModelCredentialVault,
@@ -674,7 +674,10 @@ export class PiWorkerRuntime {
       this.#ownedEventProducer = eventProducer;
       if (eventProducer !== undefined) await eventProducer.checkHealth();
       else await this.#eventIngestor?.checkHealth?.();
-      const terminalTurnProjectionSource = new AcknowledgedTerminalTurnProjectionSource();
+      const terminalTurnProjectionSource = new HttpTerminalTurnProjectionSource({
+        baseUrl: this.#config.controlPlaneBaseUrl,
+        serviceToken: this.#config.enrollmentToken,
+      });
       const leaseCoordinator = new SessionLeaseCoordinator({
         database: this.#database,
         sandboxId: identity.sandboxId,
@@ -683,7 +686,6 @@ export class PiWorkerRuntime {
         supervisor: runSupervisor,
         leaseCoordinator,
         eventIngestor,
-        onEvent: (publication) => terminalTurnProjectionSource.append(publication),
         onUnexpectedError: (error) =>
           operationalLog({
             service: "pi-cloud-pi-worker",

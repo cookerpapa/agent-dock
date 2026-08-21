@@ -1,20 +1,22 @@
 # CubeSandbox production acceptance
 
-- Checked at: 2026-08-21T18:42:52.191Z
+- Checked at: 2026-08-21T19:51:31.073Z
 - Provider/model: deepseek / deepseek-v4-flash
-- Pure-chat first text / settled: 2477 ms / 2930 ms
+- Pure-chat first text / settled: 2570 ms / 2958 ms
 - Pure-chat Tool calls / Cube activations: 0 / 0
-- First coding first text / settled: 8850 ms / 10346 ms
-- Follow-up first text / settled: 3710 ms / 7965 ms
-- Coding Tool calls: 2 + 3
+- First coding first text / settled: 8054 ms / 9076 ms
+- Follow-up first text / settled: 5386 ms / 6163 ms
+- Coding Tool calls: 2 + 2
 - Same running Session Cube KVM guest reused: true
 - Persistent Sandbox policy / archive cleanup: true / true
 - Workspace restored across Runs: true
 - Trusted Git metadata sibling / user .git absent: true / true
-- Large Workspace files / Volume reference: 1025 / 149002 bytes
+- Large Workspace files / Volume reference: 1025 / 149589 bytes
 - Large Workspace fresh-VM cold restore: true
-- Real input/output/cache-read tokens: 2361 / 2319 / 88064
-- Canonical conversation: 3 terminal Turns / 19 Pi entries / 17177 bytes
+- Real input/output/cache-read tokens: 2202 / 2873 / 102144
+- Canonical conversation: 3 terminal Turns / 17 Pi entries / 13824 bytes
+- Kafka Raw / Accepted / Session Mutation end offsets: 181 / 192 / 167
+- PostgreSQL hot-event table absent / projected Session mutations: true / 41
 - Scheduler / Worker pool: PostgreSQL / shared
 - Cross-tenant conversation hidden: true
 - Explicit warm eviction / remaining Cube microVMs: true / 0

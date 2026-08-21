@@ -763,6 +763,62 @@ describe.sequential("durable supervisor registration and health management", () 
     ).toEqual({ state: "terminated", active_sessions: 0 });
   });
 
+  it("defers channel retirement while a RunAttempt keeps heartbeating through PostgreSQL", async () => {
+    let now = testTime(3);
+    const connectionManager = manager({ clock: () => new Date(now) });
+    const firstAuthority = authority();
+    await provisionSandbox(firstAuthority);
+    const firstRegistration = await connectionManager.register(
+      registration(firstAuthority),
+      firstAuthority,
+    );
+    const accepted = await createAcceptedTurn();
+    const coordinator = await connectionManager.leaseCoordinator(
+      firstRegistration.payload.connectionId,
+      firstAuthority,
+    );
+    await coordinator.acquire(accepted.request);
+    await markAssignmentAcknowledged({ ...accepted, now });
+    const workerHeartbeat = new Date(now.valueOf() + 20_000);
+    await database
+      .updateTable("run_attempts")
+      .set({
+        last_heartbeat_at: workerHeartbeat,
+        claim_expires_at: new Date(workerHeartbeat.valueOf() + 60_000),
+      })
+      .where("id", "=", accepted.request.attemptId)
+      .executeTakeFirstOrThrow();
+
+    now = new Date(now.valueOf() + 30_001);
+    await expect(connectionManager.expireConnections()).resolves.toMatchObject({
+      scannedConnections: 1,
+      expiredConnections: 0,
+    });
+    await expect(
+      database
+        .selectFrom("sandbox_retirements")
+        .select("sandbox_id")
+        .where("sandbox_id", "=", firstAuthority.sandboxId)
+        .executeTakeFirst(),
+    ).resolves.toBeUndefined();
+
+    const replacementAuthority = authority({
+      supervisorId: firstAuthority.supervisorId,
+      bootId: firstAuthority.bootId,
+      sandboxId: firstAuthority.sandboxId,
+    });
+    await expect(
+      connectionManager.register(registration(replacementAuthority), replacementAuthority),
+    ).resolves.toMatchObject({ type: "supervisor.registered" });
+    expect(
+      await database
+        .selectFrom("supervisor_connections")
+        .select(["state", "close_reason"])
+        .where("connection_id", "=", firstRegistration.payload.connectionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ state: "superseded", close_reason: "reconnected" });
+  });
+
   it("durably delays a retryable owner-stop failure and blocks a non-retryable one", async () => {
     let now = testTime(5);
     let attempts = 0;

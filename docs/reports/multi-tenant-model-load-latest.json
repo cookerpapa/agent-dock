@@ -1,6 +1,6 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-17T14:41:12.674Z",
+  "checkedAt": "2026-08-21T20:27:24.325Z",
   "tenants": 6,
   "runs": 12,
   "model": {
@@ -18,28 +18,28 @@
   },
   "latencyMs": {
     "acceptance": {
-      "minimum": 48,
-      "p50": 75,
-      "p95": 162,
-      "maximum": 162
+      "minimum": 23,
+      "p50": 30,
+      "p95": 41,
+      "maximum": 41
     },
     "firstText": {
-      "minimum": 1777,
-      "p50": 5313,
-      "p95": 11492,
-      "maximum": 11492
+      "minimum": 923,
+      "p50": 3974,
+      "p95": 7572,
+      "maximum": 7572
     },
     "settled": {
-      "minimum": 3595,
-      "p50": 6266,
-      "p95": 14319,
-      "maximum": 14319
+      "minimum": 2654,
+      "p50": 4647,
+      "p95": 10330,
+      "maximum": 10330
     },
     "queueWait": {
-      "minimum": 714,
-      "p50": 4293,
-      "p95": 10770,
-      "maximum": 10770
+      "minimum": 291,
+      "p50": 2852,
+      "p95": 6561,
+      "maximum": 6561
     }
   },
   "workers": {
@@ -50,17 +50,17 @@
     }
   },
   "streaming": {
-    "projectionCount": 12,
-    "projectedSourceEvents": 250,
-    "semanticItems": 12,
-    "canonicalPayloadBytes": 8785,
-    "sourceEventsPerRun": 20.83
+    "terminalCount": 12,
+    "piEntryCount": 30,
+    "messageCount": 24,
+    "canonicalPayloadBytes": 20451,
+    "entriesPerRun": 2.5
   },
   "usage": {
     "requests": 12,
-    "inputTokens": 888,
-    "outputTokens": 1380,
-    "cacheReadTokens": 12288,
+    "inputTokens": 1014,
+    "outputTokens": 1221,
+    "cacheReadTokens": 72192,
     "cacheWriteTokens": 0
   }
 }

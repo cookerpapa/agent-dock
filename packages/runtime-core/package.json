@@ -17,7 +17,6 @@
     "./kafka-live-event-store": "./src/kafka-live-event-store.ts",
     "./kafka-pi-session-mutations": "./src/kafka-pi-session-mutations.ts",
     "./agent-run-execution-backend": "./src/agent-run-execution-backend.ts",
-    "./acknowledged-terminal-turn-projection": "./src/acknowledged-terminal-turn-projection.ts",
     "./live-turn-snapshot": "./src/live-turn-snapshot.ts",
     "./model-credential-runtime": "./src/model-credential-runtime.ts",
     "./postgres-checkpoint-object-store": "./src/postgres-checkpoint-object-store.ts",

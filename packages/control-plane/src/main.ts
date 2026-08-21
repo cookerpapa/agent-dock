@@ -28,6 +28,7 @@ import { ReplicatedToolBrokerClient } from "@pi-cloud/tool-broker/client";
 import { encodeWorkspaceSnapshotBlob } from "@pi-cloud/workspace-runtime";
 import { WorkspaceTerminalGateway } from "./workspace-terminal-gateway.ts";
 import { DevelopmentEnvironmentService } from "./development-environment-service.ts";
+import { TerminalTurnProjectionGateway } from "./terminal-turn-projection-gateway.ts";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
   const profile = await database
@@ -149,6 +150,10 @@ export async function startControlPlane(): Promise<void> {
       enrollmentToken: config.supervisorEnrollmentToken,
     });
     const provisioningGateway = new SupervisorProvisioningGateway({ provisioner });
+    const terminalTurnProjectionGateway = new TerminalTurnProjectionGateway({
+      source: kafkaEvents.terminalTurnProjectionSource,
+      authorize: (authorization) => provisioner.authorize(authorization),
+    });
     const httpGateway = new ProductionHttpGateway({
       authenticator: new PostgresTenantApiAuthenticator({ database }),
       publicRegistrationEnabled: config.publicRegistration.enabled,
@@ -185,6 +190,7 @@ export async function startControlPlane(): Promise<void> {
       assignmentInventoryFactory: (identity) =>
         new RoutedHttpSandboxAssignmentInventory(resolveManagementClient, identity),
       supervisorProvisioningGateway: provisioningGateway,
+      terminalTurnProjectionGateway,
       turnSteerBackendFactory: resolveSteerBackend,
       productionHttpGateway: httpGateway,
       publicRegistration: registrationConfiguration,

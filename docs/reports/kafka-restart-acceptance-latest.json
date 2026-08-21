@@ -1,0 +1,13 @@
+{
+  "accepted": true,
+  "checkedAt": "2026-08-21T20:32:06.311Z",
+  "provider": "deepseek",
+  "modelId": "deepseek-v4-flash",
+  "runId": "80c6eaa2-ff67-4b9b-b569-31337d98441a",
+  "turnId": "3ff1fbcc-9b97-4428-aa8b-87dbdfcf5af1",
+  "firstTextSequence": 3,
+  "terminalSequence": 75,
+  "sseReconnects": 0,
+  "attemptCount": 1,
+  "elapsedMs": 25274
+}

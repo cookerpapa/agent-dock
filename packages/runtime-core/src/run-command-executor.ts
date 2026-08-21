@@ -1647,7 +1647,19 @@ export class RunCommandExecutor {
       .where("id", "=", claim.request.attemptId)
       .where("last_event_seq", "<=", String(sequence))
       .executeTakeFirst();
-    expectOne(updated.numUpdatedRows, "recording the Run event boundary");
+    if (updated.numUpdatedRows === 1n) return;
+    const existing = await transaction
+      .selectFrom("run_attempts")
+      .select("last_event_seq")
+      .where("tenant_id", "=", claim.request.tenantId)
+      .where("run_id", "=", claim.request.runId)
+      .where("id", "=", claim.request.attemptId)
+      .executeTakeFirst();
+    if (existing === undefined || Number(existing.last_event_seq) < sequence) {
+      throw new RunCommandExecutorInvariantError(
+        "Run event boundary could not be advanced or confirmed",
+      );
+    }
   }
 
   async #lockLifecycleRows(

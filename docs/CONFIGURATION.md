@@ -75,6 +75,7 @@ Startup and CI validate relationships rather than isolated numbers:
 Tool execution < Tool Broker RPC timeout
 model upstream timeout <= Pi model timeout <= Pi Turn timeout
 model capability TTL >= Pi Turn timeout + expiry margin
+Accepted/Session projection wait >= supported Control Plane recovery window
 repository import lease <= repository import wait
 Worker termination grace > Turn + Tool settlement window
 Kafka time/byte retention >= maximum supported browser reconnect window
