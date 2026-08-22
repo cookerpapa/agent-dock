@@ -52,7 +52,10 @@ spec:
       {{- end }}
       automountServiceAccountToken: false
       enableServiceLinks: false
-      terminationGracePeriodSeconds: 120
+      # Tool Broker may be awaiting the bounded 11-minute Volume gateway
+      # request during checkpoint settlement. Keep the Pod alive long enough
+      # to finish or fail that operation explicitly.
+      terminationGracePeriodSeconds: 720
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

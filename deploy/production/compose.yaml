@@ -745,7 +745,7 @@ services:
     pids_limit: 128
     mem_limit: 384m
     cpus: 1.0
-    stop_grace_period: 30s
+    stop_grace_period: 12m
     logging: *bounded-logging
 
   github-gateway:
