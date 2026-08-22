@@ -154,7 +154,12 @@ async function acceptanceIdentity(suffix) {
     `select tenant.id::text || '|' || tenant.slug || '|' || user_row.id::text
        from tenants tenant
        join users user_row on user_row.tenant_id = tenant.id
+       join tenant_runtime_policies policy on policy.tenant_id = tenant.id
+       left join projects project on project.tenant_id = tenant.id
       where tenant.slug like 'long-context-%'
+      group by tenant.id, tenant.slug, tenant.created_at, user_row.id, user_row.created_at,
+               policy.maximum_projects
+      having count(project.id) < policy.maximum_projects
       order by tenant.created_at desc, user_row.created_at asc
       limit 1`,
   );
