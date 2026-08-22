@@ -277,7 +277,7 @@ async function waitForPreview(path, marker) {
     lastStatus = response.status;
     lastBody = await response.text();
     if (response.status === 200 && lastBody.includes(marker)) return;
-    if (response.status !== 503) break;
+    if (response.status !== 502 && response.status !== 503) break;
     await wait(100);
   }
   throw new Error(
