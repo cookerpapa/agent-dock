@@ -200,7 +200,14 @@ describe("PostgreSQL Tool Broker ownership", () => {
         workspaceId,
         sessionId: rootSessionId,
       }),
-    ).resolves.toEqual({ status: "reserved" });
+    ).resolves.toEqual({ status: "reserved", fencingToken: 1 });
+    await expect(
+      database
+        .selectFrom("sessions")
+        .select("last_fencing_token")
+        .where("id", "=", rootSessionId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ last_fencing_token: "1" });
     await expect(repository.reserve(activation)).resolves.toEqual({ status: "busy" });
     await repository.setTerminalState("20000000-0000-4000-8000-000000000021", "released");
     await expect(
@@ -458,6 +465,17 @@ describe("PostgreSQL Tool Broker ownership", () => {
         failure_retryable: false,
         settled_at: new Date(),
       })
+      .where("id", "=", parentRunId)
+      .executeTakeFirstOrThrow();
+    await expect(repository.claimTerminalRunActivations(16)).resolves.toEqual([]);
+    await database
+      .updateTable("run_attempts")
+      .set({ settled_at: new Date(Date.now() - 31_000) })
+      .where("id", "=", activation.assignment.attemptId)
+      .executeTakeFirstOrThrow();
+    await database
+      .updateTable("runs")
+      .set({ settled_at: new Date(Date.now() - 31_000) })
       .where("id", "=", parentRunId)
       .executeTakeFirstOrThrow();
     await expect(repository.claimTerminalRunActivations(16)).resolves.toEqual([

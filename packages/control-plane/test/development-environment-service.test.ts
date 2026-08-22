@@ -78,6 +78,9 @@ function provider(): SandboxProvider {
     async rebind(handle, assignment) {
       return { ...handle, assignment };
     },
+    async retainForWarm(handle, assignment) {
+      return { ...handle, assignment };
+    },
     async exec() {
       throw new Error("not used");
     },

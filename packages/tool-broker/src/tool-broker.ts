@@ -268,9 +268,8 @@ function samePhysicalRuntime(
   return (
     handle.runtimeId === assignment.containerId &&
     handle.runtimeName === assignment.containerName &&
-    handle.assignment.supervisorId === assignment.supervisorId &&
-    handle.assignment.bootId === assignment.bootId &&
-    handle.assignment.sandboxId === assignment.sandboxId
+    handle.assignment.workspaceId === assignment.workspaceId &&
+    sameSupervisorAssignment(handle.assignment, assignment)
   );
 }
 
@@ -293,6 +292,7 @@ function sameSupervisorAssignment(
 function terminalAssignment(
   terminalId: string,
   input: Pick<WorkspaceTerminalOpenInput, "tenantId" | "projectId" | "workspaceId" | "sessionId">,
+  fencingToken: number,
 ): ToolSandboxAssignment {
   return {
     tenantId: input.tenantId,
@@ -306,7 +306,7 @@ function terminalAssignment(
     turnId: terminalId,
     attemptId: terminalId,
     leaseId: terminalId,
-    fencingToken: 1,
+    fencingToken,
   };
 }
 
@@ -780,7 +780,6 @@ export class ToolBroker {
       );
     }
     const terminalId = validActivationId(this.#idGenerator());
-    const assignment = terminalAssignment(terminalId, input);
     const reservation = await this.#stateRepository.reserveTerminal({
       terminalId,
       tenantId: input.tenantId,
@@ -813,6 +812,7 @@ export class ToolBroker {
         true,
       );
     }
+    const assignment = terminalAssignment(terminalId, input, reservation.fencingToken);
     let admitted = false;
     let handle: SandboxHandle | undefined;
     let terminal: SandboxTerminalSession | undefined;
@@ -820,9 +820,37 @@ export class ToolBroker {
     try {
       if (reservation.retiredActivation !== undefined) {
         const retired = reservation.retiredActivation;
-        const warmEntry = [...this.#warm.entries()].find(
-          ([, warm]) => warm.handle.activationId === retired.activationId,
-        );
+        const retiredKey = workspaceKey(retired.assignment);
+        let warm = this.#warm.get(retiredKey);
+        if (
+          warm === undefined &&
+          retired.retention === "persistent" &&
+          retired.workspaceRevision !== undefined &&
+          this.#provider.recoverWarm !== undefined
+        ) {
+          const recovered = await this.#provider.recoverWarm(
+            retired.activationId,
+            retired.assignment,
+          );
+          if (recovered !== undefined) {
+            warm = {
+              handle: recovered,
+              workspaceRevision: retired.workspaceRevision,
+              environment: recovered.environment,
+              retention: "persistent",
+              lastUsedAt: this.#now(),
+              expiresAt: null,
+            };
+          }
+        }
+        const warmEntry = warm === undefined ? undefined : ([retiredKey, warm] as const);
+        if (warmEntry !== undefined && warmEntry[1].handle.activationId !== retired.activationId) {
+          throw new ToolBrokerError(
+            "persistent_sandbox_identity_mismatch",
+            "Persistent Sandbox memory and durable ownership did not match",
+            false,
+          );
+        }
         if (
           warmEntry !== undefined &&
           warmEntry[1].retention === "persistent" &&
@@ -1382,14 +1410,23 @@ export class ToolBroker {
     }
     const retainRequested = request.disposition !== "destroy";
     if (retainRequested && handle !== undefined && this.#provider.supportsWarmRebind !== false) {
-      if (this.#provider.retainForWarm !== undefined) {
-        try {
-          handle = await this.#provider.retainForWarm(handle);
-        } catch {
-          await this.#provider.stop(handle).catch(() => undefined);
-          this.#releaseAdmission(handle.activationId);
-          handle = undefined;
-        }
+      try {
+        const brokerFence = await this.#stateRepository.advanceWarmFence(
+          request.activationId,
+          request.assignment,
+        );
+        handle = await this.#provider.retainForWarm(handle, {
+          ...handle.assignment,
+          fencingToken: brokerFence,
+        });
+      } catch (error: unknown) {
+        await this.#provider.stop(handle).catch(() => undefined);
+        this.#releaseAdmission(handle.activationId);
+        handle = undefined;
+        // A best-effort warm cache may fall back to cold restore. A user who
+        // explicitly selected a persistent process world must never receive
+        // a successful Run while that world was silently destroyed.
+        if (request.disposition === "keep_persistent") throw error;
       }
     }
     const key = workspaceKey(request.assignment);
@@ -1491,8 +1528,13 @@ export class ToolBroker {
       this.#provider.listAssignments(sandboxId),
       this.#stateRepository.listRuntimeAssignments(sandboxId),
     ]);
+    const retainedRuntimeIds = new Set(
+      [...this.#warm.values()].map((warm) => warm.handle.runtimeId),
+    );
     const assignments = new Map<string, SupervisorRuntimeAssignment>();
-    for (const assignment of [...providerAssignments, ...durableAssignments]) {
+    for (const assignment of [...providerAssignments, ...durableAssignments].filter(
+      (candidate) => !retainedRuntimeIds.has(candidate.containerId),
+    )) {
       assignments.set(`${assignment.containerId}\0${assignment.fencingToken}`, assignment);
     }
     return [...assignments.values()];
@@ -1842,7 +1884,7 @@ export class ToolBroker {
   async #reapOrphanedTerminals(): Promise<void> {
     const orphaned = await this.#stateRepository.claimOrphanedTerminals(16);
     for (const terminal of orphaned) {
-      const assignment = terminalAssignment(terminal.terminalId, terminal);
+      const assignment = terminalAssignment(terminal.terminalId, terminal, terminal.fencingToken);
       try {
         await this.#provider.destroyActivation(terminal.terminalId, assignment);
         await this.#stateRepository.setTerminalState(terminal.terminalId, "released");
@@ -1898,10 +1940,15 @@ export class ToolBroker {
         const retained = terminal.retainedWarm;
         try {
           await this.#provider.snapshot(terminal.handle, terminalId);
-          const handle =
-            this.#provider.retainForWarm === undefined
-              ? terminal.handle
-              : await this.#provider.retainForWarm(terminal.handle);
+          const brokerFence = await this.#stateRepository.advanceWarmFence(
+            retained.activationId,
+            terminal.handle.assignment,
+          );
+          const brokerAssignment = {
+            ...terminal.handle.assignment,
+            fencingToken: brokerFence,
+          };
+          const handle = await this.#provider.retainForWarm(terminal.handle, brokerAssignment);
           this.#warm.set(retained.key, {
             handle,
             workspaceRevision: retained.workspaceRevision,

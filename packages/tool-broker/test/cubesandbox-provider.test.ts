@@ -226,6 +226,10 @@ class FakeCubeRuntimeClient implements CubeSandboxRuntimeClient {
       const body = input.body as { fencingToken: number };
       return { rebound: true, fencingToken: body.fencingToken, environment: toolchain };
     }
+    if (input.path === "/v1/rekey") {
+      const body = input.body as { fencingToken: number };
+      return { rekeyed: true, fencingToken: body.fencingToken, environment: toolchain };
+    }
     if (input.path === "/health") return {};
     if (input.path === "/v1/checkpoint") {
       return {
@@ -452,7 +456,8 @@ describe("CubeSandbox Provider contract", () => {
     );
     expect(runtime.creates).toHaveLength(1);
     expect(runtime.creates[0]?.metadata).not.toHaveProperty("host-mount");
-    expect(await manager.listAssignments(assignment.sandboxId)).toEqual([
+    const activeAssignments = await manager.listAssignments(assignment.sandboxId);
+    expect(activeAssignments).toEqual([
       expect.objectContaining({
         containerName: "cube-sandbox-1",
         supervisorId: assignment.supervisorId,
@@ -567,6 +572,11 @@ describe("CubeSandbox Provider contract", () => {
     expect(runtime.destroyed).toEqual([]);
     expect(manager.warmCount).toBe(1);
     expect(runtime.instances.get("cube-sandbox-1")?.state).toBe("running");
+    expect(runtime.requests.some(({ input }) => input.path === "/v1/rekey")).toBe(true);
+    await expect(manager.terminateAndConfirmAbsent(activeAssignments[0]!)).rejects.toMatchObject({
+      code: "cubesandbox_assignment_identity_mismatch",
+    });
+    expect(runtime.destroyed).toEqual([]);
 
     const nextAssignment: ToolSandboxAssignment = {
       ...assignment,
@@ -577,7 +587,7 @@ describe("CubeSandbox Provider contract", () => {
       turnId: "turn-cube-test-2",
       attemptId: "10000000-0000-4000-8000-000000000030",
       leaseId: "10000000-0000-4000-8000-000000000031",
-      fencingToken: 8,
+      fencingToken: 9,
     };
     const next = await manager.create({
       toolBrokerProtocolVersion: 1,

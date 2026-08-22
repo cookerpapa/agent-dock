@@ -764,7 +764,10 @@ export class CubeSandboxProvider implements SandboxProvider {
     }
   }
 
-  async retainForWarm(handle: SandboxHandle): Promise<SandboxHandle> {
+  async retainForWarm(
+    handle: SandboxHandle,
+    brokerAssignment: ToolSandboxAssignment,
+  ): Promise<SandboxHandle> {
     const activation = await this.#owned(handle);
     if (activation.state !== "idle") {
       throw new ToolBrokerError(
@@ -773,7 +776,92 @@ export class CubeSandboxProvider implements SandboxProvider {
         false,
       );
     }
-    return handle;
+    const nextSecret = handoffSecret();
+    const nextAuthorityEpoch = activation.authorityEpoch + 1;
+    if (
+      brokerAssignment.tenantId !== handle.assignment.tenantId ||
+      brokerAssignment.projectId !== handle.assignment.projectId ||
+      brokerAssignment.workspaceId !== handle.assignment.workspaceId ||
+      brokerAssignment.sessionId !== handle.assignment.sessionId ||
+      brokerAssignment.fencingToken !== nextAuthorityEpoch
+    ) {
+      throw new ToolBrokerError(
+        "cubesandbox_rekey_identity_invalid",
+        "CubeSandbox warm Broker authority was invalid",
+        false,
+      );
+    }
+    try {
+      const response = record(
+        await this.#client.request(activation.instance, {
+          method: "POST",
+          path: "/v1/rekey",
+          body: {
+            activationId: handle.activationId,
+            handoffSecret: nextSecret,
+            fencingToken: nextAuthorityEpoch,
+            bindingSha256: activation.bindingSha256,
+          },
+          timeoutMs: this.#readyTimeoutMs,
+          maximumResponseBytes: 1 * 1_024 * 1_024,
+          authority: this.#authority(activation),
+        }),
+        "CubeSandbox warm rekey",
+      );
+      if (response.rekeyed !== true || response.fencingToken !== nextAuthorityEpoch) {
+        throw new ToolBrokerError(
+          "cubesandbox_rekey_invalid",
+          "CubeSandbox warm rekey did not acknowledge the new fence",
+          false,
+        );
+      }
+      const toolchain = parseEnvironmentToolchainReport(response.environment);
+      if (
+        toolchain.profileKey !== handle.environment.profileKey ||
+        toolchain.profileVersion !== handle.environment.profileVersion ||
+        toolchain.imageRevision !== handle.environment.imageRevision ||
+        toolchain.specSha256 !== handle.environment.specSha256 ||
+        toolchain.recipeSha256 !== handle.environment.recipeSha256
+      ) {
+        throw new ToolBrokerError(
+          "cubesandbox_rekey_environment_mismatch",
+          "CubeSandbox warm environment did not match",
+          false,
+        );
+      }
+      const retained = Object.freeze({ ...handle, assignment: brokerAssignment });
+      activation.handle = retained;
+      activation.handoffSecret = nextSecret;
+      activation.authorityEpoch = nextAuthorityEpoch;
+      activation.toolchain = toolchain;
+      activation.state = "idle";
+      activation.seenOperationIds.clear();
+      activation.seenCaptureIds.clear();
+      return retained;
+    } catch {
+      await this.#client.destroy(activation.instance.sandboxId).catch(() => undefined);
+      this.#activations.delete(handle.activationId);
+      throw new ToolBrokerError(
+        "cubesandbox_rekey_failed",
+        "CubeSandbox warm authority rotation failed and requires a cold restore",
+        true,
+      );
+    }
+  }
+
+  async recoverWarm(
+    activationId: string,
+    assignment: ToolSandboxAssignment,
+  ): Promise<SandboxHandle | undefined> {
+    const activation = this.#activations.get(activationId);
+    if (
+      activation === undefined ||
+      activation.state !== "idle" ||
+      !sameAssignment(activation.handle.assignment, assignment)
+    ) {
+      return undefined;
+    }
+    return activation.handle;
   }
 
   async rebind(handle: SandboxHandle, assignment: ToolSandboxAssignment): Promise<SandboxHandle> {

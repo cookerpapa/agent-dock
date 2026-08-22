@@ -215,7 +215,20 @@ export interface SandboxProvider {
    * the warm pool. A Provider may keep the physical runtime running; this hook
    * must not preserve the old RunAttempt's Tool authority.
    */
-  retainForWarm?(handle: SandboxHandle): Promise<SandboxHandle>;
+  retainForWarm(
+    handle: SandboxHandle,
+    brokerAssignment: ToolSandboxAssignment,
+  ): Promise<SandboxHandle>;
+  /**
+   * Recover a Provider-local idle handle when the Broker's warm index was lost
+   * but the same trusted Provider process still owns the physical runtime.
+   * Implementations must return undefined unless activation and full prior
+   * assignment identity match exactly.
+   */
+  recoverWarm?(
+    activationId: string,
+    assignment: ToolSandboxAssignment,
+  ): Promise<SandboxHandle | undefined>;
   rebind(handle: SandboxHandle, assignment: ToolSandboxAssignment): Promise<SandboxHandle>;
   exec(
     handle: SandboxHandle,

@@ -177,6 +177,7 @@ export interface WorkspaceTerminalSessionTable {
   project_id: string;
   workspace_id: string;
   session_id: string;
+  fencing_token: Int8;
   runtime_id: string | null;
   runtime_name: string | null;
   state: WorkspaceTerminalState;

@@ -221,7 +221,9 @@ Worker disappears while Cube creation is in flight, a runtime that appears
 after the Run or Attempt became terminal is treated as an orphan: the pending
 operation is failed, the runtime is destroyed and the admission slot is
 released. This closes the create-after-caller-death race instead of relying on
-the vanished Worker to call `release()`.
+the vanished Worker to call `release()`. Reconciliation starts its grace period
+from the Run/Attempt settlement timestamp, not from activation creation, so a
+normal post-settlement checkpoint/release cannot race orphan cleanup.
 
 Cube mounts only the `workspace/` child of a trusted persistent Volume. The
 guest contains normal development tools but no platform credential. The trusted
@@ -243,15 +245,21 @@ and opens a UID 1000 PTY in `/workspace` through the authenticated Cube Tool
 Service. The image continues to exclude Cube `envd`, so the terminal cannot
 bypass PiCloud's handoff authority and fencing boundary.
 
-Human terminal authority is deliberately separate from Agent Tool capability,
-Run lease and fence. PostgreSQL nevertheless enforces one shared Workspace
-writer invariant: an active Agent activation blocks a terminal, and an active
-terminal keeps a newly accepted Run queued until terminal cleanup has released
-the writer reservation. An idle persistent same-Session Cube is rebound to a
-human-only authority and returned to the warm pool after PTY close; the old
-Agent capability remains revoked throughout the handoff. An ordinary ephemeral
-warm Cube is still retired before a separate terminal runtime starts. Input,
-output and resize frames are bounded; terminal transcripts are not persisted.
+Human terminal authority is deliberately separate from an Agent Run lease and
+Tool capability. It still reserves the next monotonic Session fence in
+PostgreSQL, so its Workspace checkpoint cannot be mistaken for an older Agent
+write and the next Run necessarily receives a higher fence. An active Agent
+activation blocks a terminal, and an active terminal keeps a newly accepted Run
+queued until terminal cleanup has released the writer reservation. An idle
+persistent same-Session Cube is rebound to a human-only authority and returned
+to the warm pool after PTY close; the old Agent capability remains revoked
+throughout the handoff. At each warm boundary the Tool Service performs a sealed
+`rekey`: it rotates Secret/Fence without starting a Tool Worker or killing user
+background processes. Warm runtimes are Broker-owned and excluded from expired
+Supervisor inventory, preventing a stale Run reconciler from deleting them. An
+ordinary ephemeral warm Cube is still retired before a separate terminal runtime
+starts. Input, output and resize frames are bounded; terminal transcripts are
+not persisted.
 
 ### User-owned development environments
 

@@ -213,6 +213,7 @@ async function terminalCommand(path, command, marker) {
   let output = "";
   let ready = false;
   let finished = false;
+  let closing = false;
   const deadline = Date.now() + 120_000;
   return new Promise((resolvePromise, rejectPromise) => {
     const timeout = setInterval(() => {
@@ -222,9 +223,8 @@ async function terminalCommand(path, command, marker) {
       rejectPromise(new Error(`Terminal did not produce ${marker}: ${output.slice(-2_000)}`));
     }, 250);
     const finish = () => {
-      if (finished) return;
-      finished = true;
-      clearInterval(timeout);
+      if (finished || closing) return;
+      closing = true;
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(
           JSON.stringify({
@@ -232,9 +232,7 @@ async function terminalCommand(path, command, marker) {
             type: "workspace_terminal.close",
           }),
         );
-        socket.close(1_000, "acceptance complete");
       }
-      resolvePromise(output);
     };
     socket.on("message", (data) => {
       const frame = JSON.parse(data.toString("utf8"));
@@ -259,7 +257,32 @@ async function terminalCommand(path, command, marker) {
       clearInterval(timeout);
       rejectPromise(error);
     });
+    socket.once("close", () => {
+      if (!closing || finished) return;
+      finished = true;
+      clearInterval(timeout);
+      resolvePromise(output);
+    });
   });
+}
+
+async function waitForPreview(path, marker) {
+  const deadline = Date.now() + 30_000;
+  let lastStatus = 0;
+  let lastBody = "";
+  while (Date.now() < deadline) {
+    const response = await fetchFromProduction(path, {
+      headers: { authorization: `Bearer ${authorizationToken}`, accept: "text/html" },
+    });
+    lastStatus = response.status;
+    lastBody = await response.text();
+    if (response.status === 200 && lastBody.includes(marker)) return;
+    if (response.status !== 503) break;
+    await wait(100);
+  }
+  throw new Error(
+    `Preview did not become ready: status=${String(lastStatus)} body=${lastBody.slice(0, 1_000)}`,
+  );
 }
 
 async function kafkaEndOffset(topic) {
@@ -450,6 +473,44 @@ async function logicalSandboxIdsForSession(sessionId) {
   const sandboxIds = values.split(/\r?\n/);
   for (const sandboxId of sandboxIds) assert.match(sandboxId, /^[0-9a-f-]{36}$/i);
   return sandboxIds;
+}
+
+async function listLogicalSandboxAssignments(logicalSandboxId) {
+  const source = `
+    import { readFileSync } from "node:fs";
+    import { randomUUID } from "node:crypto";
+    const token = readFileSync("/run/pi-cloud-secrets/tool-broker-token", "utf8").trim();
+    const response = await fetch("http://127.0.0.1:4300/internal/v1/sandbox-inventory", {
+      method: "POST",
+      headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+      body: JSON.stringify({
+        protocolVersion: 1,
+        type: "assignments.list",
+        requestId: randomUUID(),
+        sandboxId: ${JSON.stringify(logicalSandboxId)},
+      }),
+    });
+    const value = await response.json();
+    if (!response.ok) throw new Error(JSON.stringify(value));
+    process.stdout.write(JSON.stringify(value.assignments));
+  `;
+  return parseJson(
+    await capture(
+      process.execPath,
+      [
+        "scripts/production-compose.mjs",
+        "exec",
+        "-T",
+        "tool-broker",
+        "node",
+        "--input-type=module",
+        "--eval",
+        source,
+      ],
+      60_000,
+    ),
+    "Tool Broker assignment inventory",
+  );
 }
 
 async function workspaceVersionEvidence(runId) {
@@ -792,18 +853,28 @@ try {
     "First persistent Workspace revision omitted counting_sort.py code",
   );
   progress("first persistent Workspace Volume revision was verified in place");
+  assert.equal(
+    await psql(
+      `select state from tool_broker_activations
+        where activation_id = ${sqlLiteral(firstCoding.activations[0].activationId)}`,
+    ),
+    "warm",
+  );
+  assert.deepEqual(
+    await listLogicalSandboxAssignments(await logicalSandboxIdForRun(firstCoding.accepted.runId)),
+    [],
+    "Broker-owned warm Cube leaked into expired Supervisor inventory",
+  );
 
   await terminalCommand(
     `/v1/conversations/${session.sessionId}/terminal`,
     "printf '<!doctype html><html><body>PI_CLOUD_PERSISTENT_PREVIEW_OK</body></html>\\n' > /workspace/index.html; setsid sh -c 'while true; do date +%s > /workspace/persistent-heartbeat; sleep 1; done' </dev/null >/tmp/persistent-heartbeat.log 2>&1 & echo $! > /workspace/persistent-heartbeat.pid; setsid python3 -m http.server 8000 --bind 0.0.0.0 --directory /workspace </dev/null >/tmp/persistent-preview.log 2>&1 & echo PERSISTENT_TERMINAL_OK",
     "PERSISTENT_TERMINAL_OK",
   );
-  const persistentPreview = await fetchFromProduction(
+  await waitForPreview(
     `/v1/conversations/${session.sessionId}/preview/8000/`,
-    { headers: { authorization: `Bearer ${authorizationToken}`, accept: "text/html" } },
+    "PI_CLOUD_PERSISTENT_PREVIEW_OK",
   );
-  assert.equal(persistentPreview.status, 200);
-  assert.match(await persistentPreview.text(), /PI_CLOUD_PERSISTENT_PREVIEW_OK/u);
   progress(
     "owner terminal rebound the warm Cube and authenticated preview reached its HTTP service",
   );
@@ -839,6 +910,7 @@ try {
     'kill -0 "$(cat /workspace/persistent-heartbeat.pid)" && test -s /workspace/persistent-heartbeat && echo PERSISTENT_PROCESS_SURVIVED_OK',
     "PERSISTENT_PROCESS_SURVIVED_OK",
   );
+  await waitForRunningCubeSession(session.sessionId);
   progress("background process survived terminal handoff and the following real Agent Run");
   const finalVersions = await api.listWorkspaceVersions(session.sessionId);
   assert(finalVersions.currentVersionId !== undefined);

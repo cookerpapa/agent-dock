@@ -167,6 +167,9 @@ function providerFixture() {
       };
     },
     rebind,
+    async retainForWarm(handle, brokerAssignment) {
+      return { ...handle, assignment: brokerAssignment };
+    },
     exec,
     async readFile() {
       return Buffer.alloc(0);
@@ -392,8 +395,21 @@ describe("provider-backed Tool Tool Broker", () => {
       override async reserveTerminal() {
         return {
           status: "reserved" as const,
-          retiredActivation: { activationId: ACTIVATION_ID, assignment },
+          fencingToken: assignment.fencingToken + 2,
+          retiredActivation: {
+            activationId: ACTIVATION_ID,
+            workspaceRevision: "1".repeat(64),
+            retention: "persistent" as const,
+            assignment: { ...assignment, fencingToken: assignment.fencingToken + 1 },
+          },
         };
+      }
+
+      override async advanceWarmFence(
+        _activationId: string,
+        currentAssignment: ToolSandboxAssignment,
+      ) {
+        return currentAssignment.fencingToken + 1;
       }
     }
     const fixture = providerFixture();
@@ -441,7 +457,7 @@ describe("provider-backed Tool Tool Broker", () => {
     const next = await manager.create({
       ...createRequest,
       requestId: "31000000-0000-4000-8000-000000000003",
-      assignment: { ...assignment, fencingToken: 6 },
+      assignment: { ...assignment, fencingToken: 9 },
       workspaceRevision: "1".repeat(64),
     });
     expect(next.continuity).toBe("warm_reuse");
@@ -451,7 +467,38 @@ describe("provider-backed Tool Tool Broker", () => {
       activationId: next.activationId,
     });
     expect(fixture.rebind).toHaveBeenCalledTimes(2);
-    await manager.stop(next.activationId, { ...assignment, fencingToken: 6 });
+    await manager.stop(next.activationId, { ...assignment, fencingToken: 9 });
+    await manager.close();
+  });
+
+  it("fails closed instead of silently destroying a requested persistent process world", async () => {
+    const fixture = providerFixture();
+    fixture.provider.retainForWarm = async () => {
+      throw new ToolBrokerError(
+        "cubesandbox_handoff_state_invalid",
+        "Persistent process world was not ready for handoff",
+        false,
+      );
+    };
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const created = await manager.create({ ...createRequest, workspaceRevision: "1".repeat(64) });
+    await manager.execute(created.capability, operation("32000000-0000-4000-8000-000000000001"));
+    await expect(
+      manager.release({
+        toolBrokerProtocolVersion: 1,
+        type: "tool_sandbox.release",
+        requestId: "32000000-0000-4000-8000-000000000002",
+        activationId: created.activationId,
+        assignment,
+        disposition: "keep_persistent",
+        workspaceRevision: "1".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "cubesandbox_handoff_state_invalid" });
+    expect(fixture.stopped).toBe(true);
     await manager.close();
   });
 
@@ -1341,7 +1388,7 @@ describe("provider-backed Tool Tool Broker", () => {
     await manager.stop(second.activationId, nextAssignment);
   });
 
-  it("releases admission when a validated physical runtime is terminated after its assignment advanced", async () => {
+  it("keeps a fenced warm runtime until termination names its current Broker authority", async () => {
     const fixture = providerFixture();
     const manager = new ToolBroker({
       provider: fixture.provider,
@@ -1378,9 +1425,58 @@ describe("provider-backed Tool Tool Broker", () => {
     };
     await manager.terminateAndConfirmAbsent(advancedInventoryAssignment);
 
+    expect(manager.admittedCount).toBe(1);
+    expect(manager.warmCount).toBe(1);
+    expect(manager.activeCount).toBe(1);
+    await manager.terminateAndConfirmAbsent({
+      ...advancedInventoryAssignment,
+      commandId: assignment.commandId,
+      turnId: assignment.turnId,
+      leaseId: assignment.leaseId,
+      fencingToken: assignment.fencingToken + 1,
+    });
+
     expect(manager.admittedCount).toBe(0);
     expect(manager.warmCount).toBe(0);
     expect(manager.activeCount).toBe(0);
+  });
+
+  it("keeps a Broker-owned warm process world out of expired Supervisor inventory", async () => {
+    const fixture = providerFixture();
+    const runtimeAssignment: SupervisorRuntimeAssignment = {
+      containerId: "66666666-6666-4666-8666-666666666666",
+      containerName: `pi-cloud-tool-${ACTIVATION_ID}`.slice(0, 63),
+      supervisorId: assignment.supervisorId,
+      bootId: assignment.bootId,
+      sandboxId: assignment.sandboxId,
+      commandId: assignment.commandId,
+      workspaceId: assignment.workspaceId,
+      sessionId: assignment.sessionId,
+      turnId: assignment.turnId,
+      leaseId: assignment.leaseId,
+      fencingToken: assignment.fencingToken,
+    };
+    fixture.provider.listAssignments = async () => [runtimeAssignment];
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const created = await manager.create(createRequest);
+    await manager.execute(created.capability, operation("41000000-0000-4000-8000-000000000001"));
+    await manager.release({
+      toolBrokerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "41000000-0000-4000-8000-000000000002",
+      activationId: created.activationId,
+      assignment,
+      disposition: "keep_persistent",
+      workspaceRevision: "b".repeat(64),
+    });
+
+    await expect(manager.listAssignments(assignment.sandboxId)).resolves.toEqual([]);
+    expect(manager.warmCount).toBe(1);
+    await manager.close();
   });
 
   it("revokes the capability before a provider stop failure escapes", async () => {

@@ -131,6 +131,7 @@ async function terminalCommand(path, command, marker) {
   let output = "";
   let ready = false;
   let finished = false;
+  let closing = false;
   const deadline = Date.now() + 120_000;
   return new Promise((resolvePromise, rejectPromise) => {
     const timeout = setInterval(() => {
@@ -140,9 +141,8 @@ async function terminalCommand(path, command, marker) {
       rejectPromise(new Error(`Terminal did not produce ${marker}: ${output.slice(-2_000)}`));
     }, 250);
     const finish = () => {
-      if (finished) return;
-      finished = true;
-      clearInterval(timeout);
+      if (finished || closing) return;
+      closing = true;
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(
           JSON.stringify({
@@ -150,9 +150,7 @@ async function terminalCommand(path, command, marker) {
             type: "workspace_terminal.close",
           }),
         );
-        socket.close(1_000, "acceptance complete");
       }
-      resolvePromise(output);
     };
     socket.on("message", (data) => {
       const frame = JSON.parse(data.toString("utf8"));
@@ -176,6 +174,12 @@ async function terminalCommand(path, command, marker) {
     socket.once("error", (error) => {
       clearInterval(timeout);
       rejectPromise(error);
+    });
+    socket.once("close", () => {
+      if (!closing || finished) return;
+      finished = true;
+      clearInterval(timeout);
+      resolvePromise(output);
     });
   });
 }

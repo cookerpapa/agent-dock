@@ -140,6 +140,8 @@ export {
   downReconcileCodingModelLimits,
   upDevelopmentEnvironmentProfiles,
   downDevelopmentEnvironmentProfiles,
+  upWorkspaceTerminalFencing,
+  downWorkspaceTerminalFencing,
 } from "./migrations/index.ts";
 
 export {

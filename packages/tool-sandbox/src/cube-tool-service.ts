@@ -1100,6 +1100,34 @@ const server = createServer((request, response) => {
       });
       return;
     }
+    if (url.pathname === "/v1/rekey") {
+      const previous = requireAuthority(request);
+      if (
+        !sealed ||
+        bridge !== undefined ||
+        initialized === undefined ||
+        checkpointFrozenProcesses !== undefined ||
+        activeTerminal !== undefined
+      ) {
+        throw new CubeToolServiceError(409, "Cube Tool service was not sealed");
+      }
+      const next = parseRebind(await readJson(request));
+      if (next.fencingToken <= previous.fencingToken || next.secret === previous.secret) {
+        throw new CubeToolServiceError(409, "Tool rekey authority was stale");
+      }
+      authority = {
+        secret: next.secret,
+        fencingToken: next.fencingToken,
+        bindingSha256: next.bindingSha256,
+      };
+      initialized = { ...initialized, activationId: next.activationId };
+      sendJson(response, 200, {
+        rekeyed: true,
+        fencingToken: next.fencingToken,
+        environment: initialized.toolchain,
+      });
+      return;
+    }
     if (url.pathname === "/v1/rebind") {
       const previous = requireAuthority(request);
       if (

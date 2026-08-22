@@ -22,6 +22,14 @@ a tenant-safe raw SSH endpoint for ordinary Sandboxes.
   terminal authority, not replaced. The previous Agent capability stays
   revoked. Closing the PTY snapshots the boundary, returns the same physical VM
   to the persistent warm pool and preserves background processes.
+- Every Agent-to-warm, warm-to-terminal and terminal-to-warm handoff advances
+  the Session fence. A sealed Tool Service `/rekey` rotates Broker authority
+  without starting a Tool Worker or killing user processes. Old Supervisor
+  cleanup requests therefore fail identity validation instead of deleting the
+  current warm VM.
+- Broker-owned warm runtimes are excluded from Supervisor assignment inventory.
+  Terminal-Run orphan cleanup measures its grace period from durable settlement,
+  avoiding a race with normal checkpoint/release.
 - A Workspace still has one writer. New Agent Runs remain queued while the
   terminal owns the Cube.
 - Browser previews use a PiCloud-authenticated path. Control Plane verifies the

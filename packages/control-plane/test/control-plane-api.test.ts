@@ -2006,6 +2006,7 @@ describe.sequential("single-user durable turn intake API", () => {
         project_id: project.projectId,
         workspace_id: project.workspaceId,
         session_id: session.sessionId,
+        fencing_token: 1,
         state: "cleaning",
         lease_expires_at: new Date(now.valueOf() + 60_000),
         last_heartbeat_at: now,

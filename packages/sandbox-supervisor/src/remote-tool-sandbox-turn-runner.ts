@@ -823,20 +823,27 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
       await fakeModel?.stop().catch(() => undefined);
       let cleanupError: unknown;
       if (activation !== undefined && completedSuccessfully && !signal.aborted) {
+        const disposition =
+          retainedWorkspaceRevision === undefined
+            ? ({ kind: "destroy" } as const)
+            : ({
+                kind:
+                  command.payload.sandboxRetention === "persistent"
+                    ? "keep_persistent"
+                    : "keep_warm",
+                workspaceRevision: retainedWorkspaceRevision,
+              } as const);
         await this.#broker
-          .release(
-            activation.activationId,
-            toolAssignment,
-            retainedWorkspaceRevision === undefined
-              ? { kind: "destroy" }
-              : {
-                  kind:
-                    command.payload.sandboxRetention === "persistent"
-                      ? "keep_persistent"
-                      : "keep_warm",
-                  workspaceRevision: retainedWorkspaceRevision,
-                },
-          )
+          .release(activation.activationId, toolAssignment, disposition)
+          .then((released) => {
+            if (disposition.kind === "keep_persistent" && !released.retained) {
+              throw new PiTurnError(
+                "persistent_sandbox_retention_failed",
+                "Persistent Sandbox process state could not be retained",
+                true,
+              );
+            }
+          })
           .catch((error: unknown) => {
             cleanupError = error;
           });
