@@ -378,11 +378,11 @@ async function runEvidence(runId) {
              select max(candidate.seq) as latest_seq
                from pi_session_entries candidate
               where candidate.tenant_id = run.tenant_id
-                and candidate.session_id = run.session_id
+                and candidate.session_id = run.session_id::text
                 and candidate.type = 'compaction'
            ) compaction
           where entry.tenant_id = run.tenant_id
-            and entry.session_id = run.session_id
+            and entry.session_id = run.session_id::text
        ) pi on true
       where run.id = ${sqlLiteral(runId)}
       order by activation.created_at desc nulls last
