@@ -2169,6 +2169,11 @@ describe.sequential("single-user durable turn intake API", () => {
       .select(["acquired_at", "renewed_at", "valid_until"])
       .where("session_id", "=", longSession.sessionId)
       .executeTakeFirstOrThrow();
+    await database
+      .updateTable("run_attempts")
+      .set({ last_event_seq: 10 })
+      .where("run_id", "=", accepted.runId)
+      .executeTakeFirstOrThrow();
     await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 180));
     const renewedLease = await database
       .selectFrom("session_leases")
@@ -2182,6 +2187,13 @@ describe.sequential("single-user durable turn intake API", () => {
       new Date(initialLease.valid_until).valueOf(),
     );
     expect(new Date(renewedLease.valid_until).valueOf()).toBeGreaterThan(Date.now());
+    await expect(
+      database
+        .selectFrom("run_attempts")
+        .select("last_event_seq")
+        .where("run_id", "=", accepted.runId)
+        .executeTakeFirstOrThrow(),
+    ).resolves.toEqual({ last_event_seq: "10" });
 
     releaseRunner?.();
     await expect(dispatch).resolves.toMatchObject({

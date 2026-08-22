@@ -275,7 +275,6 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
             "run_attempt.state as runAttemptState",
             "run_attempt.lease_id as runAttemptLeaseId",
             "run_attempt.fencing_token as runAttemptFencingToken",
-            "run_attempt.last_event_seq as lastEventSequence",
           ])
           .where("lease.session_id", "=", observation.sessionId)
           .where("lease.sandbox_id", "=", this.#sandboxId)
@@ -290,10 +289,6 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
         const sessionFence = safeInteger(
           assignment.sessionFencingToken,
           "heartbeat session fencing token",
-        );
-        const lastEventSequence = safeInteger(
-          assignment.lastEventSequence,
-          "heartbeat event sequence",
         );
         if (
           assignment.leaseId !== observation.leaseId ||
@@ -311,8 +306,7 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           assignment.runAttemptState === "cancelled" ||
           assignment.runAttemptState === "timed_out" ||
           assignment.runAttemptState === "superseded" ||
-          observation.lastAcknowledgedSeq > observation.lastProducedSeq ||
-          observation.lastAcknowledgedSeq < lastEventSequence
+          observation.lastAcknowledgedSeq > observation.lastProducedSeq
         ) {
           continue;
         }
@@ -331,7 +325,11 @@ export class SessionLeaseCoordinator implements TurnExecutionLeaseManager {
           .set({
             claim_expires_at: validUntil,
             last_heartbeat_at: now,
-            last_event_seq: observation.lastAcknowledgedSeq,
+            // Kafka projection may advance the durable event boundary between
+            // heartbeat capture and this transaction. A slightly older Worker
+            // acknowledgement is valid evidence of liveness, but must never
+            // move the canonical boundary backwards.
+            last_event_seq: sql<string>`greatest(${sql.ref("last_event_seq")}, ${observation.lastAcknowledgedSeq})`,
             updated_at: now,
           })
           .where("id", "=", assignment.runAttemptId)
