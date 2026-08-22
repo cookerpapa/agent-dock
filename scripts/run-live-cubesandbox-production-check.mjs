@@ -1201,6 +1201,10 @@ try {
   // Release Manager ownership/admission first, then use the native Cube API
   // only as an orphan fallback. Reversing this order would strand a warm
   // in-memory handle until the Manager's TTL/restart.
+  await api
+    .deleteConversation(session.sessionId, newIdempotencyKey("acceptance-finally-archive"))
+    .catch(() => undefined);
+  await waitForNoCubeSession(session.sessionId).catch(() => undefined);
   for (const logicalSandboxId of await logicalSandboxIdsForSession(session.sessionId).catch(
     () => [],
   )) {
@@ -1210,6 +1214,13 @@ try {
   }
   await destroyCubeSession(session.sessionId).catch(() => undefined);
   if (largeSession !== undefined) {
+    await api
+      .deleteConversation(
+        largeSession.sessionId,
+        newIdempotencyKey("acceptance-finally-archive-large"),
+      )
+      .catch(() => undefined);
+    await waitForNoCubeSession(largeSession.sessionId).catch(() => undefined);
     for (const logicalSandboxId of await logicalSandboxIdsForSession(largeSession.sessionId).catch(
       () => [],
     )) {
