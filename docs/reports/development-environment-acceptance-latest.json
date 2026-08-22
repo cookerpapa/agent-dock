@@ -1,11 +1,13 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-20T00:41:24.657Z",
-  "developmentEnvironmentId": "c2e2287b-1386-48bd-9a31-8cb35db1f528",
-  "workspaceId": "9a44d1c9-3062-4181-8e4a-0e920dd20ddf",
+  "checkedAt": "2026-08-22T02:13:08.429Z",
+  "developmentEnvironmentId": "73c3d841-6d83-4299-892d-d1f679a1b52c",
+  "workspaceId": "ebaf01e2-cc43-4402-8ba7-3cfe43681bf8",
   "cubeIdentityStableAcrossPause": true,
   "processSurvivedTerminalReconnect": true,
   "processSurvivedPauseResume": true,
   "agentRunQueuedUntilRelease": true,
-  "workspaceVolumeSurvivedRelease": true
+  "workspaceVolumeSurvivedRelease": true,
+  "authenticatedHttpPreviewPassed": true,
+  "selectedProfile": "standard"
 }
