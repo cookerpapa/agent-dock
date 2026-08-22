@@ -72,7 +72,6 @@ export type GitHubInstallationStatus = "active" | "suspended" | "removed";
 export type GitHubPullRequestDeliveryState = "pending" | "delivering" | "completed" | "failed";
 export type GitHubWebhookDeliveryStatus = "processed" | "ignored" | "failed";
 export type ModelRequestState = "reserved" | "completed" | "failed" | "aborted" | "budget_denied";
-export type ContextCompactionState = "running" | "completed" | "aborted" | "failed";
 export type EnvironmentVersionState = "pending" | "validated" | "failed";
 export type EnvironmentValidationStatus = "validated" | "failed";
 export type EnvironmentOperationKind = "create" | "activate" | "rollback" | "validate";
@@ -1016,27 +1015,6 @@ export interface ModelRequestTable {
   settled_at: NullableTimestamp;
 }
 
-export interface ContextCompactionTable {
-  id: string;
-  tenant_id: string;
-  session_id: string;
-  turn_id: string;
-  run_id: string;
-  attempt_id: string;
-  started_event_id: string;
-  completed_event_id: string | null;
-  reason: "manual" | "threshold" | "overflow";
-  state: ContextCompactionState;
-  tokens_before: NullableInt8;
-  estimated_tokens_after: NullableInt8;
-  first_kept_entry_id: string | null;
-  summary_sha256: string | null;
-  summary_version: number | null;
-  will_retry: GeneratedBoolean;
-  started_at: Timestamp;
-  completed_at: NullableTimestamp;
-}
-
 export interface PlatformRuntimeSettingsTable {
   settings_key: "default";
   cube_proxy_enabled: GeneratedBoolean;
@@ -1212,7 +1190,6 @@ export interface Database {
   model_rates: ModelRateTable;
   model_routing_policies: ModelRoutingPolicyTable;
   model_requests: ModelRequestTable;
-  context_compactions: ContextCompactionTable;
   platform_runtime_settings: PlatformRuntimeSettingsTable;
   platform_runtime_setting_changes: PlatformRuntimeSettingChangeTable;
   pi_sessions: PiSessionTable;

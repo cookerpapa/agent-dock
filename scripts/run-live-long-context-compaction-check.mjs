@@ -411,30 +411,6 @@ async function runEvidence(runId) {
   };
 }
 
-async function compactionsForSession(sessionId) {
-  const rows = await psql(
-    `select run_id::text || '|' || reason || '|' || state || '|' ||
-            coalesce(tokens_before, 0) || '|' || coalesce(estimated_tokens_after, 0) || '|' ||
-            coalesce(extract(epoch from (completed_at - started_at)) * 1000, 0)::bigint
-       from context_compactions
-      where tenant_id = ${sqlLiteral(tenantId)}
-        and session_id = ${sqlLiteral(sessionId)}
-      order by started_at`,
-  );
-  if (rows.length === 0) return [];
-  return rows.split(/\r?\n/).map((row) => {
-    const [runId, reason, state, tokensBefore, estimatedTokensAfter, durationMs] = row.split("|");
-    return {
-      runId,
-      reason,
-      state,
-      tokensBefore: Number(tokensBefore),
-      estimatedTokensAfter: Number(estimatedTokensAfter),
-      durationMs: Number(durationMs),
-    };
-  });
-}
-
 async function runTurn(sessionId, prompt, afterSequence, expectedTools) {
   const submittedAt = performance.now();
   const accepted = await api.acceptTurn(sessionId, prompt, newIdempotencyKey("turn"), "off");
@@ -809,11 +785,7 @@ try {
   for (const [index, task] of selectedTasks.entries()) {
     const turn = await runTurn(session.sessionId, codingPrompt(task, index, marker), cursor, true);
     cursor = turn.cursor;
-    const [usage, evidence, compactions] = await Promise.all([
-      usageForRun(turn.runId),
-      runEvidence(turn.runId),
-      compactionsForSession(session.sessionId),
-    ]);
+    const [usage, evidence] = await Promise.all([usageForRun(turn.runId), runEvidence(turn.runId)]);
     const round = {
       round: index + 1,
       task: task[0],
@@ -835,13 +807,9 @@ try {
     progress(
       `round ${String(index + 1)} ${task[0]}: input(max/sum)=${String(usage.maximumRequestInputTokens)}/${String(usage.inputTokens)}, output=${String(usage.outputTokens)}, tools=${String(turn.toolCalls)}, firstResponse=${String(turn.firstResponseMs)}ms, settled=${String(turn.settledMs)}ms, active-context=${String(evidence.activeContextBytes)}B/${String(evidence.activeContextEntries)} entries`,
     );
-    completedCompaction =
-      compactions.find(
-        (compaction) => compaction.runId === turn.runId && compaction.state === "completed",
-      ) ??
-      turn.eventCompactions.find(
-        (compaction) => compaction.runId === turn.runId && compaction.status === "completed",
-      );
+    completedCompaction = turn.eventCompactions.find(
+      (compaction) => compaction.runId === turn.runId && compaction.status === "completed",
+    );
     if (completedCompaction !== undefined) {
       progress(
         `Pi compaction completed: ${String(completedCompaction.tokensBefore)} -> ${String(completedCompaction.estimatedTokensAfter)} estimated tokens in ${String(completedCompaction.durationMs)}ms`,
@@ -934,7 +902,7 @@ try {
   const files = await api.listWorkspaceFiles(versions.currentVersionId);
   assert(files.files.some((entry) => entry.path === "algolab/post_compaction_validation.py"));
   assert(files.files.some((entry) => entry.path === "tests/test_sorting_elementary.py"));
-  const compactions = await compactionsForSession(session.sessionId);
+  const compactions = rounds.flatMap((round) => round.eventCompactions);
   const totalUsage = [
     ...rounds.map((round) => round.usage),
     recallUsage,

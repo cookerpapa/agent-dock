@@ -142,6 +142,8 @@ export {
   downDevelopmentEnvironmentProfiles,
   upWorkspaceTerminalFencing,
   downWorkspaceTerminalFencing,
+  upRemoveDuplicateCompactionLedger,
+  downRemoveDuplicateCompactionLedger,
 } from "./migrations/index.ts";
 
 export {

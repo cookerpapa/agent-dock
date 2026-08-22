@@ -83,6 +83,11 @@ and the append log in PostgreSQL, and bounds an active branch at Pi compaction.
 Every mutation checks an opaque `ExecutionAuthority` inside the same database
 transaction as the write.
 
+The native `pi_session_entries` compaction node is the recovery authority;
+Kafka's durable `context.compaction.*` events provide live and audit evidence.
+The obsolete `context_compactions` governance ledger has been removed rather
+than maintained as a second, eventually inconsistent source of truth.
+
 The same package implements Pi's tenant-scoped `SessionRepo`; Workers open or
 create Sessions through that repository rather than through a second
 PiCloud-only lifecycle. Pi's pinned, unmodified backend conformance suite
