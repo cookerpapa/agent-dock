@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { format } from "prettier";
-import { PiCloudApi, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
+import { PiCloudApi, PiCloudApiError, newIdempotencyKey } from "../packages/web-ui/src/api.ts";
 import { streamSessionEvents } from "../packages/web-ui/src/sse.ts";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -150,6 +150,14 @@ async function psql(query) {
 }
 
 async function acceptanceIdentity(suffix) {
+  try {
+    return await new PiCloudApi(fetchFromProduction).registerTenant(
+      `long-context-${suffix}`.replaceAll(/[^a-z0-9-]/g, "-").slice(0, 63),
+      "Long-context compaction acceptance",
+    );
+  } catch (error) {
+    if (!(error instanceof PiCloudApiError) || error.status !== 429) throw error;
+  }
   const reusable = await psql(
     `select tenant.id::text || '|' || tenant.slug || '|' || user_row.id::text
        from tenants tenant
@@ -163,12 +171,7 @@ async function acceptanceIdentity(suffix) {
       order by tenant.created_at desc, user_row.created_at asc
       limit 1`,
   );
-  if (reusable.length === 0) {
-    return new PiCloudApi(fetchFromProduction).registerTenant(
-      `long-context-${suffix}`.replaceAll(/[^a-z0-9-]/g, "-").slice(0, 63),
-      "Long-context compaction acceptance",
-    );
-  }
+  if (reusable.length === 0) throw new Error("No reusable long-context acceptance tenant exists");
   const [reusableTenantId, tenantSlug, userId] = reusable.split("|");
   assert(reusableTenantId && tenantSlug && userId, "Reusable acceptance identity is invalid");
   const issued = JSON.parse(
