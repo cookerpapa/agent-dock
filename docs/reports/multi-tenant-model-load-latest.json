@@ -1,6 +1,6 @@
 {
   "accepted": true,
-  "checkedAt": "2026-08-21T20:27:24.325Z",
+  "checkedAt": "2026-08-22T04:42:38.762Z",
   "tenants": 6,
   "runs": 12,
   "model": {
@@ -18,48 +18,48 @@
   },
   "latencyMs": {
     "acceptance": {
-      "minimum": 23,
-      "p50": 30,
-      "p95": 41,
-      "maximum": 41
+      "minimum": 22,
+      "p50": 29,
+      "p95": 38,
+      "maximum": 38
     },
     "firstText": {
-      "minimum": 923,
-      "p50": 3974,
-      "p95": 7572,
-      "maximum": 7572
+      "minimum": 1247,
+      "p50": 4021,
+      "p95": 7938,
+      "maximum": 7938
     },
     "settled": {
-      "minimum": 2654,
-      "p50": 4647,
-      "p95": 10330,
-      "maximum": 10330
+      "minimum": 2071,
+      "p50": 4785,
+      "p95": 11484,
+      "maximum": 11484
     },
     "queueWait": {
-      "minimum": 291,
-      "p50": 2852,
-      "p95": 6561,
-      "maximum": 6561
+      "minimum": 294,
+      "p50": 3214,
+      "p95": 6883,
+      "maximum": 6883
     }
   },
   "workers": {
-    "distinct": ["pi-cloud-worker-2", "pi-cloud-worker-1"],
+    "distinct": ["pi-cloud-worker-1", "pi-cloud-worker-2"],
     "assignments": {
-      "pi-cloud-worker-2": 6,
-      "pi-cloud-worker-1": 6
+      "pi-cloud-worker-1": 6,
+      "pi-cloud-worker-2": 6
     }
   },
   "streaming": {
     "terminalCount": 12,
     "piEntryCount": 30,
     "messageCount": 24,
-    "canonicalPayloadBytes": 20451,
+    "canonicalPayloadBytes": 20558,
     "entriesPerRun": 2.5
   },
   "usage": {
     "requests": 12,
-    "inputTokens": 1014,
-    "outputTokens": 1221,
+    "inputTokens": 1050,
+    "outputTokens": 1276,
     "cacheReadTokens": 72192,
     "cacheWriteTokens": 0
   }
