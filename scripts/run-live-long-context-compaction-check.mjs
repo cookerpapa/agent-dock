@@ -493,6 +493,25 @@ async function runTurn(sessionId, prompt, afterSequence, expectedTools) {
       assert.equal(toolCalls, 0, "Conversation-only turn unexpectedly used a Tool");
     }
     await waitForRun(accepted.runId);
+    let compactionStartedAt;
+    const eventCompactions = [];
+    for (const event of events) {
+      if (event.type === "context.compaction.started") {
+        compactionStartedAt = Date.parse(event.occurredAt);
+      }
+      if (event.type === "context.compaction.completed") {
+        const completedAt = Date.parse(event.occurredAt);
+        eventCompactions.push({
+          ...event.payload,
+          runId: accepted.runId,
+          durationMs:
+            compactionStartedAt === undefined || !Number.isFinite(completedAt)
+              ? 0
+              : Math.max(0, completedAt - compactionStartedAt),
+        });
+        compactionStartedAt = undefined;
+      }
+    }
     return {
       ...accepted,
       cursor,
@@ -501,9 +520,7 @@ async function runTurn(sessionId, prompt, afterSequence, expectedTools) {
       firstResponseMs: Math.round(firstResponseAt - submittedAt),
       firstTextMs: firstTextAt === undefined ? undefined : Math.round(firstTextAt - submittedAt),
       settledMs: Math.round(performance.now() - submittedAt),
-      eventCompactions: events
-        .filter((event) => event.type === "context.compaction.completed")
-        .map((event) => event.payload),
+      eventCompactions,
     };
   } finally {
     clearTimeout(timer);
@@ -818,9 +835,13 @@ try {
     progress(
       `round ${String(index + 1)} ${task[0]}: input(max/sum)=${String(usage.maximumRequestInputTokens)}/${String(usage.inputTokens)}, output=${String(usage.outputTokens)}, tools=${String(turn.toolCalls)}, firstResponse=${String(turn.firstResponseMs)}ms, settled=${String(turn.settledMs)}ms, active-context=${String(evidence.activeContextBytes)}B/${String(evidence.activeContextEntries)} entries`,
     );
-    completedCompaction = compactions.find(
-      (compaction) => compaction.runId === turn.runId && compaction.state === "completed",
-    );
+    completedCompaction =
+      compactions.find(
+        (compaction) => compaction.runId === turn.runId && compaction.state === "completed",
+      ) ??
+      turn.eventCompactions.find(
+        (compaction) => compaction.runId === turn.runId && compaction.status === "completed",
+      );
     if (completedCompaction !== undefined) {
       progress(
         `Pi compaction completed: ${String(completedCompaction.tokensBefore)} -> ${String(completedCompaction.estimatedTokensAfter)} estimated tokens in ${String(completedCompaction.durationMs)}ms`,
