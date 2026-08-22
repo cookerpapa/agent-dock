@@ -706,7 +706,11 @@ export class ToolBrokerServer {
     const close = async (): Promise<void> => {
       if (closed) return;
       closed = true;
-      await connection?.close().catch(() => undefined);
+      try {
+        await connection?.close();
+      } catch (error: unknown) {
+        reportFailure("workspace_terminal_close_failed", safeFailure(error), error);
+      }
       if (socket.readyState === socket.OPEN) socket.close(1_000, "terminal closed");
       else if (socket.readyState !== socket.CLOSED) socket.terminate();
     };

@@ -758,12 +758,15 @@ async function processStartTime(pid: number): Promise<string | undefined> {
   return startTime !== undefined && /^[0-9]+$/.test(startTime) ? startTime : undefined;
 }
 
-async function processIsStopped(processIdentity: FrozenToolProcess): Promise<boolean> {
-  if ((await processStartTime(processIdentity.pid)) !== processIdentity.startTime) return false;
+async function toolProcessQuiescence(
+  processIdentity: FrozenToolProcess,
+): Promise<"gone" | "stopped" | "running"> {
+  if ((await processStartTime(processIdentity.pid)) !== processIdentity.startTime) return "gone";
   const status = await readFile(`/proc/${String(processIdentity.pid)}/status`, "utf8").catch(
     () => undefined,
   );
-  return status !== undefined && /^State:\s+(?:T|t)\b/m.test(status);
+  if (status === undefined || /^State:\s+(?:Z|X|x)\b/m.test(status)) return "gone";
+  return /^State:\s+(?:T|t)\b/m.test(status) ? "stopped" : "running";
 }
 
 async function resumeToolProcesses(processes: readonly FrozenToolProcess[]): Promise<number> {
@@ -803,14 +806,13 @@ async function freezeToolProcesses(): Promise<readonly FrozenToolProcess[]> {
     }
     const deadline = Date.now() + 1_000;
     while (Date.now() < deadline) {
-      if (
-        (
-          await Promise.all(
-            processes.map(async (processIdentity) => processIsStopped(processIdentity)),
-          )
-        ).every(Boolean)
-      ) {
-        return Object.freeze(processes);
+      const states = await Promise.all(
+        processes.map(async (processIdentity) => toolProcessQuiescence(processIdentity)),
+      );
+      if (states.every((state) => state !== "running")) {
+        return Object.freeze(
+          processes.filter((_processIdentity, index) => states[index] === "stopped"),
+        );
       }
       await delay(10);
     }
