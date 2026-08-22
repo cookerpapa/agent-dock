@@ -388,6 +388,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
     let fakeModel: FakeModelServer | undefined;
     let capturedPatch: WorkspacePatch | undefined;
     let retainedWorkspaceRevision: string | undefined;
+    let materializedSandboxCheckpoint = false;
     let completedSuccessfully = false;
     let stopPromise: Promise<void> | undefined;
     const stopSandbox = (): Promise<void> => {
@@ -539,6 +540,7 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
           );
           return;
         }
+        materializedSandboxCheckpoint = true;
         if (this.#runAttemptPhaseObserver !== undefined) {
           try {
             await this.#runAttemptPhaseObserver.transition(command, "checkpointing");
@@ -836,7 +838,11 @@ export class RemoteToolSandboxTurnRunner implements SupervisorTurnRunner {
         await this.#broker
           .release(activation.activationId, toolAssignment, disposition)
           .then((released) => {
-            if (disposition.kind === "keep_persistent" && !released.retained) {
+            if (
+              disposition.kind === "keep_persistent" &&
+              materializedSandboxCheckpoint &&
+              !released.retained
+            ) {
               throw new PiTurnError(
                 "persistent_sandbox_retention_failed",
                 "Persistent Sandbox process state could not be retained",
