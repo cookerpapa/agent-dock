@@ -6,6 +6,7 @@ import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
+import WebSocket from "ws";
 import {
   OfficialCubeSandboxRuntimeClient,
   workspaceVolumeId,
@@ -201,6 +202,64 @@ async function psql(query) {
     "--command",
     query,
   ]);
+}
+
+async function terminalCommand(path, command, marker) {
+  const target = new URL(path, baseUrl);
+  target.protocol = target.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(target, {
+    headers: { authorization: `Bearer ${authorizationToken}` },
+  });
+  let output = "";
+  let ready = false;
+  let finished = false;
+  const deadline = Date.now() + 120_000;
+  return new Promise((resolvePromise, rejectPromise) => {
+    const timeout = setInterval(() => {
+      if (Date.now() < deadline) return;
+      clearInterval(timeout);
+      socket.terminate();
+      rejectPromise(new Error(`Terminal did not produce ${marker}: ${output.slice(-2_000)}`));
+    }, 250);
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearInterval(timeout);
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({
+            workspaceTerminalProtocolVersion: 1,
+            type: "workspace_terminal.close",
+          }),
+        );
+        socket.close(1_000, "acceptance complete");
+      }
+      resolvePromise(output);
+    };
+    socket.on("message", (data) => {
+      const frame = JSON.parse(data.toString("utf8"));
+      if (frame.type === "workspace_terminal.ready" && !ready) {
+        ready = true;
+        socket.send(
+          JSON.stringify({
+            workspaceTerminalProtocolVersion: 1,
+            type: "workspace_terminal.input",
+            data: Buffer.from(`${command}\n`, "utf8").toString("base64"),
+          }),
+        );
+      } else if (frame.type === "workspace_terminal.output") {
+        output += Buffer.from(frame.data, "base64").toString("utf8");
+        if (output.includes(marker)) finish();
+      } else if (frame.type === "workspace_terminal.error") {
+        clearInterval(timeout);
+        rejectPromise(new Error(`${frame.code}: ${frame.message}`));
+      }
+    });
+    socket.once("error", (error) => {
+      clearInterval(timeout);
+      rejectPromise(error);
+    });
+  });
 }
 
 async function kafkaEndOffset(topic) {
@@ -734,6 +793,21 @@ try {
   );
   progress("first persistent Workspace Volume revision was verified in place");
 
+  await terminalCommand(
+    `/v1/conversations/${session.sessionId}/terminal`,
+    "printf '<!doctype html><html><body>PI_CLOUD_PERSISTENT_PREVIEW_OK</body></html>\\n' > /workspace/index.html; setsid sh -c 'while true; do date +%s > /workspace/persistent-heartbeat; sleep 1; done' </dev/null >/tmp/persistent-heartbeat.log 2>&1 & echo $! > /workspace/persistent-heartbeat.pid; setsid python3 -m http.server 8000 --bind 0.0.0.0 --directory /workspace </dev/null >/tmp/persistent-preview.log 2>&1 & echo PERSISTENT_TERMINAL_OK",
+    "PERSISTENT_TERMINAL_OK",
+  );
+  const persistentPreview = await fetchFromProduction(
+    `/v1/conversations/${session.sessionId}/preview/8000/`,
+    { headers: { authorization: `Bearer ${authorizationToken}`, accept: "text/html" } },
+  );
+  assert.equal(persistentPreview.status, 200);
+  assert.match(await persistentPreview.text(), /PI_CLOUD_PERSISTENT_PREVIEW_OK/u);
+  progress(
+    "owner terminal rebound the warm Cube and authenticated preview reached its HTTP service",
+  );
+
   const followUp = await runTurn(
     session.sessionId,
     [
@@ -760,6 +834,12 @@ try {
   );
   const followUpUsage = await runUsageEvidence(followUp.accepted.runId);
   assert(followUpUsage.requests > 0 && followUpUsage.outputTokens > 0);
+  await terminalCommand(
+    `/v1/conversations/${session.sessionId}/terminal`,
+    'kill -0 "$(cat /workspace/persistent-heartbeat.pid)" && test -s /workspace/persistent-heartbeat && echo PERSISTENT_PROCESS_SURVIVED_OK',
+    "PERSISTENT_PROCESS_SURVIVED_OK",
+  );
+  progress("background process survived terminal handoff and the following real Agent Run");
   const finalVersions = await api.listWorkspaceVersions(session.sessionId);
   assert(finalVersions.currentVersionId !== undefined);
   assert.notEqual(finalVersions.currentVersionId, firstVersionId);
@@ -937,6 +1017,9 @@ try {
       sameCubeMicroVm: true,
       runningSessionReuse: true,
       persistentSandboxPolicy: session.sandboxRetention === "persistent",
+      ownerTerminalReusedCube: true,
+      backgroundProcessSurvived: true,
+      authenticatedHttpPreviewPassed: true,
       workspaceRestored: true,
       workspaceVersions: finalVersions.versions.length,
       finalWorkspaceFileBytes: Buffer.byteLength(finalSource, "utf8"),
