@@ -74,7 +74,8 @@ const registry = assertEndpoint(cluster.registry, "Cube registry");
 const proxy = assertEndpoint(cluster.proxy, "Cube proxy");
 if (
   typeof cluster.sandboxDomain !== "string" ||
-  typeof template.templateId !== "string" ||
+  template.formatVersion !== 2 ||
+  typeof template.agent?.templateId !== "string" ||
   typeof template.imageRevision !== "string"
 ) {
   throw new Error("Cube cluster/template evidence was invalid");
@@ -100,7 +101,7 @@ const child = spawn(
       PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP: proxy.host,
       PI_CLOUD_CUBESANDBOX_PROXY_PORT: String(proxy.port),
       PI_CLOUD_CUBESANDBOX_DOMAIN: cluster.sandboxDomain,
-      PI_CLOUD_CUBESANDBOX_TEMPLATE_ID: template.templateId,
+      PI_CLOUD_CUBESANDBOX_TEMPLATE_ID: template.agent.templateId,
       PI_CLOUD_IMAGE_REVISION: template.imageRevision,
       PI_CLOUD_CUBESANDBOX_FORBIDDEN_ENDPOINTS: `${master.host}:${String(master.port)},${registry.host}:${String(registry.port)}`,
       PI_CLOUD_WORKSPACE_VOLUME_GATEWAY_URL: `http://${gatewayAddress}:4500`,

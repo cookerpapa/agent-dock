@@ -3,6 +3,12 @@ import { Value } from "typebox/value";
 import { AgentWorkspaceSeedSchema } from "./agent-runtime.ts";
 import { EnvironmentRuntimeSnapshotSchema } from "./environment.ts";
 import { UuidSchema } from "./protocol-primitives.ts";
+import { DevelopmentEnvironmentProfileKeySchema } from "./development-environment-profile.ts";
+export {
+  DEVELOPMENT_ENVIRONMENT_PROFILES,
+  DevelopmentEnvironmentProfileKeySchema,
+  type DevelopmentEnvironmentProfileKey,
+} from "./development-environment-profile.ts";
 
 export const TOOL_BROKER_DEVELOPMENT_ENVIRONMENT_PATH =
   "/internal/v1/development-environments" as const;
@@ -30,6 +36,7 @@ export const DevelopmentEnvironmentProvisionRequestSchema = Type.Object(
     projectId: UuidSchema,
     workspaceId: UuidSchema,
     generation: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+    profileKey: DevelopmentEnvironmentProfileKeySchema,
     environment: EnvironmentRuntimeSnapshotSchema,
     workspaceSeed: AgentWorkspaceSeedSchema,
   },
@@ -119,7 +126,17 @@ function parse<Schema extends TSchema>(
   label: string,
 ): Static<Schema> {
   if (!Value.Check(schema, value)) {
-    throw new DevelopmentEnvironmentProtocolError(`${label} failed validation`);
+    const issues = [...Value.Errors(schema, value)].slice(0, 6);
+    throw new DevelopmentEnvironmentProtocolError(
+      `${label} failed validation: ${
+        issues.map((issue) => `${issue.instancePath || "/"}: ${issue.message}`).join("; ") ||
+        "invalid value"
+      }; keys=${
+        typeof value === "object" && value !== null && !Array.isArray(value)
+          ? Object.keys(value).sort().join(",")
+          : "non-object"
+      }`,
+    );
   }
   return value as Static<Schema>;
 }

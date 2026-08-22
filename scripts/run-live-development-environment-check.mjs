@@ -205,6 +205,7 @@ const suffix = Date.now().toString(36);
 const project = await api.createProject(`Exclusive environment acceptance ${suffix}`);
 const development = await api.createDevelopmentEnvironment(
   project.workspaceId,
+  "standard",
   newIdempotencyKey("environment"),
 );
 assert.equal(development.state, "running");
@@ -214,10 +215,16 @@ const runtimeName = await psql(
 assert(runtimeName, "Development environment did not persist its Cube identity");
 await terminalCommand(
   `/v1/development-environments/${development.environmentId}/terminal`,
-  "printf 'EXCLUSIVE_FILE_OK\\n' > /workspace/exclusive.txt; setsid sh -c 'while true; do date +%s > /workspace/heartbeat; sleep 1; done' </dev/null >/tmp/exclusive-loop.log 2>&1 & echo $! > /workspace/exclusive.pid; echo EXCLUSIVE_FIRST_OK",
+  "printf 'EXCLUSIVE_FILE_OK\\n' > /workspace/exclusive.txt; printf '<!doctype html><html><head><title>PiCloud Preview</title></head><body>PI_CLOUD_PREVIEW_OK</body></html>\\n' > /workspace/index.html; setsid sh -c 'while true; do date +%s > /workspace/heartbeat; sleep 1; done' </dev/null >/tmp/exclusive-loop.log 2>&1 & echo $! > /workspace/exclusive.pid; setsid python3 -m http.server 8000 --bind 0.0.0.0 --directory /workspace </dev/null >/tmp/preview.log 2>&1 & echo EXCLUSIVE_FIRST_OK",
   "EXCLUSIVE_FIRST_OK",
 );
 await wait(2_000);
+const preview = await fetch(
+  new URL(`/v1/development-environments/${development.environmentId}/preview/8000/`, baseUrl),
+  { headers: { authorization: `Bearer ${token}`, accept: "text/html" } },
+);
+assert.equal(preview.status, 200);
+assert.match(await preview.text(), /PI_CLOUD_PREVIEW_OK/);
 await terminalCommand(
   `/v1/development-environments/${development.environmentId}/terminal`,
   'test "$(cat /workspace/exclusive.txt)" = EXCLUSIVE_FILE_OK && kill -0 "$(cat /workspace/exclusive.pid)" && echo EXCLUSIVE_RECONNECT_OK',
@@ -288,6 +295,8 @@ const report = {
   processSurvivedPauseResume: true,
   agentRunQueuedUntilRelease: true,
   workspaceVolumeSurvivedRelease: true,
+  authenticatedHttpPreviewPassed: true,
+  selectedProfile: development.profileKey,
 };
 await cube.close();
 await mkdir(resolve(repositoryRoot, "docs/reports"), { recursive: true });

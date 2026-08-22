@@ -198,6 +198,10 @@ export interface DevelopmentEnvironmentTable {
   owner_instance_id: string | null;
   owner_base_url: string | null;
   generation: GeneratedInt8;
+  profile_key: string;
+  cpu_count: number;
+  memory_mib: number;
+  system_disk_gib: number;
   runtime_id: string | null;
   runtime_name: string | null;
   state: DevelopmentEnvironmentState;

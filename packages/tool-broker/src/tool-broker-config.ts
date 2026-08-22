@@ -21,6 +21,7 @@ export type ToolBrokerConfig = {
     apiUrl: string;
     apiKey: string;
     templateId: string;
+    developmentTemplateIds: Readonly<Record<"starter" | "standard" | "performance", string>>;
     proxyNodeIp: string;
     proxyPort: number;
     proxyScheme: "http" | "https";
@@ -74,6 +75,35 @@ function integer(
     throw new TypeError("Tool Broker numeric configuration is invalid");
   }
   return parsed;
+}
+
+function developmentTemplateIds(
+  value: string | undefined,
+  fallback: string,
+): Readonly<Record<"starter" | "standard" | "performance", string>> {
+  if (value === undefined) {
+    return Object.freeze({ starter: fallback, standard: fallback, performance: fallback });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    throw new TypeError("CubeSandbox development template catalog is invalid");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new TypeError("CubeSandbox development template catalog is invalid");
+  }
+  const record = parsed as Record<string, unknown>;
+  const output = Object.fromEntries(
+    (["starter", "standard", "performance"] as const).map((key) => {
+      const templateId = record[key];
+      if (typeof templateId !== "string" || !/^tpl-[a-z0-9]{24}$/.test(templateId)) {
+        throw new TypeError("CubeSandbox development template catalog is invalid");
+      }
+      return [key, templateId];
+    }),
+  ) as Record<"starter" | "standard" | "performance", string>;
+  return Object.freeze(output);
 }
 
 async function readSecret(path: string): Promise<string> {
@@ -231,6 +261,14 @@ export async function loadToolBrokerConfig(
         required(environment, "PI_CLOUD_CUBESANDBOX_TEMPLATE_ID"),
         "cubeSandboxTemplateId",
         256,
+      ),
+      developmentTemplateIds: developmentTemplateIds(
+        environment.PI_CLOUD_CUBESANDBOX_DEVELOPMENT_TEMPLATE_IDS,
+        bounded(
+          required(environment, "PI_CLOUD_CUBESANDBOX_TEMPLATE_ID"),
+          "cubeSandboxTemplateId",
+          256,
+        ),
       ),
       proxyNodeIp: bounded(
         required(environment, "PI_CLOUD_CUBESANDBOX_PROXY_NODE_IP"),

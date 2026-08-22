@@ -380,6 +380,11 @@ describe("CubeSandbox Provider contract", () => {
     const runtime = new FakeCubeRuntimeClient();
     const provider = new CubeSandboxProvider({
       templateId: "pi-cloud-tool-v1",
+      developmentTemplateIds: {
+        starter: "tpl-starter00000000000000000",
+        standard: "tpl-standard0000000000000000",
+        performance: "tpl-performance00000000000000",
+      },
       imageRevision: "development",
       webProxy: WEB_PROXY,
       runtimeClient: runtime,
@@ -392,8 +397,10 @@ describe("CubeSandbox Provider contract", () => {
       workspaceSeed: { kind: "sample_java" },
       policy: provider.defaultPolicy,
       lifetime: "development_environment",
+      developmentProfileKey: "standard",
     });
     expect(runtime.creates[0]).toMatchObject({
+      templateId: "tpl-standard0000000000000000",
       timeoutSeconds: -1,
       lifecycle: { onTimeout: "pause", autoResume: true },
     });

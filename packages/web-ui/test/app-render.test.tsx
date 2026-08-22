@@ -106,6 +106,7 @@ describe("product chat experience", () => {
         onError={() => undefined}
         refreshSignal={0}
         sessionId="10000000-0000-4000-8000-000000000001"
+        workspaceId="10000000-0000-4000-8000-000000000002"
         workspaceName="order-service"
       />,
     );
@@ -314,6 +315,31 @@ describe("product chat experience", () => {
     expect(markup).toContain("Took 1.2s");
     expect(markup).not.toContain("&quot;content&quot;");
     expect(markup).not.toContain("输入</span>");
+  });
+
+  it("renders a multiline Bash call as a Pi-style terminal command block", () => {
+    const markup = renderToStaticMarkup(
+      <ToolActivity
+        item={{
+          kind: "tool",
+          key: "tool:bash-multiline",
+          toolCallId: "bash-multiline",
+          toolName: "bash",
+          input: { command: "cd /tmp\necho download\ncurl -sL https://example.test/archive" },
+          output: { content: [{ type: "text", text: "done" }] },
+          status: "completed",
+          firstSequence: 8,
+          lastSequence: 9,
+          startedAt: "2026-08-21T00:00:00.000Z",
+          completedAt: "2026-08-21T00:00:00.100Z",
+        }}
+      />,
+    );
+    expect(markup).toContain("3 行命令");
+    expect(markup).toContain("product-tool-command-block");
+    expect(markup).toContain("$ cd /tmp");
+    expect(markup).toContain("  echo download");
+    expect(markup).toContain("curl -sL");
   });
 
   it("renders write paths and a bounded source preview like Pi", () => {

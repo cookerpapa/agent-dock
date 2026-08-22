@@ -43,7 +43,8 @@ schema or maintained deployment. The current sources of truth are this README,
 - lazy Cube activation, warm reuse and optional persistent Sandbox retention;
 - a Workspace directory/source browser, isolated Web Terminal, and safe deletion;
 - user-owned exclusive Cube development environments with reconnectable
-  terminals and explicit pause/resume/release;
+  terminals, deployment-owned resource profiles, authenticated HTTP service
+  previews and explicit pause/resume/release;
 - administrator-only hot model credentials and Cube proxy configuration.
 
 ## One user message
@@ -131,10 +132,11 @@ not another archive of the directory.
 The Workspace panel can also open an interactive Web Terminal. The Control
 Plane derives tenant, Session and Workspace identity from the authenticated
 browser request, then proxies a separate short-lived human terminal authority
-through the Tool Broker to a fenced PTY inside Cube. A human terminal and an Agent Run
-cannot write the same Workspace concurrently. Closing the terminal destroys its
-Cube while retaining the persistent Workspace Volume; no public SSH port or
-platform credential is exposed.
+through the Tool Broker to a fenced PTY inside Cube. A human terminal and an
+Agent Run cannot write the same Workspace concurrently. For a persistent
+conversation, terminal access rebinds and later returns the same idle Cube
+instead of discarding its process world. No public SSH port or platform
+credential is exposed.
 
 Ordinary users may also request an exclusive development environment for one
 Workspace. PostgreSQL binds the allocation to the authenticated user while Tool

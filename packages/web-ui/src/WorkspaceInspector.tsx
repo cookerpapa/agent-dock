@@ -106,6 +106,7 @@ export function WorkspaceInspector({
   onError,
   refreshSignal,
   sessionId,
+  workspaceId,
   workspaceName,
 }: {
   api: PiCloudApi;
@@ -113,6 +114,7 @@ export function WorkspaceInspector({
   onError: (message: string) => void;
   refreshSignal: number;
   sessionId: string | null;
+  workspaceId: string | null;
   workspaceName: string | null;
 }) {
   const [version, setVersion] = useState<WorkspaceVersionResource | null>(null);
@@ -128,6 +130,7 @@ export function WorkspaceInspector({
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [view, setView] = useState<"files" | "terminal">("files");
+  const [developmentEnvironmentId, setDevelopmentEnvironmentId] = useState<string | null>(null);
   const onErrorRef = useRef(onError);
   const directoryLoadGeneration = useRef(0);
   const fileLoadGeneration = useRef(0);
@@ -151,6 +154,31 @@ export function WorkspaceInspector({
     setFileLoading(false);
     setView("files");
   }, [sessionId]);
+
+  useEffect(() => {
+    if (workspaceId === null) {
+      setDevelopmentEnvironmentId(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .listDevelopmentEnvironments()
+      .then((listed) => {
+        if (cancelled) return;
+        setDevelopmentEnvironmentId(
+          listed.environments.find(
+            (environment) =>
+              environment.workspaceId === workspaceId && environment.state === "running",
+          )?.environmentId ?? null,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setDevelopmentEnvironmentId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, refreshSignal, workspaceId]);
 
   const refresh = useCallback(async (): Promise<void> => {
     if (sessionId === null) {
@@ -305,7 +333,12 @@ export function WorkspaceInspector({
         </button>
       </div>
       {view === "terminal" ? (
-        <WorkspaceTerminal sessionId={sessionId} onError={onError} />
+        <WorkspaceTerminal
+          {...(developmentEnvironmentId === null
+            ? { sessionId }
+            : { environmentId: developmentEnvironmentId })}
+          onError={onError}
+        />
       ) : (
         <div className="workspace-directory-body">
           <nav className="workspace-file-tree" aria-label="/workspace 文件">

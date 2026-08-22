@@ -38,7 +38,8 @@ The current Worker invariant is deliberately precise:
 The Web product provides authentication, resizable conversation/tree panels,
 focused or whole-tree navigation, conversation forks, recursive subtree
 deletion, settled-message tail pruning, named Workspaces, resumable output,
-file browsing, user-owned development environments and administrator settings. The Control Plane
+file browsing, user-owned development environments, authenticated service
+previews and administrator settings. The Control Plane
 commits each idempotent message and its Run command in one PostgreSQL
 transaction. It enforces tenant quota and same-Session serialization.
 
@@ -246,10 +247,11 @@ Human terminal authority is deliberately separate from Agent Tool capability,
 Run lease and fence. PostgreSQL nevertheless enforces one shared Workspace
 writer invariant: an active Agent activation blocks a terminal, and an active
 terminal keeps a newly accepted Run queued until terminal cleanup has released
-the writer reservation. A same-owner warm Agent Cube is retired before
-the terminal starts. Input, output and resize frames are bounded; the platform
-does not persist terminal transcripts. Disconnect kills the PTY and destroys
-that Cube, while the stable Workspace Volume remains available to later Runs.
+the writer reservation. An idle persistent same-Session Cube is rebound to a
+human-only authority and returned to the warm pool after PTY close; the old
+Agent capability remains revoked throughout the handoff. An ordinary ephemeral
+warm Cube is still retired before a separate terminal runtime starts. Input,
+output and resize frames are bounded; terminal transcripts are not persisted.
 
 ### User-owned development environments
 
@@ -265,11 +267,34 @@ KVM, and disconnect kills only the PTY. Pause snapshots VM memory/filesystem;
 resume reconnects the same Cube identity; release destroys it without deleting
 Workspace bytes.
 
+The user selects one deployment-owned immutable template profile (starter,
+standard or performance). CPU, memory and system-disk values come from the
+registered Cube template catalog; arbitrary template IDs and resource overrides
+are never accepted from the browser.
+
 The allocation participates in tenant/Domain Sandbox quotas and the global
 Workspace single-writer rule. PostgreSQL Worker scans exclude Runs whose
 Workspace has a requested, provisioning, running, paused, releasing or unknown
 environment. A lost Broker owner causes fail-closed orphan cleanup and a fresh
 start; only the persistent Volume is guaranteed across that failure.
+
+### Authenticated Sandbox service preview
+
+The browser reaches a service through a same-origin PiCloud preview path. The
+Control Plane authenticates the user and resolves the conversation or owned
+development environment. Tool Broker resolves the local live handle and the
+Cube provider forwards HTTP through CubeProxy with the Sandbox's private
+traffic token. That token and the physical Sandbox ID never leave the trusted
+execution plane. Responses are bounded and security-sensitive hop-by-hop
+headers are not forwarded. Applications listen on `0.0.0.0` and should use
+relative asset URLs under the path-based preview endpoint.
+Cube allows three custom exposed ports per template. Port 49984 belongs to the
+trusted Tool Service, so PiCloud reserves the remaining two slots for
+application ports 3000 and 8000. The public protocol rejects every other port
+rather than returning a late CubeProxy routing failure.
+
+Cube's ordinary Sandbox ingress is HTTP/WebSocket-oriented; PiCloud currently
+provides a brokered Web terminal rather than claiming raw SSH support.
 
 ### Persistent Workspace Volume gateway
 

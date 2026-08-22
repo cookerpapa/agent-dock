@@ -415,6 +415,12 @@ body.product-panel-resizing {
   background: #171717;
   color: #e8e8e8;
 }
+.development-environment-eyebrow {
+  color: #8e80d7;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.16em;
+}
 
 .development-environment-header,
 .development-environment-create,
@@ -459,6 +465,62 @@ body.product-panel-resizing {
   border: 1px solid #303030;
   border-radius: 14px;
   background: #1d1d1d;
+}
+.development-environment-create-title {
+  display: grid;
+  width: 100%;
+  gap: 4px;
+}
+.development-environment-create-title strong {
+  color: #ececec;
+  font-size: 15px;
+}
+.development-environment-create-title span {
+  color: #858585;
+  font-size: 12px;
+}
+.development-environment-profiles {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.development-environment-profiles > button {
+  display: grid;
+  gap: 6px;
+  padding: 15px;
+  border: 1px solid #343434;
+  border-radius: 11px;
+  background: #191919;
+  color: #cfcfcf;
+  text-align: left;
+}
+.development-environment-profiles > button.active {
+  border-color: #7465bc;
+  background: linear-gradient(145deg, #292441, #201e2c);
+  box-shadow: inset 0 0 0 1px rgba(151, 132, 231, 0.18);
+}
+.development-environment-profiles > button > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #dcdcdc;
+}
+.development-environment-profiles em {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #473d71;
+  color: #ded7ff;
+  font-size: 9px;
+  font-style: normal;
+}
+.development-environment-profiles b {
+  color: #f0f0f0;
+  font-size: 16px;
+}
+.development-environment-profiles small {
+  color: #858585;
+  font-size: 11px;
 }
 
 .development-environment-create label {
@@ -530,6 +592,32 @@ body.product-panel-resizing {
   gap: 8px;
   margin-top: 16px;
 }
+.development-environment-preview-port {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #8c8c8c;
+  font-size: 11px;
+}
+.development-environment-preview-port input,
+.development-environment-preview-port select {
+  width: 72px;
+  padding: 7px 8px;
+  border: 1px solid #3a3a3a;
+  border-radius: 7px;
+  background: #171717;
+  color: #e2e2e2;
+}
+.development-environment-preview-link,
+.product-preview-link {
+  padding: 8px 11px;
+  border: 1px solid #4a426d;
+  border-radius: 8px;
+  background: #29243c;
+  color: #d6cff7;
+  font-size: 12px;
+  text-decoration: none;
+}
 
 .development-environment-failure {
   color: #d59d9d;
@@ -557,6 +645,9 @@ body.product-panel-resizing {
 
   .development-environment-create select {
     width: 100%;
+  }
+  .development-environment-profiles {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -747,6 +838,32 @@ body.product-panel-resizing {
   min-width: 0;
   align-items: center;
   gap: 9px;
+}
+.product-preview-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 5px;
+}
+.product-preview-control label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #777;
+  font-size: 10px;
+}
+.product-preview-control input,
+.product-preview-control select {
+  width: 64px;
+  padding: 4px 6px;
+  border: 1px solid #3d3d3d;
+  border-radius: 6px;
+  background: #191919;
+  color: #d8d8d8;
+}
+.product-preview-link {
+  padding: 5px 8px;
+  font-size: 10px;
 }
 
 .product-topbar-title strong {
@@ -1174,6 +1291,10 @@ body.product-panel-resizing {
   color: #c9c9c9;
   font-weight: 650;
 }
+.product-tool-multiline-label span {
+  color: #777;
+  font-size: 10px;
+}
 .product-tool-state {
   color: #777;
   font-size: 10px;
@@ -1232,6 +1353,7 @@ body.product-panel-resizing {
   color: #aaa;
 }
 .product-tool-body .product-tool-source,
+.product-tool-body .product-tool-command-block,
 .product-tool-body .product-tool-terminal,
 .product-tool-body .product-tool-output {
   max-height: 430px;
@@ -1253,7 +1375,13 @@ body.product-panel-resizing {
   background: #1b1b1b;
   color: #bfbfbf;
 }
+.product-tool-body .product-tool-command-block {
+  border-left-color: #7568aa;
+  background: #17161d;
+  color: #ddd8f5;
+}
 .product-tool-body .product-tool-source code,
+.product-tool-body .product-tool-command-block code,
 .product-tool-body .product-tool-terminal code,
 .product-tool-body .product-tool-output code {
   font: inherit;

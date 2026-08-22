@@ -1,4 +1,18 @@
 export {
+  TOOL_BROKER_SANDBOX_PREVIEW_PATH,
+  SANDBOX_PREVIEW_PORTS,
+  SandboxPreviewRequestSchema,
+  SandboxPreviewResponseSchema,
+  SandboxPreviewTargetSchema,
+  SandboxPreviewProtocolError,
+  parseSandboxPreviewRequest,
+  parseSandboxPreviewResponse,
+  type SandboxPreviewRequest,
+  type SandboxPreviewResponse,
+  type SandboxPreviewTarget,
+} from "./sandbox-preview.ts";
+
+export {
   ApprovalRequestPayloadSchema,
   PiCloudEventSchema,
   PiCloudProtocolError,
@@ -46,6 +60,8 @@ export {
   DevelopmentEnvironmentProvisionRequestSchema,
   DevelopmentEnvironmentTerminalOpenRequestSchema,
   DevelopmentEnvironmentProtocolError,
+  DEVELOPMENT_ENVIRONMENT_PROFILES,
+  DevelopmentEnvironmentProfileKeySchema,
   parseDevelopmentEnvironmentBrokerRequest,
   parseDevelopmentEnvironmentBrokerResponse,
   parseDevelopmentEnvironmentTerminalOpenRequest,
@@ -54,6 +70,7 @@ export {
   type DevelopmentEnvironmentLifecycleRequest,
   type DevelopmentEnvironmentProvisionRequest,
   type DevelopmentEnvironmentTerminalOpenRequest,
+  type DevelopmentEnvironmentProfileKey,
 } from "./development-environment.ts";
 
 export {

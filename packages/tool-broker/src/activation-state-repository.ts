@@ -6,6 +6,8 @@ import type {
   WorkspaceTerminalState,
 } from "@pi-cloud/database";
 import type { SupervisorRuntimeAssignment, ToolSandboxAssignment } from "@pi-cloud/protocol";
+import type { DevelopmentEnvironmentProfileKey, SandboxPreviewTarget } from "@pi-cloud/protocol";
+import { DEVELOPMENT_ENVIRONMENT_PROFILES } from "@pi-cloud/protocol";
 import type { SandboxHandle } from "./sandbox-provider.ts";
 import { sql, type Kysely, type Transaction } from "kysely";
 
@@ -57,6 +59,7 @@ export type DevelopmentEnvironmentReservation = Readonly<{
   workspaceId: string;
   environmentVersionId: string;
   generation: number;
+  profileKey: DevelopmentEnvironmentProfileKey;
 }>;
 
 export type DevelopmentEnvironmentReservationResult =
@@ -70,6 +73,9 @@ export type DevelopmentEnvironmentOwnerResult =
   | { status: "owned"; state: DevelopmentEnvironmentState }
   | { status: "redirect"; ownerBaseUrl: string }
   | { status: "unavailable" };
+
+export type SandboxPreviewOwnerResult =
+  { status: "owned" } | { status: "redirect"; ownerBaseUrl: string } | { status: "unavailable" };
 
 export type PersistentConversationHandoff = Readonly<{
   tenantId: string;
@@ -92,6 +98,11 @@ export interface SandboxActivationStateRepository {
     userId: string,
     environmentId: string,
   ): Promise<DevelopmentEnvironmentOwnerResult>;
+  sandboxPreviewOwner(
+    tenantId: string,
+    userId: string,
+    target: SandboxPreviewTarget,
+  ): Promise<SandboxPreviewOwnerResult>;
   setDevelopmentEnvironmentState(
     environmentId: string,
     state: Exclude<DevelopmentEnvironmentState, "requested">,
@@ -232,6 +243,22 @@ export class InMemorySandboxActivationStateRepository implements SandboxActivati
       ? { status: "unavailable" }
       : { status: "owned", state: environment.state };
   }
+  async sandboxPreviewOwner(
+    _tenantId: string,
+    _userId: string,
+    target: SandboxPreviewTarget,
+  ): Promise<SandboxPreviewOwnerResult> {
+    if (target.kind === "development_environment") {
+      return this.#developmentEnvironments.has(target.environmentId)
+        ? { status: "owned" }
+        : { status: "unavailable" };
+    }
+    return [...this.#activations.values()].some(
+      (activation) => activation.assignment.sessionId === target.sessionId,
+    )
+      ? { status: "owned" }
+      : { status: "unavailable" };
+  }
   async setDevelopmentEnvironmentState(
     environmentId: string,
     state: Exclude<DevelopmentEnvironmentState, "requested">,
@@ -322,6 +349,17 @@ function positiveInteger(value: number, name: string): number {
 function failureCode(value: string | undefined): string | null {
   if (value === undefined) return null;
   return /^[a-z][a-z0-9_]{0,127}$/.test(value) ? value : "tool_broker_failed";
+}
+
+function developmentProfileKey(value: string): DevelopmentEnvironmentProfileKey {
+  const profile = DEVELOPMENT_ENVIRONMENT_PROFILES.find((candidate) => candidate.key === value);
+  if (profile === undefined) {
+    throw new SandboxActivationStateRepositoryError(
+      "state_conflict",
+      "Development environment profile is invalid",
+    );
+  }
+  return profile.key;
 }
 
 export class PostgresSandboxActivationStateRepository implements SandboxActivationStateRepository {
@@ -926,7 +964,8 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         environment === undefined ||
         environment.project_id !== input.projectId ||
         environment.workspace_id !== input.workspaceId ||
-        environment.sandbox_domain_id !== this.#sandboxDomainId
+        environment.sandbox_domain_id !== this.#sandboxDomainId ||
+        environment.profile_key !== input.profileKey
       ) {
         throw new SandboxActivationStateRepositoryError(
           "state_conflict",
@@ -1065,6 +1104,36 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
     return { status: "owned", state: row.state };
   }
 
+  async sandboxPreviewOwner(
+    tenantId: string,
+    userId: string,
+    target: SandboxPreviewTarget,
+  ): Promise<SandboxPreviewOwnerResult> {
+    if (target.kind === "development_environment") {
+      const owner = await this.developmentEnvironmentOwner(tenantId, userId, target.environmentId);
+      if (owner.status !== "owned") return owner;
+      return owner.state === "running" ? { status: "owned" } : { status: "unavailable" };
+    }
+    const activation = await this.#database
+      .selectFrom("tool_broker_activations as activation")
+      .innerJoin("sessions as session_row", (join) =>
+        join
+          .onRef("session_row.tenant_id", "=", "activation.tenant_id")
+          .onRef("session_row.id", "=", "activation.session_id"),
+      )
+      .select(["activation.owner_instance_id", "activation.owner_base_url"])
+      .where("activation.tenant_id", "=", tenantId)
+      .where("activation.session_id", "=", target.sessionId)
+      .where("activation.state", "in", ["materializing", "active", "warm", "cleaning"])
+      .where("session_row.archived_at", "is", null)
+      .orderBy("activation.updated_at", "desc")
+      .executeTakeFirst();
+    if (activation === undefined) return { status: "unavailable" };
+    return activation.owner_instance_id === this.#instanceId
+      ? { status: "owned" }
+      : { status: "redirect", ownerBaseUrl: activation.owner_base_url };
+  }
+
   async setDevelopmentEnvironmentState(
     environmentId: string,
     state: Exclude<DevelopmentEnvironmentState, "requested">,
@@ -1114,6 +1183,7 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
           "workspace_id",
           "environment_version_id",
           "generation",
+          "profile_key",
         ])
         .where("sandbox_domain_id", "=", this.#sandboxDomainId)
         .where("state", "=", "unknown")
@@ -1147,6 +1217,7 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         workspaceId: row.workspace_id,
         environmentVersionId: row.environment_version_id!,
         generation: Number(row.generation),
+        profileKey: developmentProfileKey(row.profile_key),
       }));
     });
   }

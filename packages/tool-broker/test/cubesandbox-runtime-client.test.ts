@@ -54,6 +54,11 @@ beforeAll(async () => {
         response.end('{"kernelRelease":"cube-guest"}');
         return;
       }
+      if (host.startsWith("8000-cube-runtime-1.")) {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end("<html>private-preview-ok</html>");
+        return;
+      }
       if (
         request.method === "GET" &&
         request.url === "/volumes/pcw-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -227,6 +232,26 @@ describe("official CubeSandbox HTTP compatibility client", () => {
         "x-pi-cloud-handoff-secret": `pcch_${"h".repeat(43)}`,
         "x-pi-cloud-fencing-token": "7",
         "x-pi-cloud-binding-sha256": "a".repeat(64),
+      },
+    });
+    await expect(
+      client.requestService!(instance, {
+        port: 8000,
+        method: "GET",
+        path: "/",
+        headers: { accept: "text/html" },
+        maximumResponseBytes: 64 * 1_024,
+        timeoutMs: 1_000,
+      }),
+    ).resolves.toMatchObject({
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: Buffer.from("<html>private-preview-ok</html>"),
+    });
+    expect(observed.find((request) => request.headers.host?.startsWith("8000-"))).toMatchObject({
+      headers: {
+        "e2b-traffic-access-token": "private-traffic-token",
+        "cube-traffic-access-token": "private-traffic-token",
       },
     });
     const terminal = await client.openTerminal(instance, {

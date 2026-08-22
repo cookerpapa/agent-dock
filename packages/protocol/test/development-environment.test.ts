@@ -22,6 +22,7 @@ describe("development environment Broker protocol", () => {
       projectId: "10000000-0000-4000-8000-000000000005",
       workspaceId: "10000000-0000-4000-8000-000000000006",
       generation: 1,
+      profileKey: "standard",
       environment: {
         environmentVersionId: "10000000-0000-4000-8000-000000000007",
         versionNumber: 1,

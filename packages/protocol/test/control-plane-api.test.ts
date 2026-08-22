@@ -49,8 +49,11 @@ const ENVIRONMENT_SNAPSHOT = {
 describe("control-plane public API schemas", () => {
   it("validates user-owned development environment resources and actions", () => {
     const createdAt = "2026-08-20T00:00:00.000Z";
-    expect(parseCreateDevelopmentEnvironmentRequest({ workspaceId: UUID })).toEqual({
+    expect(
+      parseCreateDevelopmentEnvironmentRequest({ workspaceId: UUID, profileKey: "standard" }),
+    ).toEqual({
       workspaceId: UUID,
+      profileKey: "standard",
     });
     expect(parseDevelopmentEnvironmentActionRequest({ action: "pause" })).toEqual({
       action: "pause",
@@ -65,8 +68,22 @@ describe("control-plane public API schemas", () => {
             workspaceName: "agent-runtime",
             state: "running",
             generation: 1,
+            profileKey: "standard",
+            cpuCount: 2,
+            memoryMiB: 4096,
+            systemDiskGiB: 16,
             createdAt,
             updatedAt: createdAt,
+          },
+        ],
+        profiles: [
+          {
+            key: "standard",
+            label: "标准型",
+            cpuCount: 2,
+            memoryMiB: 4096,
+            systemDiskGiB: 16,
+            recommended: true,
           },
         ],
         truncated: false,

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -16,6 +17,7 @@ import type {
   TenantIdentityResource,
   WorkspaceSummaryResource,
 } from "@pi-cloud/protocol";
+import { SANDBOX_PREVIEW_PORTS } from "@pi-cloud/protocol";
 import { PiCloudApi, PiCloudApiError, newIdempotencyKey } from "./api.ts";
 import { AdminPage } from "./AdminPage.tsx";
 import { AuthScreen } from "./AuthScreen.tsx";
@@ -95,7 +97,10 @@ export default function ChatApp() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRefreshSignal, setInspectorRefreshSignal] = useState(0);
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(false);
-  const [developmentEnvironmentsOpen, setDevelopmentEnvironmentsOpen] = useState(false);
+  const [developmentEnvironmentsOpen, setDevelopmentEnvironmentsOpen] = useState(
+    () => typeof window !== "undefined" && window.location.pathname === "/environments",
+  );
+  const [previewPort, setPreviewPort] = useState("8000");
   const [newConversationTitle, setNewConversationTitle] = useState("");
   const [workspaceChoice, setWorkspaceChoice] = useState<"existing" | "new">("new");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
@@ -116,6 +121,7 @@ export default function ChatApp() {
   const lastSequenceRef = useRef(0);
   const chatScrollerRef = useRef<HTMLElement | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const currentTurn = activeTurn(state);
   const selectedWorkspace = workspaces.find(
     (workspace) => workspace.workspaceId === selectedWorkspaceId,
@@ -179,6 +185,22 @@ export default function ChatApp() {
   const update = useCallback((action: Parameters<typeof sessionViewReducer>[1]) => {
     setState((current) => sessionViewReducer(current, action));
   }, []);
+
+  const focusComposer = useCallback((): void => {
+    requestAnimationFrame(() => {
+      const composer = composerRef.current;
+      if (composer === null || composer.disabled) return;
+      composer.focus({ preventScroll: true });
+      composer.setSelectionRange(composer.value.length, composer.value.length);
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const composer = composerRef.current;
+    if (composer === null) return;
+    composer.style.height = "auto";
+    composer.style.height = `${String(Math.min(composer.scrollHeight, 180))}px`;
+  }, [prompt]);
 
   const refreshConversations = useCallback(async (): Promise<void> => {
     const listed = await api.listConversations();
@@ -244,6 +266,19 @@ export default function ChatApp() {
       cancelled = true;
     };
   }, [api]);
+
+  useEffect(() => {
+    const navigate = (): void =>
+      setDevelopmentEnvironmentsOpen(window.location.pathname === "/environments");
+    window.addEventListener("popstate", navigate);
+    return () => window.removeEventListener("popstate", navigate);
+  }, []);
+
+  const showDevelopmentEnvironments = useCallback((open: boolean): void => {
+    const path = open ? "/environments" : "/";
+    if (window.location.pathname !== path) window.history.pushState({}, "", path);
+    setDevelopmentEnvironmentsOpen(open);
+  }, []);
 
   useEffect(() => {
     if (authPhase !== "authenticated" || identity?.platformAdministrator === true) return;
@@ -689,6 +724,7 @@ export default function ChatApp() {
       update({ type: "api.error", message: errorMessage(error) });
     } finally {
       setOperation(null);
+      focusComposer();
     }
   }
 
@@ -706,6 +742,7 @@ export default function ChatApp() {
       update({ type: "api.error", message: errorMessage(error) });
     } finally {
       setOperation(null);
+      focusComposer();
     }
   }
 
@@ -841,7 +878,7 @@ export default function ChatApp() {
       <DevelopmentEnvironmentsPage
         api={api}
         canMutate={canMutate}
-        onClose={() => setDevelopmentEnvironmentsOpen(false)}
+        onClose={() => showDevelopmentEnvironments(false)}
         workspaces={workspaces}
       />
     );
@@ -886,7 +923,7 @@ export default function ChatApp() {
             </button>
             <button
               className="product-development-environments"
-              onClick={() => setDevelopmentEnvironmentsOpen(true)}
+              onClick={() => showDevelopmentEnvironments(true)}
               type="button"
             >
               <span>▣</span> 开发环境
@@ -977,6 +1014,32 @@ export default function ChatApp() {
               <span className={state.connection.phase === "live" ? "online" : ""}>
                 {state.connection.phase === "live" ? "已连接" : "连接中"}
               </span>
+            ) : null}
+            {state.session?.sandboxRetention === "persistent" ? (
+              <div className="product-preview-control">
+                <label>
+                  端口
+                  <select
+                    aria-label="预览端口"
+                    onChange={(event) => setPreviewPort(event.target.value)}
+                    value={previewPort}
+                  >
+                    {SANDBOX_PREVIEW_PORTS.map((port) => (
+                      <option key={port} value={port}>
+                        {port}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <a
+                  className="product-preview-link"
+                  href={`/v1/conversations/${encodeURIComponent(state.session.sessionId)}/preview/${encodeURIComponent(previewPort)}/`}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  打开预览 ↗
+                </a>
+              </div>
             ) : null}
           </div>
           <div className="product-topbar-actions">
@@ -1334,6 +1397,7 @@ export default function ChatApp() {
               onError={(message) => update({ type: "api.error", message })}
               refreshSignal={inspectorRefreshSignal}
               sessionId={state.session?.sessionId ?? null}
+              workspaceId={state.project?.workspaceId ?? null}
               workspaceName={state.project?.name ?? null}
             />
           ) : null}
@@ -1348,7 +1412,7 @@ export default function ChatApp() {
           <div className="product-composer">
             <textarea
               aria-label="发送消息"
-              disabled={!canMutate || !canQueue || operation !== null}
+              disabled={!canMutate || !canQueue}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
@@ -1357,6 +1421,7 @@ export default function ChatApp() {
                 }
               }}
               placeholder={currentTurn ? "继续输入，消息会在当前任务后执行" : "给 PiCloud 发送消息"}
+              ref={composerRef}
               rows={1}
               value={prompt}
             />

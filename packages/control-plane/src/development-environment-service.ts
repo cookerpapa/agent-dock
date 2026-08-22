@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Database } from "@pi-cloud/database";
 import {
   TOOL_BROKER_DEVELOPMENT_ENVIRONMENT_PATH,
+  DEVELOPMENT_ENVIRONMENT_PROFILES,
   parseDevelopmentEnvironmentBrokerResponse,
   parseEnvironmentRuntimeSnapshot,
   type CreateDevelopmentEnvironmentRequest,
@@ -29,6 +30,17 @@ function requestHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+function profile(key: string) {
+  const selected = DEVELOPMENT_ENVIRONMENT_PROFILES.find((candidate) => candidate.key === key);
+  if (selected === undefined) {
+    throw new ControlPlaneStoreError(
+      "invalid_request",
+      "Development environment profile is invalid",
+    );
+  }
+  return selected;
+}
+
 function resource(row: {
   id: string;
   projectId: string;
@@ -36,12 +48,17 @@ function resource(row: {
   workspaceName: string;
   state: DevelopmentEnvironmentResource["state"];
   generation: string;
+  profileKey: string;
+  cpuCount: number;
+  memoryMiB: number;
+  systemDiskGiB: number;
   failureCode: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
   releasedAt: Date | string | null;
 }): DevelopmentEnvironmentResource {
   const generation = Number(row.generation);
+  const selectedProfile = profile(row.profileKey);
   if (!Number.isSafeInteger(generation) || generation < 1) {
     throw new ControlPlaneStoreError(
       "control_plane_misconfigured",
@@ -55,6 +72,10 @@ function resource(row: {
     workspaceName: row.workspaceName,
     state: row.state,
     generation,
+    profileKey: selectedProfile.key,
+    cpuCount: row.cpuCount,
+    memoryMiB: row.memoryMiB,
+    systemDiskGiB: row.systemDiskGiB,
     ...(row.failureCode === null ? {} : { failureCode: row.failureCode }),
     createdAt: new Date(row.createdAt).toISOString(),
     updatedAt: new Date(row.updatedAt).toISOString(),
@@ -86,6 +107,10 @@ export class DevelopmentEnvironmentService {
       .execute();
     return {
       environments: rows.slice(0, MAXIMUM_ENVIRONMENTS).map(resource),
+      profiles: DEVELOPMENT_ENVIRONMENT_PROFILES.map((candidate) => ({
+        ...candidate,
+        recommended: candidate.key === "standard",
+      })),
       truncated: rows.length > MAXIMUM_ENVIRONMENTS,
     };
   }
@@ -173,6 +198,7 @@ export class DevelopmentEnvironmentService {
         );
       }
       const id = this.#id();
+      const selectedProfile = profile(request.profileKey);
       await transaction
         .insertInto("development_environments")
         .values({
@@ -187,6 +213,10 @@ export class DevelopmentEnvironmentService {
           owner_base_url: null,
           runtime_id: null,
           runtime_name: null,
+          profile_key: selectedProfile.key,
+          cpu_count: selectedProfile.cpuCount,
+          memory_mib: selectedProfile.memoryMiB,
+          system_disk_gib: selectedProfile.systemDiskGiB,
           state: "requested",
           failure_code: null,
           idempotency_key: idempotencyKey,
@@ -196,7 +226,7 @@ export class DevelopmentEnvironmentService {
         .executeTakeFirstOrThrow();
       return id;
     });
-    await this.#provision(identity, environmentId).catch(() => undefined);
+    await this.#provision(identity, environmentId);
     return this.get(identity, environmentId);
   }
 
@@ -368,6 +398,10 @@ export class DevelopmentEnvironmentService {
         "project.name as workspaceName",
         "development.state",
         "development.generation",
+        "development.profile_key as profileKey",
+        "development.cpu_count as cpuCount",
+        "development.memory_mib as memoryMiB",
+        "development.system_disk_gib as systemDiskGiB",
         "development.failure_code as failureCode",
         "development.created_at as createdAt",
         "development.updated_at as updatedAt",
@@ -389,6 +423,7 @@ export class DevelopmentEnvironmentService {
       projectId: descriptor.projectId,
       workspaceId: descriptor.workspaceId,
       generation: descriptor.generation,
+      profileKey: descriptor.profileKey,
       environment: descriptor.environment,
       workspaceSeed: descriptor.workspaceSeed,
     });
@@ -432,6 +467,7 @@ export class DevelopmentEnvironmentService {
         "domain.id as domainId",
         "domain.tool_broker_base_url as toolBrokerBaseUrl",
         "development.generation",
+        "development.profile_key as profileKey",
         "environment.id as environmentVersionId",
         "environment.version_number as environmentVersionNumber",
         "environment.profile_key as environmentProfileKey",
@@ -455,12 +491,14 @@ export class DevelopmentEnvironmentService {
       );
     }
     const generation = Number(row.generation);
+    const selectedProfile = profile(row.profileKey);
     return {
       projectId: row.projectId,
       workspaceId: row.workspaceId,
       domainId: row.domainId,
       toolBrokerBaseUrl: row.toolBrokerBaseUrl,
       generation,
+      profileKey: selectedProfile.key,
       environment: parseEnvironmentRuntimeSnapshot({
         environmentVersionId: row.environmentVersionId,
         versionNumber: row.environmentVersionNumber,
@@ -500,9 +538,21 @@ export class DevelopmentEnvironmentService {
       });
       const body = (await response.json()) as unknown;
       if (!response.ok) {
+        const safeError =
+          typeof body === "object" &&
+          body !== null &&
+          "error" in body &&
+          typeof body.error === "object" &&
+          body.error !== null
+            ? (body.error as { code?: unknown; message?: unknown })
+            : undefined;
+        const message =
+          typeof safeError?.message === "string" && safeError.message.length <= 1_024
+            ? safeError.message
+            : "Development environment operation was rejected by Tool Broker";
         throw new ControlPlaneStoreError(
           response.status === 409 ? "conflict" : "control_plane_misconfigured",
-          "Development environment operation was rejected by Tool Broker",
+          message,
         );
       }
       const parsed = parseDevelopmentEnvironmentBrokerResponse(body);

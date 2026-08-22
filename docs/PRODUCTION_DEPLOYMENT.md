@@ -18,6 +18,11 @@ the application. It is resumable and supports a read-only preflight:
 Open `http://127.0.0.1:8080`, register the designated administrator and set the
 model provider/key in the administrator page.
 
+The safe default binds the Web/Preview entry to loopback. For a trusted LAN,
+set `PI_CLOUD_HTTP_BIND_ADDRESS=0.0.0.0` in the private production environment
+and access `http://<host-ip>:8080`. Internet publication should use a TLS
+reverse proxy and firewall; CubeAPI, Cube WebUI and Tool Broker remain private.
+
 The installer also creates a private Workspace-terminal service credential.
 Users open the terminal from the Workspace panel; there is no SSH listener or
 manual Cube credential to configure.

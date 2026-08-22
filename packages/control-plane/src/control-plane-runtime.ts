@@ -231,6 +231,9 @@ export async function createControlPlaneRuntime(
       ...(options.workspaceTerminalGateway === undefined
         ? {}
         : { workspaceTerminalGateway: options.workspaceTerminalGateway }),
+      ...(options.sandboxPreviewGateway === undefined
+        ? {}
+        : { sandboxPreviewGateway: options.sandboxPreviewGateway }),
       ...(options.developmentEnvironmentService === undefined
         ? {}
         : { developmentEnvironmentService: options.developmentEnvironmentService }),

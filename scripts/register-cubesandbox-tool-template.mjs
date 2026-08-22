@@ -327,7 +327,7 @@ async function retryReadOnlyCubeMasterCli(args, timeout, label) {
   );
 }
 
-async function currentTemplateId() {
+async function currentTemplateEvidence() {
   let current;
   try {
     current = parseJson(
@@ -338,10 +338,21 @@ async function currentTemplateId() {
     if (error?.code === "ENOENT") return undefined;
     throw error;
   }
-  if (current?.formatVersion !== 1 || !/^tpl-[a-z0-9]{24}$/.test(current?.templateId ?? "")) {
+  if (
+    current?.formatVersion !== 2 ||
+    !/^tpl-[a-z0-9]{24}$/.test(current?.agent?.templateId ?? "") ||
+    !["starter", "standard", "performance"].every((key) =>
+      /^tpl-[a-z0-9]{24}$/.test(current?.development?.[key]?.templateId ?? ""),
+    )
+  ) {
+    // Pre-release format v1 is intentionally not migrated. Its template is
+    // left for the normal retention pass after the v2 catalog is ready.
+    if (current?.formatVersion === 1 && /^tpl-[a-z0-9]{24}$/.test(current?.templateId ?? "")) {
+      return undefined;
+    }
     throw new Error("Existing Cube template evidence is invalid");
   }
-  return current.templateId;
+  return current;
 }
 
 async function pruneCubeTemplates(inventory, protectedTemplateIds, phase) {
@@ -468,7 +479,14 @@ if (!directManagement) {
   ]);
 }
 
-const previousTemplateId = await currentTemplateId();
+const previousTemplateEvidence = await currentTemplateEvidence();
+const previousTemplateIds =
+  previousTemplateEvidence === undefined
+    ? []
+    : [
+        previousTemplateEvidence.agent.templateId,
+        ...Object.values(previousTemplateEvidence.development).map((profile) => profile.templateId),
+      ];
 const preBuildInventory = parseJson(
   await retryReadOnlyCubeMasterCli(
     ["tpl", "list", "--json"],
@@ -478,11 +496,35 @@ const preBuildInventory = parseJson(
   "Cube template pre-build inventory",
 );
 assertSuccessfulCubeResponse(preBuildInventory, "Cube template pre-build inventory");
-await pruneCubeTemplates(
-  preBuildInventory,
-  previousTemplateId === undefined ? [] : [previousTemplateId],
-  "before-build",
-);
+if (
+  previousTemplateEvidence?.imageRevision === revision &&
+  previousTemplateIds.every((templateId) =>
+    preBuildInventory?.data?.some(
+      (candidate) => candidate?.template_id === templateId && candidate?.status === "READY",
+    ),
+  )
+) {
+  await pruneCubeTemplates(preBuildInventory, previousTemplateIds, "reuse-existing-catalog");
+  process.stdout.write(
+    `${JSON.stringify({
+      registered: true,
+      reused: true,
+      templatePath,
+      templateId: previousTemplateEvidence.agent.templateId,
+      developmentTemplateIds: Object.fromEntries(
+        Object.entries(previousTemplateEvidence.development).map(([key, value]) => [
+          key,
+          value.templateId,
+        ]),
+      ),
+      imageRevision: previousTemplateEvidence.imageRevision,
+      imageDigest: previousTemplateEvidence.imageDigest,
+      templateSpecSha256: previousTemplateEvidence.agent.templateSpecSha256,
+    })}\n`,
+  );
+  process.exit(0);
+}
+await pruneCubeTemplates(preBuildInventory, previousTemplateIds, "before-build");
 
 const imageTag = `${registryRepository}:${revision}`;
 await run("docker", [
@@ -543,36 +585,82 @@ try {
 }
 
 const clusterImage = `${clusterRegistryRepository}@${digest}`;
-const templateSpecification = Object.freeze({
-  image: clusterImage,
-  writableLayerSize: "1G",
-  exposedPorts: [49_984],
-  probePort: 49_984,
-  probePath: "/health",
-  cpuMillicores: 2_000,
-  memoryMb: 2_000,
-  cubeCaInjected: false,
-  allowInternetAccess: true,
+const previewPorts = Object.freeze([3000, 8000]);
+const templateDefinitions = Object.freeze({
+  agent: Object.freeze({
+    label: "Agent Tool Runtime",
+    writableLayerSize: "1G",
+    cpuMillicores: 2_000,
+    memoryMb: 2_000,
+  }),
+  starter: Object.freeze({
+    label: "轻量型",
+    writableLayerSize: "8G",
+    cpuMillicores: 1_000,
+    memoryMb: 2_048,
+  }),
+  standard: Object.freeze({
+    label: "标准型",
+    writableLayerSize: "16G",
+    cpuMillicores: 2_000,
+    memoryMb: 4_096,
+  }),
+  performance: Object.freeze({
+    label: "性能型",
+    writableLayerSize: "32G",
+    cpuMillicores: 4_000,
+    memoryMb: 8_192,
+  }),
 });
-const templateSpecSha256 = createHash("sha256")
-  .update(JSON.stringify(templateSpecification), "utf8")
-  .digest("hex");
+function specification(definition) {
+  return Object.freeze({
+    image: clusterImage,
+    writableLayerSize: definition.writableLayerSize,
+    exposedPorts: [49_984, ...previewPorts],
+    probePort: 49_984,
+    probePath: "/health",
+    cpuMillicores: definition.cpuMillicores,
+    memoryMb: definition.memoryMb,
+    cubeCaInjected: false,
+    allowInternetAccess: true,
+  });
+}
+function specificationSha256(value) {
+  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+}
 const initialInventory = parseJson(
   await retryReadOnlyCubeMasterCli(["tpl", "list", "--json"], 60_000, "Cube template inventory"),
   "Cube template inventory",
 );
 assertSuccessfulCubeResponse(initialInventory, "Cube template inventory");
-const reusableTemplate = initialInventory?.data?.find(
-  (value) =>
-    value?.status === "READY" &&
-    value?.image_info === clusterImage &&
-    /^tpl-[a-z0-9]{24}$/.test(value?.template_id ?? "") &&
-    /^[0-9a-f-]{36}$/.test(value?.job_id ?? ""),
-);
+const reusableCatalog =
+  previousTemplateEvidence?.imageRevision === revision &&
+  previousTemplateEvidence?.imageDigest === digest
+    ? previousTemplateEvidence
+    : undefined;
 
-let templateId = reusableTemplate?.template_id;
-let jobId = reusableTemplate?.job_id;
-if (templateId === undefined || jobId === undefined) {
+async function registerTemplate(key, definition) {
+  const templateSpecification = specification(definition);
+  const templateSpecSha256 = specificationSha256(templateSpecification);
+  const prior = key === "agent" ? reusableCatalog?.agent : reusableCatalog?.development?.[key];
+  const reusable = initialInventory?.data?.find(
+    (value) =>
+      prior?.templateSpecSha256 === templateSpecSha256 &&
+      value?.template_id === prior?.templateId &&
+      value?.job_id === prior?.jobId &&
+      value?.status === "READY" &&
+      value?.image_info === clusterImage,
+  );
+  if (reusable !== undefined) {
+    return {
+      key,
+      label: definition.label,
+      templateId: reusable.template_id,
+      jobId: reusable.job_id,
+      templateSpecSha256,
+      templateSpecification,
+    };
+  }
   const created = parseJson(
     await cubeMasterCli(
       [
@@ -581,17 +669,18 @@ if (templateId === undefined || jobId === undefined) {
         "--image",
         clusterImage,
         "--writable-layer-size",
-        "1G",
+        definition.writableLayerSize,
         "--expose-port",
         "49984",
+        ...previewPorts.flatMap((port) => ["--expose-port", String(port)]),
         "--probe",
         "49984",
         "--probe-path",
         "/health",
         "--cpu",
-        "2000",
+        String(definition.cpuMillicores),
         "--memory",
-        "2000",
+        String(definition.memoryMb),
         "--with-cube-ca=false",
         "--allow-internet-access",
         "--detach",
@@ -602,7 +691,7 @@ if (templateId === undefined || jobId === undefined) {
     "Cube template create response",
   );
   assertSuccessfulCubeResponse(created, "Cube template create");
-  jobId = nestedString(created, "job_id");
+  const jobId = nestedString(created, "job_id");
   if (!/^[0-9a-f-]{36}$/.test(jobId ?? "")) {
     throw new Error("Cube template create response did not contain a valid job ID");
   }
@@ -615,10 +704,23 @@ if (templateId === undefined || jobId === undefined) {
     "Cube template watch response",
   );
   assertSuccessfulCubeResponse(watched, "Cube template watch");
-  templateId = nestedString(watched, "template_id");
+  const templateId = nestedString(watched, "template_id");
   if (!/^tpl-[a-z0-9]{24}$/.test(templateId ?? "")) {
     throw new Error("Cube template watch response did not contain a valid template ID");
   }
+  return {
+    key,
+    label: definition.label,
+    templateId,
+    jobId,
+    templateSpecSha256,
+    templateSpecification,
+  };
+}
+
+const registeredTemplates = [];
+for (const [key, definition] of Object.entries(templateDefinitions)) {
+  registeredTemplates.push(await registerTemplate(key, definition));
 }
 
 const listed = parseJson(
@@ -630,36 +732,53 @@ const listed = parseJson(
   "Cube template inventory",
 );
 assertSuccessfulCubeResponse(listed, "Cube template inventory");
-const template = listed?.data?.find((value) => value?.template_id === templateId);
-if (
-  template?.status !== "READY" ||
-  template?.job_id !== jobId ||
-  template?.image_info !== clusterImage
-) {
-  throw new Error("Cube template inventory did not confirm the immutable READY template");
+for (const registered of registeredTemplates) {
+  const template = listed?.data?.find((value) => value?.template_id === registered.templateId);
+  if (
+    template?.status !== "READY" ||
+    template?.job_id !== registered.jobId ||
+    template?.image_info !== clusterImage
+  ) {
+    throw new Error(`Cube template inventory did not confirm ${registered.key}`);
+  }
 }
 
+const byKey = new Map(registeredTemplates.map((template) => [template.key, template]));
+const agent = byKey.get("agent");
+if (agent === undefined) throw new Error("Agent Cube template was not registered");
+const development = Object.fromEntries(
+  ["starter", "standard", "performance"].map((key) => {
+    const selected = byKey.get(key);
+    if (selected === undefined) throw new Error(`Development Cube template ${key} was missing`);
+    return [key, selected];
+  }),
+);
 const evidence = {
-  formatVersion: 1,
+  formatVersion: 2,
   cubeCommit: CUBE_COMMIT,
   imageRevision: revision,
   imageDigest: digest,
   imageReference: clusterImage,
-  templateId,
-  jobId,
-  templateSpecSha256,
-  templateSpecification,
+  agent,
+  development,
   registeredAt: new Date().toISOString(),
 };
 await writePrivate(templatePath, `${JSON.stringify(evidence, null, 2)}\n`, credentialOwner);
-await pruneCubeTemplates(listed, [templateId], "after-registration");
+await pruneCubeTemplates(
+  listed,
+  registeredTemplates.map((template) => template.templateId),
+  "after-registration",
+);
 process.stdout.write(
   `${JSON.stringify({
     registered: true,
     templatePath,
-    templateId,
+    templateId: agent.templateId,
+    developmentTemplateIds: Object.fromEntries(
+      Object.entries(development).map(([key, value]) => [key, value.templateId]),
+    ),
     imageRevision: revision,
     imageDigest: digest,
-    templateSpecSha256,
+    templateSpecSha256: agent.templateSpecSha256,
   })}\n`,
 );

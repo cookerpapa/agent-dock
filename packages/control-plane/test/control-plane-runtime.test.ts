@@ -8,6 +8,7 @@ import {
   DurableEventStore,
   HashedBearerSupervisorAuthorizer,
   SessionEventHub,
+  SandboxPreviewGateway,
   SupervisorMaintenanceRuntime,
   createControlPlaneRuntime,
   type SupervisorMaintenanceActivity,
@@ -126,6 +127,11 @@ describe.sequential("remote control-plane runtime composition", () => {
 
   it("starts maintenance with the HTTP/WebSocket control plane and drains idempotently", async () => {
     const activities: SupervisorMaintenanceActivity[] = [];
+    const sandboxPreviewGateway = new SandboxPreviewGateway({
+      database,
+      previewToken: `preview-${"p".repeat(48)}`,
+      allowInsecureInternalHttp: true,
+    });
     const runtime = await createControlPlaneRuntime({
       database,
       tenantId: IDS.tenant,
@@ -152,6 +158,7 @@ describe.sequential("remote control-plane runtime composition", () => {
           throw new Error("An empty inventory cannot terminate an assignment");
         },
       }),
+      sandboxPreviewGateway,
       maintenance: {
         maintenanceIntervalMs: 10,
         failurePollMs: 10,
@@ -165,7 +172,14 @@ describe.sequential("remote control-plane runtime composition", () => {
     });
 
     try {
-      await runtime.listen(0, "127.0.0.1");
+      const address = await runtime.listen(0, "127.0.0.1");
+      expect(
+        (
+          await fetch(
+            `${address}/v1/conversations/10000000-0000-4000-8000-000000000001/preview/8000/`,
+          )
+        ).status,
+      ).toBe(401);
       expect(runtime.application.get(DurableEventStore)).toBe(runtime.eventStore);
       expect(runtime.application.get(SessionEventHub)).toBe(runtime.eventHub);
       await waitFor(() => activities.some((activity) => activity.type === "maintenance.completed"));

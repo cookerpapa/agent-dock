@@ -29,13 +29,30 @@ describe("tenant-aware browser API", () => {
       const path = String(input);
       if (init?.method === "GET") {
         expect(path).toBe("/v1/development-environments");
-        return new Response(JSON.stringify({ environments: [], truncated: false }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            environments: [],
+            profiles: [
+              {
+                key: "standard",
+                label: "标准型",
+                cpuCount: 2,
+                memoryMiB: 4096,
+                systemDiskGiB: 16,
+                recommended: true,
+              },
+            ],
+            truncated: false,
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      if (path === "/v1/development-environments") expect(body).toEqual({ workspaceId });
+      if (path === "/v1/development-environments")
+        expect(body).toEqual({ workspaceId, profileKey: "standard" });
       else expect(body).toEqual({ action: "pause" });
       return new Response(
         JSON.stringify({
@@ -45,6 +62,10 @@ describe("tenant-aware browser API", () => {
           workspaceName: "agent-runtime",
           state: path.endsWith("/actions") ? "paused" : "running",
           generation: 1,
+          profileKey: "standard",
+          cpuCount: 2,
+          memoryMiB: 4096,
+          systemDiskGiB: 16,
           createdAt,
           updatedAt: createdAt,
         }),
@@ -54,10 +75,20 @@ describe("tenant-aware browser API", () => {
     const api = new PiCloudApi(fetchImplementation);
     await expect(api.listDevelopmentEnvironments()).resolves.toEqual({
       environments: [],
+      profiles: [
+        {
+          key: "standard",
+          label: "标准型",
+          cpuCount: 2,
+          memoryMiB: 4096,
+          systemDiskGiB: 16,
+          recommended: true,
+        },
+      ],
       truncated: false,
     });
     await expect(
-      api.createDevelopmentEnvironment(workspaceId, "environment:create"),
+      api.createDevelopmentEnvironment(workspaceId, "standard", "environment:create"),
     ).resolves.toMatchObject({ state: "running" });
     await expect(
       api.developmentEnvironmentAction(environmentId, "pause", "environment:pause"),

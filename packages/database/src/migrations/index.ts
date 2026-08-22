@@ -78,6 +78,8 @@ import * as postgresLiveEventAuthority from "./076_postgres_live_event_authority
 import * as removeLegacyEventIdTrigger from "./077_remove_legacy_event_id_trigger.ts";
 import * as kafkaFirstAgentEventLog from "./078_kafka_first_agent_event_log.ts";
 import * as removePostgresHotEventLog from "./079_remove_postgres_hot_event_log.ts";
+import * as reconcileCodingModelLimits from "./080_reconcile_coding_model_limits.ts";
+import * as developmentEnvironmentProfiles from "./081_development_environment_profiles.ts";
 
 export const migrationProvider: MigrationProvider = {
   async getMigrations() {
@@ -161,6 +163,8 @@ export const migrationProvider: MigrationProvider = {
       "077_remove_legacy_event_id_trigger": removeLegacyEventIdTrigger,
       "078_kafka_first_agent_event_log": kafkaFirstAgentEventLog,
       "079_remove_postgres_hot_event_log": removePostgresHotEventLog,
+      "080_reconcile_coding_model_limits": reconcileCodingModelLimits,
+      "081_development_environment_profiles": developmentEnvironmentProfiles,
     };
   },
 };
@@ -449,3 +453,11 @@ export {
   down as downRemoveLegacyEventIdTrigger,
   up as upRemoveLegacyEventIdTrigger,
 } from "./077_remove_legacy_event_id_trigger.ts";
+export {
+  down as downReconcileCodingModelLimits,
+  up as upReconcileCodingModelLimits,
+} from "./080_reconcile_coding_model_limits.ts";
+export {
+  down as downDevelopmentEnvironmentProfiles,
+  up as upDevelopmentEnvironmentProfiles,
+} from "./081_development_environment_profiles.ts";

@@ -136,6 +136,10 @@ export {
   downPostgresLiveEventAuthority,
   upRemoveLegacyEventIdTrigger,
   downRemoveLegacyEventIdTrigger,
+  upReconcileCodingModelLimits,
+  downReconcileCodingModelLimits,
+  upDevelopmentEnvironmentProfiles,
+  downDevelopmentEnvironmentProfiles,
 } from "./migrations/index.ts";
 
 export {

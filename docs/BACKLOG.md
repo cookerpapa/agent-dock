@@ -91,6 +91,10 @@ retired and remain only in Git history or explicitly superseded ADRs.
 - [x] Keep Cube credentials and cluster inventory behind Tool Broker.
 - [x] Support create, persistent PTY, pause, resume and release while preserving
       Workspace Volume bytes.
+- [x] Preserve one persistent conversation Cube across owner terminal handoff.
+- [x] Add private-token HTTP service preview and deployment-owned development
+      environment size profiles.
+- [ ] Add a bounded WebSocket preview tunnel for HMR and application sockets.
 - [ ] Define an explicit fenced Agent handoff into a live development
       environment; until then Agent Runs remain queued behind its writer lock.
 

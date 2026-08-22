@@ -288,7 +288,13 @@ export function ConversationTreeNavigator({
         <header className="product-tree-header">
           <div>
             <strong>对话导航</strong>
-            <span>{tree === null ? "选择一个对话" : `${String(tree.branches.length)} 条分支`}</span>
+            <span>
+              {tree === null
+                ? "选择一个对话"
+                : loading
+                  ? "正在同步…"
+                  : `${String(tree.branches.length)} 条分支`}
+            </span>
           </div>
           <div className="product-tree-view-switch" role="group" aria-label="树视图">
             <button
@@ -307,8 +313,8 @@ export function ConversationTreeNavigator({
             </button>
           </div>
         </header>
-        <nav className="product-tree-nav" aria-label="Pi 会话树">
-          {loading ? (
+        <nav aria-busy={loading} className="product-tree-nav" aria-label="Pi 会话树">
+          {loading && root === null ? (
             <div className="product-tree-empty">正在读取会话树…</div>
           ) : root === null ? (
             <div className="product-tree-empty">发送第一条消息后，这里会显示对话路径。</div>

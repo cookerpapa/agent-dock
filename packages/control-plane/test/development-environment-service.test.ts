@@ -222,7 +222,10 @@ afterAll(async () => {
 
 describe("user-owned development environments", () => {
   it("provisions, isolates visibility, pauses, resumes and releases one Workspace KVM", async () => {
-    const created = await service.create(identity, "create-exclusive", { workspaceId });
+    const created = await service.create(identity, "create-exclusive", {
+      workspaceId,
+      profileKey: "standard",
+    });
     expect(created).toMatchObject({ workspaceId, state: "running", generation: 1 });
     await expect(
       stateRepository.reserve({
@@ -249,13 +252,17 @@ describe("user-owned development environments", () => {
     ).resolves.toEqual({ status: "busy" });
     await expect(service.list(otherIdentity)).resolves.toEqual({
       environments: [],
+      profiles: expect.any(Array),
       truncated: false,
     });
     await expect(service.get(otherIdentity, created.environmentId)).rejects.toMatchObject({
       code: "not_found",
     });
     await expect(
-      service.create(identity, "create-exclusive-replay", { workspaceId }),
+      service.create(identity, "create-exclusive-replay", {
+        workspaceId,
+        profileKey: "standard",
+      }),
     ).rejects.toMatchObject({ code: "conflict" });
 
     await expect(

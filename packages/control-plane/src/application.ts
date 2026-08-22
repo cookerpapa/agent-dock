@@ -19,6 +19,7 @@ import type { WebAuthenticationService } from "./web-authentication.ts";
 import type { WorkspaceTerminalGateway } from "./workspace-terminal-gateway.ts";
 import type { DevelopmentEnvironmentService } from "./development-environment-service.ts";
 import type { TerminalTurnProjectionGateway } from "./terminal-turn-projection-gateway.ts";
+import type { SandboxPreviewGateway } from "./sandbox-preview-gateway.ts";
 
 export type ControlPlaneApplicationOptions = Omit<
   ControlPlaneStoreOptions,
@@ -43,6 +44,7 @@ export type ControlPlaneApplicationOptions = Omit<
   workspaceTerminalGateway?: WorkspaceTerminalGateway;
   developmentEnvironmentService?: DevelopmentEnvironmentService;
   terminalTurnProjectionGateway?: TerminalTurnProjectionGateway;
+  sandboxPreviewGateway?: SandboxPreviewGateway;
 };
 
 export async function createControlPlaneApplication(
@@ -53,6 +55,7 @@ export async function createControlPlaneApplication(
   options.supervisorProvisioningGateway?.install(adapter.getInstance());
   options.supervisorWebSocketGateway?.install(adapter.getInstance());
   options.workspaceTerminalGateway?.install(adapter.getInstance());
+  options.sandboxPreviewGateway?.install(adapter.getInstance());
   options.terminalTurnProjectionGateway?.install(adapter.getInstance());
   let staticRequestIdentity;
   if (options.productionHttpGateway === undefined) {

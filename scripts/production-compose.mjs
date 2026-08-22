@@ -183,12 +183,17 @@ if (!allowsStaleCubeTemplate && invalidClusterEvidence) {
   throw new Error("CubeSandbox cluster evidence is not the validated primary profile");
 }
 const invalidTemplateEvidence =
-  template?.formatVersion !== 1 ||
+  template?.formatVersion !== 2 ||
   template?.cubeCommit !== cluster?.cubeCommit ||
   !/^sha256:[a-f0-9]{64}$/.test(template?.imageDigest ?? "") ||
   !/^[a-f0-9]{40}$/.test(template?.imageRevision ?? "") ||
-  !/^tpl-[a-z0-9]{24}$/.test(template?.templateId ?? "") ||
-  !/^[a-f0-9]{64}$/.test(template?.templateSpecSha256 ?? "");
+  !/^tpl-[a-z0-9]{24}$/.test(template?.agent?.templateId ?? "") ||
+  !/^[a-f0-9]{64}$/.test(template?.agent?.templateSpecSha256 ?? "") ||
+  !["starter", "standard", "performance"].every(
+    (key) =>
+      /^tpl-[a-z0-9]{24}$/.test(template?.development?.[key]?.templateId ?? "") &&
+      /^[a-f0-9]{64}$/.test(template?.development?.[key]?.templateSpecSha256 ?? ""),
+  );
 if (!allowsStaleCubeTemplate && invalidTemplateEvidence) {
   throw new Error("CubeSandbox READY template evidence is invalid");
 }
@@ -216,7 +221,22 @@ const cubeEnvironment = {
   PI_CLOUD_CUBESANDBOX_TEMPLATE_ID:
     invalidTemplateEvidence || template === undefined
       ? "tpl-000000000000000000000000"
-      : template.templateId,
+      : template.agent.templateId,
+  PI_CLOUD_CUBESANDBOX_DEVELOPMENT_TEMPLATE_IDS:
+    invalidTemplateEvidence || template === undefined
+      ? JSON.stringify({
+          starter: "tpl-000000000000000000000000",
+          standard: "tpl-000000000000000000000000",
+          performance: "tpl-000000000000000000000000",
+        })
+      : JSON.stringify(
+          Object.fromEntries(
+            ["starter", "standard", "performance"].map((key) => [
+              key,
+              template.development[key].templateId,
+            ]),
+          ),
+        ),
   PI_CLOUD_CUBESANDBOX_DOMAIN:
     invalidClusterEvidence || cluster === undefined ? "cube.app" : cluster.sandboxDomain,
   PI_CLOUD_CUBESANDBOX_API_NODE_IP:

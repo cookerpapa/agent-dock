@@ -1,8 +1,11 @@
 import type {
   DevelopmentEnvironmentAction,
+  DevelopmentEnvironmentListResource,
+  DevelopmentEnvironmentProfileKey,
   DevelopmentEnvironmentResource,
   WorkspaceSummaryResource,
 } from "@pi-cloud/protocol";
+import { SANDBOX_PREVIEW_PORTS } from "@pi-cloud/protocol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PiCloudApi, newIdempotencyKey } from "./api.ts";
 import { errorMessage } from "./ui-errors.ts";
@@ -41,10 +44,13 @@ export function DevelopmentEnvironmentsPage({
   onClose: () => void;
 }) {
   const [environments, setEnvironments] = useState<readonly DevelopmentEnvironmentResource[]>([]);
+  const [profiles, setProfiles] = useState<DevelopmentEnvironmentListResource["profiles"]>([]);
+  const [profileKey, setProfileKey] = useState<DevelopmentEnvironmentProfileKey>("standard");
   const [workspaceId, setWorkspaceId] = useState(workspaces[0]?.workspaceId ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [terminalEnvironmentId, setTerminalEnvironmentId] = useState<string | null>(null);
+  const [previewPort, setPreviewPort] = useState("8000");
   const liveWorkspaceIds = useMemo(
     () =>
       new Set(
@@ -65,6 +71,7 @@ export function DevelopmentEnvironmentsPage({
   const refresh = useCallback(async () => {
     const listed = await api.listDevelopmentEnvironments();
     setEnvironments(listed.environments);
+    setProfiles(listed.profiles);
   }, [api]);
 
   useEffect(() => {
@@ -115,7 +122,11 @@ export function DevelopmentEnvironmentsPage({
     setBusy("create");
     setNotice(null);
     try {
-      await api.createDevelopmentEnvironment(workspaceId, newIdempotencyKey("environment"));
+      await api.createDevelopmentEnvironment(
+        workspaceId,
+        profileKey,
+        newIdempotencyKey("environment"),
+      );
       await refresh();
     } catch (error: unknown) {
       setNotice(errorMessage(error));
@@ -129,9 +140,9 @@ export function DevelopmentEnvironmentsPage({
     <div className="development-environment-page">
       <header className="development-environment-header">
         <div>
-          <span className="product-sidebar-label">独占计算</span>
+          <span className="development-environment-eyebrow">PI CLOUD · COMPUTE</span>
           <h1>开发环境</h1>
-          <p>为一个 Workspace 申请独占 Cube KVM。环境仅你可见，暂停时保留进程和内存。</p>
+          <p>申请仅你可见的 Cube KVM 开发机。后台进程在终端断开后继续运行，暂停时保留内存状态。</p>
         </div>
         <button onClick={onClose} type="button">
           返回对话
@@ -139,6 +150,31 @@ export function DevelopmentEnvironmentsPage({
       </header>
 
       <section className="development-environment-create">
+        <div className="development-environment-create-title">
+          <strong>创建开发机</strong>
+          <span>选择计算规格与 Workspace。系统盘随 VM 生命周期，Workspace 数据独立持久化。</span>
+        </div>
+        <div className="development-environment-profiles" role="radiogroup" aria-label="开发机规格">
+          {profiles.map((profile) => (
+            <button
+              aria-checked={profile.key === profileKey}
+              className={profile.key === profileKey ? "active" : ""}
+              disabled={!canMutate || busy !== null}
+              key={profile.key}
+              onClick={() => setProfileKey(profile.key)}
+              role="radio"
+              type="button"
+            >
+              <span>
+                <strong>{profile.label}</strong>
+                {profile.recommended ? <em>推荐</em> : null}
+              </span>
+              <b>{String(profile.cpuCount)} vCPU</b>
+              <small>{String(profile.memoryMiB / 1024)} GiB 内存</small>
+              <small>{String(profile.systemDiskGiB)} GiB 系统盘</small>
+            </button>
+          ))}
+        </div>
         <label>
           <span>Workspace</span>
           <select
@@ -183,7 +219,9 @@ export function DevelopmentEnvironmentsPage({
                   <div>
                     <h2>{environment.workspaceName}</h2>
                     <span>
-                      第 {String(environment.generation)} 代 · {stateLabel(environment.state)}
+                      第 {String(environment.generation)} 代 · {String(environment.cpuCount)} vCPU ·{" "}
+                      {String(environment.memoryMiB / 1024)} GiB ·{" "}
+                      {String(environment.systemDiskGiB)} GiB 系统盘
                     </span>
                   </div>
                   <span className="development-environment-state">
@@ -205,6 +243,28 @@ export function DevelopmentEnvironmentsPage({
                       >
                         {selected ? "收起终端" : "打开终端"}
                       </button>
+                      <label className="development-environment-preview-port">
+                        端口
+                        <select
+                          aria-label={`${environment.workspaceName} 预览端口`}
+                          onChange={(event) => setPreviewPort(event.target.value)}
+                          value={previewPort}
+                        >
+                          {SANDBOX_PREVIEW_PORTS.map((port) => (
+                            <option key={port} value={port}>
+                              {port}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <a
+                        className="development-environment-preview-link"
+                        href={`/v1/development-environments/${encodeURIComponent(environment.environmentId)}/preview/${encodeURIComponent(previewPort)}/`}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        打开服务 ↗
+                      </a>
                       <button
                         disabled={busy !== null}
                         onClick={() => void act(environment, "pause")}

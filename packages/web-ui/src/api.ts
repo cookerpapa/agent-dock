@@ -329,13 +329,14 @@ export class PiCloudApi {
 
   async createDevelopmentEnvironment(
     workspaceId: string,
+    profileKey: import("@pi-cloud/protocol").DevelopmentEnvironmentProfileKey,
     idempotencyKey: string,
   ): Promise<DevelopmentEnvironmentResource> {
     return parseDevelopmentEnvironmentResource(
       await request(
         this.#fetch,
         "/v1/development-environments",
-        jsonRequest({ workspaceId }, idempotencyKey),
+        jsonRequest({ workspaceId, profileKey }, idempotencyKey),
         this.#authorizationToken,
       ),
     );

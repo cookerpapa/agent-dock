@@ -14,6 +14,7 @@ import {
   type ToolSandboxOperationRequest,
   type ToolSandboxOperationResponse,
   type ToolWebProxyBootstrap,
+  type DevelopmentEnvironmentProfileKey,
 } from "@pi-cloud/protocol";
 import { createHash, randomBytes } from "node:crypto";
 import { isIPv4 } from "node:net";
@@ -150,6 +151,7 @@ type CubeActivation = {
 
 export type CubeSandboxProviderOptions = Readonly<{
   templateId: string;
+  developmentTemplateIds?: Readonly<Record<DevelopmentEnvironmentProfileKey, string>>;
   imageRevision: string;
   runtimeClient?: CubeSandboxRuntimeClient;
   runtime?: OfficialCubeSandboxRuntimeClientOptions;
@@ -543,6 +545,7 @@ export class CubeSandboxProvider implements SandboxProvider {
   readonly defaultPolicy = CUBESANDBOX_TOOL_POLICY;
   readonly supportsWarmRebind = true;
   readonly #templateId: string;
+  readonly #developmentTemplateIds: ReadonlyMap<DevelopmentEnvironmentProfileKey, string>;
   readonly #imageRevision: string;
   readonly #client: CubeSandboxRuntimeClient;
   readonly #readyTimeoutMs: number;
@@ -553,6 +556,16 @@ export class CubeSandboxProvider implements SandboxProvider {
 
   constructor(options: CubeSandboxProviderOptions) {
     this.#templateId = bounded(options.templateId, "CubeSandbox template ID", 256);
+    this.#developmentTemplateIds = new Map(
+      (["starter", "standard", "performance"] as const).map((key) => [
+        key,
+        bounded(
+          options.developmentTemplateIds?.[key] ?? options.templateId,
+          `CubeSandbox ${key} development template ID`,
+          256,
+        ),
+      ]),
+    );
     this.#imageRevision = bounded(options.imageRevision, "CubeSandbox image revision", 128);
     this.#readyTimeoutMs = positiveInteger(options.readyTimeoutMs, READY_TIMEOUT_MS, 300_000);
     this.#workspaceVolumeGateway = options.workspaceVolumeGateway;
@@ -641,7 +654,10 @@ export class CubeSandboxProvider implements SandboxProvider {
       volumeId,
     });
     const instance = await this.#client.create({
-      templateId: this.#templateId,
+      templateId:
+        spec.lifetime === "development_environment" && spec.developmentProfileKey !== undefined
+          ? this.#developmentTemplateIds.get(spec.developmentProfileKey)!
+          : this.#templateId,
       timeoutSeconds:
         spec.lifetime === "development_environment"
           ? -1
@@ -1034,6 +1050,32 @@ export class CubeSandboxProvider implements SandboxProvider {
         await terminal.kill();
       },
       disconnect: () => terminal.disconnect(),
+    });
+  }
+
+  async previewHttp(
+    handle: SandboxHandle,
+    request: import("./sandbox-provider.ts").SandboxPreviewHttpRequest,
+  ): Promise<import("./sandbox-provider.ts").SandboxPreviewHttpResponse> {
+    const activation = await this.#owned(handle);
+    if (activation.state !== "running" && activation.state !== "idle") {
+      throw new ToolBrokerError(
+        "sandbox_preview_runtime_unavailable",
+        "Sandbox preview runtime was not available",
+        true,
+      );
+    }
+    if (this.#client.requestService === undefined) {
+      throw new ToolBrokerError(
+        "sandbox_preview_unsupported",
+        "CubeSandbox client does not support service preview",
+        false,
+      );
+    }
+    return this.#client.requestService(activation.instance, {
+      ...request,
+      maximumResponseBytes: 16 * 1_024 * 1_024,
+      timeoutMs: 60_000,
     });
   }
 

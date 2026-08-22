@@ -143,6 +143,11 @@ function providerFixture() {
   );
   const pause = vi.fn<NonNullable<SandboxProvider["pause"]>>(async () => undefined);
   const resume = vi.fn<NonNullable<SandboxProvider["resume"]>>(async (handle) => handle);
+  const previewHttp = vi.fn<NonNullable<SandboxProvider["previewHttp"]>>(async () => ({
+    status: 200,
+    headers: { "content-type": "text/html; charset=utf-8" },
+    body: Buffer.from("<html><body>preview-ok</body></html>"),
+  }));
   const provider: SandboxProvider = {
     providerId: "cubesandbox",
     async checkHealth() {},
@@ -181,6 +186,7 @@ function providerFixture() {
         disconnect() {},
       };
     },
+    previewHttp,
     pause,
     resume,
     snapshot,
@@ -239,6 +245,7 @@ function providerFixture() {
     terminalResize,
     pause,
     resume,
+    previewHttp,
     get createSpec() {
       return createSpec;
     },
@@ -293,6 +300,7 @@ describe("provider-backed Tool Tool Broker", () => {
         projectId: assignment.projectId,
         workspaceId: assignment.workspaceId,
         generation: 1,
+        profileKey: "standard",
         environment,
         workspaceSeed: { kind: "sample_java" },
       }),
@@ -376,6 +384,123 @@ describe("provider-backed Tool Tool Broker", () => {
       activationId: ACTIVATION_ID,
     });
     await manager.stop(ACTIVATION_ID, assignment);
+    await manager.close();
+  });
+
+  it("hands an idle persistent Cube to the human terminal without replacing its process world", async () => {
+    class PersistentTerminalRepository extends InMemorySandboxActivationStateRepository {
+      override async reserveTerminal() {
+        return {
+          status: "reserved" as const,
+          retiredActivation: { activationId: ACTIVATION_ID, assignment },
+        };
+      }
+    }
+    const fixture = providerFixture();
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      stateRepository: new PersistentTerminalRepository(),
+      idGenerator: (() => {
+        const ids = [ACTIVATION_ID, SECOND_ACTIVATION_ID];
+        return () => ids.shift()!;
+      })(),
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const created = await manager.create({ ...createRequest, workspaceRevision: "1".repeat(64) });
+    await manager.execute(created.capability, operation("31000000-0000-4000-8000-000000000001"));
+    await manager.release({
+      toolBrokerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "31000000-0000-4000-8000-000000000002",
+      activationId: created.activationId,
+      assignment,
+      disposition: "keep_persistent",
+      workspaceRevision: "1".repeat(64),
+    });
+
+    const terminal = await manager.openTerminal({
+      tenantId: assignment.tenantId,
+      userId: "user-provider-test",
+      projectId: assignment.projectId,
+      workspaceId: assignment.workspaceId,
+      sessionId: assignment.sessionId,
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      size: { rows: 24, cols: 100 },
+    });
+    expect(fixture.createCount).toBe(1);
+    expect(manager.warmCount).toBe(0);
+    expect(fixture.rebind).toHaveBeenCalledOnce();
+
+    await terminal.close();
+    expect(fixture.destroyed).toBe(false);
+    expect(fixture.stopped).toBe(false);
+    expect(fixture.snapshot).toHaveBeenCalledOnce();
+    expect(manager.warmCount).toBe(1);
+
+    const next = await manager.create({
+      ...createRequest,
+      requestId: "31000000-0000-4000-8000-000000000003",
+      assignment: { ...assignment, fencingToken: 6 },
+      workspaceRevision: "1".repeat(64),
+    });
+    expect(next.continuity).toBe("warm_reuse");
+    expect(fixture.createCount).toBe(1);
+    await manager.execute(next.capability, {
+      ...operation("31000000-0000-4000-8000-000000000004"),
+      activationId: next.activationId,
+    });
+    expect(fixture.rebind).toHaveBeenCalledTimes(2);
+    await manager.stop(next.activationId, { ...assignment, fencingToken: 6 });
+    await manager.close();
+  });
+
+  it("proxies a tenant-authorized port through a retained private-ingress Cube", async () => {
+    const fixture = providerFixture();
+    const manager = new ToolBroker({
+      provider: fixture.provider,
+      idGenerator: () => ACTIVATION_ID,
+      capabilityGenerator: () => CAPABILITY,
+    });
+    const created = await manager.create({ ...createRequest, workspaceRevision: "1".repeat(64) });
+    await manager.execute(created.capability, operation("32000000-0000-4000-8000-000000000001"));
+    await manager.release({
+      toolBrokerProtocolVersion: 1,
+      type: "tool_sandbox.release",
+      requestId: "32000000-0000-4000-8000-000000000002",
+      activationId: created.activationId,
+      assignment,
+      disposition: "keep_persistent",
+      workspaceRevision: "1".repeat(64),
+    });
+
+    const response = await manager.preview({
+      sandboxPreviewProtocolVersion: 1,
+      type: "sandbox_preview.request",
+      requestId: "32000000-0000-4000-8000-000000000003",
+      tenantId: assignment.tenantId,
+      userId: "user-provider-test",
+      target: { kind: "conversation", sessionId: assignment.sessionId },
+      port: 8000,
+      method: "GET",
+      path: "/",
+      headers: { accept: "text/html" },
+    });
+    expect(response).toMatchObject({
+      type: "sandbox_preview.response",
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+    expect(
+      Buffer.from(
+        response.type === "sandbox_preview.response" ? response.body : "",
+        "base64",
+      ).toString(),
+    ).toContain("preview-ok");
+    expect(fixture.previewHttp).toHaveBeenCalledWith(
+      expect.objectContaining({ activationId: ACTIVATION_ID }),
+      expect.objectContaining({ port: 8000, method: "GET", path: "/" }),
+    );
     await manager.close();
   });
 

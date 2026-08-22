@@ -104,9 +104,12 @@ if (
   cluster?.formatVersion !== 1 ||
   cluster?.cubeCommit !== "8721dd151971ce3c2966482bbd32904ad98f378e" ||
   cluster?.podNetworkMtu !== 1_450 ||
-  template?.formatVersion !== 1 ||
+  template?.formatVersion !== 2 ||
   template?.cubeCommit !== cluster.cubeCommit ||
-  !/^tpl-[a-z0-9]{24}$/.test(template?.templateId ?? "") ||
+  !/^tpl-[a-z0-9]{24}$/.test(template?.agent?.templateId ?? "") ||
+  !["starter", "standard", "performance"].every((key) =>
+    /^tpl-[a-z0-9]{24}$/.test(template?.development?.[key]?.templateId ?? ""),
+  ) ||
   !/^sha256:[a-f0-9]{64}$/.test(template?.imageDigest ?? "")
 ) {
   throw new Error("Cube production evidence is invalid");

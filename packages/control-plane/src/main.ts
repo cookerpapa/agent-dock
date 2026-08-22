@@ -29,6 +29,7 @@ import { encodeWorkspaceSnapshotBlob } from "@pi-cloud/workspace-runtime";
 import { WorkspaceTerminalGateway } from "./workspace-terminal-gateway.ts";
 import { DevelopmentEnvironmentService } from "./development-environment-service.ts";
 import { TerminalTurnProjectionGateway } from "./terminal-turn-projection-gateway.ts";
+import { SandboxPreviewGateway } from "./sandbox-preview-gateway.ts";
 
 async function verifyBootstrap(database: ReturnType<typeof createDatabase>): Promise<void> {
   const profile = await database
@@ -170,6 +171,11 @@ export async function startControlPlane(): Promise<void> {
       terminalToken: config.workspaceTerminalToken,
       allowInsecureInternalHttp: config.allowInsecureInternalHttp,
     });
+    const sandboxPreviewGateway = new SandboxPreviewGateway({
+      database,
+      previewToken: config.workspaceTerminalToken,
+      allowInsecureInternalHttp: config.allowInsecureInternalHttp,
+    });
     const developmentEnvironmentService = new DevelopmentEnvironmentService({
       database,
       terminalToken: config.workspaceTerminalToken,
@@ -200,6 +206,7 @@ export async function startControlPlane(): Promise<void> {
       platformModelSourceTenantId: config.platformModelSourceTenantId,
       cubeEgressConfigToken: config.cubeEgressConfigToken,
       workspaceTerminalGateway,
+      sandboxPreviewGateway,
       environmentImageRevision: config.environmentImageRevision,
       metrics: observability.metrics,
       artifactReader: { get: (objectKey) => objectStore.get(objectKey) },

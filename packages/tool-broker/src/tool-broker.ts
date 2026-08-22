@@ -20,6 +20,8 @@ import type {
   ToolBrokerWorkspaceForkRequest,
   ToolBrokerWorkspaceForkResponse,
   CloudToolName,
+  SandboxPreviewRequest,
+  SandboxPreviewResponse,
 } from "@pi-cloud/protocol";
 import { parseCloudToolCapabilitySnapshot } from "@pi-cloud/protocol";
 import {
@@ -127,6 +129,12 @@ type ManagedWorkspaceTerminal = {
   assignment: ToolSandboxAssignment;
   handle: SandboxHandle;
   session: SandboxTerminalSession;
+  retainedWarm?: {
+    key: string;
+    activationId: string;
+    workspaceRevision: string;
+    environment: EnvironmentRuntimeSnapshot;
+  };
   closing?: Promise<void>;
 };
 
@@ -451,7 +459,8 @@ export class ToolBroker {
         existing.reservation.tenantId !== request.tenantId ||
         existing.reservation.userId !== request.userId ||
         existing.reservation.workspaceId !== request.workspaceId ||
-        existing.reservation.generation !== request.generation
+        existing.reservation.generation !== request.generation ||
+        existing.reservation.profileKey !== request.profileKey
       ) {
         throw new ToolBrokerError(
           "development_environment_identity_conflict",
@@ -475,6 +484,7 @@ export class ToolBroker {
       workspaceId: request.workspaceId,
       environmentVersionId: request.environment.environmentVersionId,
       generation: request.generation,
+      profileKey: request.profileKey,
     };
     const reserved = await this.#stateRepository.reserveDevelopmentEnvironment(reservation);
     if (reserved.status === "redirect") {
@@ -514,6 +524,7 @@ export class ToolBroker {
         workspaceSeed: request.workspaceSeed,
         policy: this.#provider.defaultPolicy ?? DEFAULT_TOOL_SANDBOX_POLICY,
         lifetime: "development_environment",
+        developmentProfileKey: request.profileKey,
       });
       if (
         !handleMatches(
@@ -805,34 +816,64 @@ export class ToolBroker {
     let admitted = false;
     let handle: SandboxHandle | undefined;
     let terminal: SandboxTerminalSession | undefined;
+    let retainedWarm: ManagedWorkspaceTerminal["retainedWarm"];
     try {
       if (reservation.retiredActivation !== undefined) {
         const retired = reservation.retiredActivation;
         const warmEntry = [...this.#warm.entries()].find(
           ([, warm]) => warm.handle.activationId === retired.activationId,
         );
-        if (warmEntry === undefined) {
+        if (
+          warmEntry !== undefined &&
+          warmEntry[1].retention === "persistent" &&
+          warmEntry[1].handle.assignment.sessionId === input.sessionId
+        ) {
+          this.#warm.delete(warmEntry[0]);
+          handle = await this.#provider.rebind(warmEntry[1].handle, assignment);
+          retainedWarm = {
+            key: warmEntry[0],
+            activationId: retired.activationId,
+            workspaceRevision: warmEntry[1].workspaceRevision,
+            environment: warmEntry[1].environment,
+          };
+        } else if (warmEntry === undefined) {
           await this.#provider.destroyActivation(retired.activationId, retired.assignment);
         } else {
           this.#warm.delete(warmEntry[0]);
           await this.#provider.stop(warmEntry[1].handle);
           this.#releaseAdmission(retired.activationId);
         }
-        await this.#stateRepository.setActivationState(retired.activationId, "released");
+        if (retainedWarm === undefined) {
+          await this.#stateRepository.setActivationState(retired.activationId, "released");
+        }
       }
       await this.#stateRepository.setTerminalState(terminalId, "materializing");
-      await this.#acquireAdmission(terminalId, assignment);
-      admitted = true;
-      handle = await this.#provider.create({
-        activationId: terminalId,
-        assignment,
-        environment: input.environment,
-        workspaceSeed: input.workspaceSeed,
-        policy: this.#provider.defaultPolicy ?? DEFAULT_TOOL_SANDBOX_POLICY,
-      });
+      if (retainedWarm === undefined) {
+        await this.#acquireAdmission(terminalId, assignment);
+        admitted = true;
+        handle = await this.#provider.create({
+          activationId: terminalId,
+          assignment,
+          environment: input.environment,
+          workspaceSeed: input.workspaceSeed,
+          policy: this.#provider.defaultPolicy ?? DEFAULT_TOOL_SANDBOX_POLICY,
+        });
+      }
+      if (handle === undefined) {
+        throw new ToolBrokerError(
+          "workspace_terminal_runtime_unavailable",
+          "Workspace terminal runtime was unavailable",
+          true,
+        );
+      }
       terminal = await this.#provider.openTerminal(handle, input.size);
       const activeTerminal = terminal;
-      const managed: ManagedWorkspaceTerminal = { assignment, handle, session: activeTerminal };
+      const managed: ManagedWorkspaceTerminal = {
+        assignment,
+        handle,
+        session: activeTerminal,
+        ...(retainedWarm === undefined ? {} : { retainedWarm }),
+      };
       await this.#stateRepository.setTerminalState(terminalId, "active", { handle });
       this.#terminals.set(terminalId, managed);
       return Object.freeze({
@@ -855,11 +896,90 @@ export class ToolBroker {
       await terminal?.kill().catch(() => undefined);
       if (handle !== undefined) await this.#provider.destroy(handle).catch(() => undefined);
       if (admitted) this.#releaseAdmission(terminalId);
+      if (retainedWarm !== undefined) {
+        this.#releaseAdmission(retainedWarm.activationId);
+        await this.#stateRepository
+          .setActivationState(retainedWarm.activationId, "released")
+          .catch(() => undefined);
+      }
       await this.#stateRepository
         .setTerminalState(terminalId, "unknown", { failureCode: operationFailureCode(error) })
         .catch(() => undefined);
       throw error;
     }
+  }
+
+  async preview(request: SandboxPreviewRequest): Promise<SandboxPreviewResponse> {
+    if (this.#provider.previewHttp === undefined) {
+      throw new ToolBrokerError(
+        "sandbox_preview_unsupported",
+        "The configured Sandbox Provider does not support HTTP preview",
+        false,
+      );
+    }
+    const ownership = await this.#stateRepository.sandboxPreviewOwner(
+      request.tenantId,
+      request.userId,
+      request.target,
+    );
+    if (ownership.status === "redirect") {
+      throw new ToolBrokerOwnerRedirectError(ownership.ownerBaseUrl);
+    }
+    if (ownership.status === "unavailable") {
+      throw new ToolBrokerError(
+        "sandbox_preview_unavailable",
+        "Sandbox preview target is not running",
+        true,
+      );
+    }
+    let handle: SandboxHandle | undefined;
+    if (request.target.kind === "development_environment") {
+      handle = this.#developmentEnvironments.get(request.target.environmentId)?.handle;
+    } else {
+      const sessionId = request.target.sessionId;
+      // A running Agent still owns the Workspace writer. Preview admission is
+      // delayed until the persistent Cube is warm (or explicitly handed to a
+      // human terminal) so an application request cannot race Agent Tools.
+      handle = [...this.#warm.values()].find(
+        (candidate) => candidate.handle.assignment.sessionId === sessionId,
+      )?.handle;
+      handle ??= [...this.#terminals.values()].find(
+        (candidate) => candidate.assignment.sessionId === sessionId,
+      )?.handle;
+    }
+    if (handle === undefined) {
+      throw new ToolBrokerError(
+        "sandbox_preview_unavailable",
+        "Sandbox preview target has no live runtime",
+        true,
+      );
+    }
+    let body: Buffer | undefined;
+    if (request.body !== undefined) {
+      body = Buffer.from(request.body, "base64");
+      if (body.toString("base64") !== request.body) {
+        throw new ToolBrokerError(
+          "sandbox_preview_request_invalid",
+          "Sandbox preview body was invalid",
+          false,
+        );
+      }
+    }
+    const response = await this.#provider.previewHttp(handle, {
+      port: request.port,
+      method: request.method,
+      path: request.path,
+      headers: request.headers,
+      ...(body === undefined ? {} : { body }),
+    });
+    return {
+      sandboxPreviewProtocolVersion: 1,
+      type: "sandbox_preview.response",
+      requestId: request.requestId,
+      status: response.status,
+      headers: response.headers,
+      body: Buffer.from(response.body).toString("base64"),
+    };
   }
 
   async create(request: ToolSandboxCreateRequest): Promise<ToolSandboxCreateResponse> {
@@ -1774,6 +1894,42 @@ export class ToolBroker {
       await this.#stateRepository.setTerminalState(terminalId, "cleaning").catch(() => undefined);
       terminal.session.disconnect();
       await terminal.session.kill().catch(() => undefined);
+      if (terminal.retainedWarm !== undefined) {
+        const retained = terminal.retainedWarm;
+        try {
+          await this.#provider.snapshot(terminal.handle, terminalId);
+          const handle =
+            this.#provider.retainForWarm === undefined
+              ? terminal.handle
+              : await this.#provider.retainForWarm(terminal.handle);
+          this.#warm.set(retained.key, {
+            handle,
+            workspaceRevision: retained.workspaceRevision,
+            environment: retained.environment,
+            retention: "persistent",
+            lastUsedAt: this.#now(),
+            expiresAt: null,
+          });
+          await this.#stateRepository.setActivationState(retained.activationId, "warm", {
+            handle,
+            workspaceRevision: retained.workspaceRevision,
+          });
+          await this.#stateRepository.setTerminalState(terminalId, "released");
+          return;
+        } catch (error: unknown) {
+          await this.#provider.destroy(terminal.handle).catch(() => undefined);
+          this.#releaseAdmission(retained.activationId);
+          await this.#stateRepository
+            .setActivationState(retained.activationId, "released")
+            .catch(() => undefined);
+          await this.#stateRepository
+            .setTerminalState(terminalId, "unknown", {
+              failureCode: operationFailureCode(error),
+            })
+            .catch(() => undefined);
+          throw error;
+        }
+      }
       try {
         await this.#provider.destroy(terminal.handle);
         this.#releaseAdmission(terminalId);

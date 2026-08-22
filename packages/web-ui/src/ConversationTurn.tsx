@@ -151,6 +151,14 @@ export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "
   const path = stringValue(input?.path);
   const content = stringValue(input?.content);
   const output = item.output === undefined ? "" : toolOutputText(item.output);
+  const multilineCommand = command !== null && command.includes("\n");
+  const displayedCommand =
+    command === null
+      ? null
+      : command
+          .split("\n")
+          .map((line, index) => `${index === 0 ? "$ " : "  "}${line}`)
+          .join("\n");
   const duration = durationLabel(item.startedAt, item.completedAt);
   const conventionalWriteResult = /^Successfully wrote \d+ bytes to /u.test(output.trim());
   const statusLabel =
@@ -170,10 +178,15 @@ export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "
           ? "!"
           : "✓";
   const heading =
-    item.toolName === "bash" && command !== null ? (
+    item.toolName === "bash" && command !== null && !multilineCommand ? (
       <div className="product-tool-command">
         <span aria-hidden="true">$</span>
         <code>{command}</code>
+      </div>
+    ) : item.toolName === "bash" && multilineCommand ? (
+      <div className="product-tool-operation product-tool-multiline-label">
+        <strong>bash</strong>
+        <span>{String(command.split("\n").length)} 行命令</span>
       </div>
     ) : (
       <div className="product-tool-operation">
@@ -194,7 +207,13 @@ export function ToolActivity({ item }: { item: Extract<TranscriptItem, { kind: "
         <span className="product-tool-state">{statusLabel}</span>
       </div>
       <div className="product-tool-body">
-        {item.toolName === "write" && content !== null ? (
+        {item.toolName === "bash" && multilineCommand && displayedCommand !== null ? (
+          <ExpandableToolText
+            className="product-tool-command-block"
+            direction="head"
+            text={displayedCommand}
+          />
+        ) : item.toolName === "write" && content !== null ? (
           <ExpandableToolText
             className="product-tool-source"
             direction="head"

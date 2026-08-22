@@ -17,6 +17,7 @@ import {
   EnvironmentRuntimeSnapshotSchema,
   ProjectEnvironmentResourceSchema,
 } from "./environment.ts";
+import { DevelopmentEnvironmentProfileKeySchema } from "./development-environment-profile.ts";
 
 export const TurnThinkingLevelSchema = Type.Union([
   Type.Literal("off"),
@@ -560,7 +561,7 @@ export const DevelopmentEnvironmentActionSchema = Type.Union([
 ]);
 
 export const CreateDevelopmentEnvironmentRequestSchema = Type.Object(
-  { workspaceId: UuidSchema },
+  { workspaceId: UuidSchema, profileKey: DevelopmentEnvironmentProfileKeySchema },
   { additionalProperties: false },
 );
 
@@ -577,6 +578,10 @@ export const DevelopmentEnvironmentResourceSchema = Type.Object(
     workspaceName: Type.String({ minLength: 1, maxLength: 256 }),
     state: DevelopmentEnvironmentStateSchema,
     generation: PositiveSafeIntegerSchema,
+    profileKey: DevelopmentEnvironmentProfileKeySchema,
+    cpuCount: PositiveSafeIntegerSchema,
+    memoryMiB: PositiveSafeIntegerSchema,
+    systemDiskGiB: PositiveSafeIntegerSchema,
     failureCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     createdAt: UtcTimestampSchema,
     updatedAt: UtcTimestampSchema,
@@ -588,6 +593,20 @@ export const DevelopmentEnvironmentResourceSchema = Type.Object(
 export const DevelopmentEnvironmentListResourceSchema = Type.Object(
   {
     environments: Type.Array(DevelopmentEnvironmentResourceSchema, { maxItems: 100 }),
+    profiles: Type.Array(
+      Type.Object(
+        {
+          key: DevelopmentEnvironmentProfileKeySchema,
+          label: Type.String({ minLength: 1, maxLength: 64 }),
+          cpuCount: PositiveSafeIntegerSchema,
+          memoryMiB: PositiveSafeIntegerSchema,
+          systemDiskGiB: PositiveSafeIntegerSchema,
+          recommended: Type.Boolean(),
+        },
+        { additionalProperties: false },
+      ),
+      { minItems: 1, maxItems: 8 },
+    ),
     truncated: Type.Boolean(),
   },
   { additionalProperties: false },
@@ -1123,6 +1142,9 @@ export type WorkspaceSummaryResource = Static<typeof WorkspaceSummaryResourceSch
 export type WorkspaceListResource = Static<typeof WorkspaceListResourceSchema>;
 export type WorkspaceDeletionResource = Static<typeof WorkspaceDeletionResourceSchema>;
 export type DevelopmentEnvironmentState = Static<typeof DevelopmentEnvironmentStateSchema>;
+export type DevelopmentEnvironmentProfileKey = Static<
+  typeof DevelopmentEnvironmentProfileKeySchema
+>;
 export type DevelopmentEnvironmentAction = Static<typeof DevelopmentEnvironmentActionSchema>;
 export type CreateDevelopmentEnvironmentRequest = Static<
   typeof CreateDevelopmentEnvironmentRequestSchema

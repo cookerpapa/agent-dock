@@ -69,7 +69,7 @@ class TestAuthority implements CloudAgentExecutionAuthority {
 
 describe("PiCloudTurnRunner integration", () => {
   it("executes the native Pi loop from SessionStorage and publishes reviewed events", async () => {
-    const fake = new FakeModelServer();
+    const fake = new FakeModelServer({ scenarioSequence: ["rate_limit", "text"] });
     await fake.start();
     const session = new Session(
       new InMemorySessionStorage({ id: command.payload.sessionId, createdAt: Date.now() }),
@@ -161,6 +161,13 @@ describe("PiCloudTurnRunner integration", () => {
       expect(events.map((event) => event.payload.event.type)).toContain("turn.started");
       expect(events.map((event) => event.payload.event.type)).toContain("assistant.text.delta");
       expect(events.map((event) => event.payload.event.type)).toContain("model.sampling.completed");
+      expect(events.map((event) => event.payload.event.type)).toContain(
+        "model.sampling.retry.scheduled",
+      );
+      expect(fake.observations.map((observation) => observation.scenario)).toEqual([
+        "rate_limit",
+        "text",
+      ]);
       expect((await session.getStats()).messageCount).toBe(2);
       expect(authorityWasActiveAtSettlement).toBe(true);
       expect(authority.closed).toBe(true);

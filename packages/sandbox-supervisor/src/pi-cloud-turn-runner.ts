@@ -342,6 +342,15 @@ export class PiCloudTurnRunner {
         const outcome = adapter.adapt(source);
         if (outcome.kind === "invalid")
           throw new PiTurnError("pi_protocol_error", outcome.reason, false);
+        if (outcome.kind === "mapped" && isRecord(source) && source.type === "auto_retry_start") {
+          samplingSteps.scheduleRetry(source.attempt as number);
+        } else if (
+          isRecord(source) &&
+          source.type === "auto_retry_end" &&
+          source.success === false
+        ) {
+          samplingSteps.cancelScheduledRetry();
+        }
         if (outcome.kind === "mapped") {
           let publicEvent = outcome.event;
           if (publicEvent.type === "tool.started") toolStarted = true;

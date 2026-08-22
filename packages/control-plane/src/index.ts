@@ -1,4 +1,11 @@
 export {
+  SandboxPreviewGateway,
+  type SandboxPreviewGatewayOptions,
+  CONVERSATION_PREVIEW_PATH,
+  DEVELOPMENT_ENVIRONMENT_PREVIEW_PATH,
+} from "./sandbox-preview-gateway.ts";
+
+export {
   PostgresTenantApiAuthenticator,
   bindTenantRequestIdentity,
   generateTenantApiCredential,

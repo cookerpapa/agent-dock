@@ -26,6 +26,7 @@ const observability = await startServiceObservability({
 const cube = config.cubeSandbox;
 const provider = new CubeSandboxProvider({
   templateId: cube.templateId,
+  developmentTemplateIds: cube.developmentTemplateIds,
   imageRevision: config.imageRevision,
   runtime: {
     apiUrl: cube.apiUrl,

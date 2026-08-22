@@ -67,6 +67,22 @@ export type CubeSandboxDataRequest = Readonly<{
   }>;
 }>;
 
+export type CubeSandboxServiceRequest = Readonly<{
+  port: number;
+  method: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
+  path: string;
+  headers: Readonly<Record<string, string>>;
+  body?: Uint8Array;
+  maximumResponseBytes: number;
+  timeoutMs: number;
+}>;
+
+export type CubeSandboxServiceResponse = Readonly<{
+  status: number;
+  headers: Readonly<Record<string, string>>;
+  body: Uint8Array;
+}>;
+
 export type CubeSandboxHandoffAuthority = NonNullable<CubeSandboxDataRequest["authority"]>;
 
 export interface CubeSandboxRuntimeClient {
@@ -79,6 +95,10 @@ export interface CubeSandboxRuntimeClient {
   list(): Promise<readonly CubeSandboxInstance[]>;
   destroy(sandboxId: string): Promise<void>;
   request(instance: CubeSandboxInstance, input: CubeSandboxDataRequest): Promise<unknown>;
+  requestService?(
+    instance: CubeSandboxInstance,
+    input: CubeSandboxServiceRequest,
+  ): Promise<CubeSandboxServiceResponse>;
   openTerminal(
     instance: CubeSandboxInstance,
     input: Readonly<{
@@ -451,6 +471,7 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
         allow_internet_access: true,
         network: {
           allowPublicTraffic: false,
+          maskRequestHost: "localhost:${PORT}",
           allowOut: [`${this.#egressProxyIp}/32`],
           denyOut: ["0.0.0.0/0"],
         },
@@ -569,6 +590,69 @@ export class OfficialCubeSandboxRuntimeClient implements CubeSandboxRuntimeClien
       );
     }
     return parseJson(bytes, "CubeSandbox Tool service");
+  }
+
+  async requestService(
+    instance: CubeSandboxInstance,
+    input: CubeSandboxServiceRequest,
+  ): Promise<CubeSandboxServiceResponse> {
+    const token = instance.trafficAccessToken;
+    if (token === undefined) {
+      throw new CubeRuntimeClientError("CubeSandbox private-ingress token was unavailable");
+    }
+    const port = positiveInteger(input.port, 3_000, 1_024, 65_535);
+    if (!/^\/[A-Za-z0-9._~!$&'()*+,;=:@%/?-]*$/.test(input.path)) {
+      throw new TypeError("CubeSandbox preview path was invalid");
+    }
+    const host = `${String(port)}-${instance.sandboxId}.${instance.domain}`;
+    const timeout = AbortSignal.timeout(positiveInteger(input.timeoutMs, 30_000, 100, 300_000));
+    const response = await fetch(`${this.#proxyScheme}://${host}${input.path}`, {
+      method: input.method,
+      headers: {
+        ...input.headers,
+        "e2b-traffic-access-token": token,
+        "cube-traffic-access-token": token,
+      },
+      ...(input.body === undefined || input.method === "GET" || input.method === "HEAD"
+        ? {}
+        : { body: Buffer.from(input.body) }),
+      dispatcher: this.#dispatcher,
+      redirect: "manual",
+      signal: timeout,
+    });
+    const allowedResponseHeaders = new Set([
+      "accept-ranges",
+      "cache-control",
+      "content-encoding",
+      "content-language",
+      "content-range",
+      "content-type",
+      "etag",
+      "last-modified",
+      "location",
+    ]);
+    const headers: Record<string, string> = {};
+    for (const [name, value] of response.headers) {
+      if (!allowedResponseHeaders.has(name.toLowerCase())) continue;
+      if (name.toLowerCase() === "location") {
+        try {
+          const location = new URL(value, `${this.#proxyScheme}://${host}`);
+          headers.location =
+            location.host === host
+              ? `${location.pathname}${location.search}${location.hash}`
+              : value;
+        } catch {
+          continue;
+        }
+      } else {
+        headers[name.toLowerCase()] = value;
+      }
+    }
+    return {
+      status: response.status,
+      headers: Object.freeze(headers),
+      body: await readBoundedResponse(response, input.maximumResponseBytes),
+    };
   }
 
   async openTerminal(

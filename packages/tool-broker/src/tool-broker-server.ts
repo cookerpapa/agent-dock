@@ -11,6 +11,8 @@ import {
   parseToolBrokerMaterializeFileRequest,
   parseSupervisorManagementRequest,
   parseToolSandboxOperationRequest,
+  parseSandboxPreviewRequest,
+  TOOL_BROKER_SANDBOX_PREVIEW_PATH,
   type InternalServiceError,
   type SupervisorManagementResponse,
 } from "@pi-cloud/protocol";
@@ -74,6 +76,7 @@ export type ToolBrokerBackend = Pick<
       | "provisionDevelopmentEnvironment"
       | "developmentEnvironmentLifecycle"
       | "openDevelopmentEnvironmentTerminal"
+      | "preview"
     >
   >;
 
@@ -262,6 +265,7 @@ export class ToolBrokerServer {
     ) {
       this.#metrics?.sandboxAdmissionRejected.inc({ reason: failure.code });
     }
+
     reportFailure("operation_failed", failure, error);
     await reply.code(failure.retryable ? 503 : 409).send({
       error: {
@@ -400,6 +404,31 @@ export class ToolBrokerServer {
           { websocket: true },
           (socket) => this.#acceptTerminalSocket(socket, true),
         );
+      });
+    }
+
+    if (this.#terminalDigest !== undefined && this.#broker.preview !== undefined) {
+      this.#server.post(TOOL_BROKER_SANDBOX_PREVIEW_PATH, async (request, reply) => {
+        if (!this.#terminalAuthorized(request.headers.authorization)) {
+          await reply.code(401).send();
+          return;
+        }
+        try {
+          const message = parseSandboxPreviewRequest(request.body);
+          await reply.code(200).send(await this.#broker.preview!(message));
+        } catch (error: unknown) {
+          if (error instanceof ToolBrokerOwnerRedirectError) {
+            const message = parseSandboxPreviewRequest(request.body);
+            await reply.code(200).send({
+              sandboxPreviewProtocolVersion: 1,
+              type: "sandbox_preview.owner_redirect",
+              requestId: message.requestId,
+              ownerBaseUrl: error.ownerBaseUrl,
+            });
+            return;
+          }
+          await this.#failure(reply, error);
+        }
       });
     }
 
