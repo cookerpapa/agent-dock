@@ -577,6 +577,31 @@ async function trustedGitPlacementEvidence(tenant, workspaceId, sessionId) {
 }
 
 async function terminateLogicalSandbox(logicalSandboxId, sessionId, required) {
+  const durableWarmJson = await psql(
+    `select json_build_object(
+              'containerId', runtime_id,
+              'containerName', runtime_name,
+              'supervisorId', supervisor_id,
+              'bootId', boot_id,
+              'sandboxId', sandbox_id,
+              'commandId', command_id,
+              'workspaceId', workspace_id,
+              'sessionId', session_id,
+              'turnId', turn_id,
+              'leaseId', lease_id,
+              'fencingToken', fencing_token
+            )::text
+       from tool_broker_activations
+      where sandbox_id = ${sqlLiteral(logicalSandboxId)}
+        and session_id = ${sqlLiteral(sessionId)}
+        and state = 'warm'
+        and runtime_id is not null
+        and runtime_name is not null`,
+  );
+  const durableWarm =
+    durableWarmJson.length === 0
+      ? undefined
+      : parseJson(durableWarmJson, "Broker-owned warm assignment");
   const source = `
     import { readFileSync } from "node:fs";
     import { randomUUID } from "node:crypto";
@@ -606,9 +631,13 @@ async function terminateLogicalSandbox(logicalSandboxId, sessionId, required) {
       requestId: randomUUID(),
       sandboxId,
     });
-    const assignments = listed.assignments.filter(
+    const visibleAssignments = listed.assignments.filter(
       (assignment) => assignment.sessionId === sessionId,
     );
+    const durableWarm = ${JSON.stringify(durableWarm)};
+    const assignments = visibleAssignments.length === 0 && durableWarm !== undefined
+      ? [durableWarm]
+      : visibleAssignments;
     if (assignments.length > 1 || (${JSON.stringify(required)} && assignments.length !== 1)) {
       throw new Error("Expected one exact-Session warm assignment, got " + assignments.length);
     }
