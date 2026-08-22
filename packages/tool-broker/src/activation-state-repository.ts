@@ -1156,7 +1156,7 @@ export class PostgresSandboxActivationStateRepository implements SandboxActivati
         .where("workspace_id", "=", assignment.workspaceId)
         .where("session_id", "=", assignment.sessionId)
         .where("fencing_token", "=", String(assignment.fencingToken))
-        .where("state", "in", ["materializing", "active", "cleaning"])
+        .where("state", "in", ["reserved", "materializing", "active", "cleaning"])
         .forUpdate()
         .executeTakeFirst();
       if (activation === undefined) {

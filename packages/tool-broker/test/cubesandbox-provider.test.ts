@@ -578,6 +578,40 @@ describe("CubeSandbox Provider contract", () => {
     });
     expect(runtime.destroyed).toEqual([]);
 
+    const idleAssignment: ToolSandboxAssignment = {
+      ...assignment,
+      commandId: "command-cube-test-idle",
+      turnId: "turn-cube-test-idle",
+      attemptId: "10000000-0000-4000-8000-000000000028",
+      leaseId: "10000000-0000-4000-8000-000000000029",
+      fencingToken: 9,
+    };
+    const idle = await manager.create({
+      toolBrokerProtocolVersion: 1,
+      type: "tool_sandbox.create",
+      requestId: "10000000-0000-4000-8000-000000000027",
+      assignment: idleAssignment,
+      turnContextSha256: STEP_CONTEXT_SHA256,
+      attemptContextSha256: STEP_CONTEXT_SHA256,
+      allowedTools: ["read", "write", "edit", "bash"],
+      environment,
+      workspaceSeed: { kind: "sample_java" },
+      workspaceRevision: "a".repeat(64),
+    });
+    expect(idle.continuity).toBe("warm_reuse");
+    await expect(
+      manager.release({
+        toolBrokerProtocolVersion: 1,
+        type: "tool_sandbox.release",
+        requestId: "10000000-0000-4000-8000-000000000026",
+        activationId: idle.activationId,
+        assignment: idleAssignment,
+        disposition: "keep_warm",
+        workspaceRevision: "a".repeat(64),
+      }),
+    ).resolves.toMatchObject({ retained: true });
+    expect(runtime.creates).toHaveLength(1);
+
     const nextAssignment: ToolSandboxAssignment = {
       ...assignment,
       supervisorId: "supervisor-cube-test-next",
@@ -587,7 +621,7 @@ describe("CubeSandbox Provider contract", () => {
       turnId: "turn-cube-test-2",
       attemptId: "10000000-0000-4000-8000-000000000030",
       leaseId: "10000000-0000-4000-8000-000000000031",
-      fencingToken: 9,
+      fencingToken: 11,
     };
     const next = await manager.create({
       toolBrokerProtocolVersion: 1,

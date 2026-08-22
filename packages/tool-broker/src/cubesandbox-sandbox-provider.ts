@@ -777,13 +777,13 @@ export class CubeSandboxProvider implements SandboxProvider {
       );
     }
     const nextSecret = handoffSecret();
-    const nextAuthorityEpoch = activation.authorityEpoch + 1;
+    const nextAuthorityEpoch = brokerAssignment.fencingToken;
     if (
       brokerAssignment.tenantId !== handle.assignment.tenantId ||
       brokerAssignment.projectId !== handle.assignment.projectId ||
       brokerAssignment.workspaceId !== handle.assignment.workspaceId ||
       brokerAssignment.sessionId !== handle.assignment.sessionId ||
-      brokerAssignment.fencingToken !== nextAuthorityEpoch
+      nextAuthorityEpoch <= activation.authorityEpoch
     ) {
       throw new ToolBrokerError(
         "cubesandbox_rekey_identity_invalid",
